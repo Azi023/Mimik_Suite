@@ -27,11 +27,29 @@ SITES = {
 
 _WAIT_MS = 20 * 60 * 1000  # give the operator up to 20 min to log in + close the window
 
+# Anti-automation launch: use the REAL installed Chrome (not "Chrome for Testing") and drop the
+# automation fingerprints Cloudflare keys on. This gives the best chance of passing a human
+# verification during an interactive login; aggressive walls (OpenAI) may still loop.
+_ARGS = ["--disable-blink-features=AutomationControlled"]
+_IGNORE = ["--enable-automation"]
+
 
 def _profile_dir(site: str) -> Path:
     d = Path.home() / ".mimik" / "browser-profiles" / site
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _launch(p, profile_dir: Path, *, headless: bool):
+    """Launch a persistent context, preferring the real Chrome channel; fall back to bundled."""
+    try:
+        return p.chromium.launch_persistent_context(
+            str(profile_dir), channel="chrome", headless=headless, args=_ARGS, ignore_default_args=_IGNORE
+        )
+    except Exception:
+        return p.chromium.launch_persistent_context(
+            str(profile_dir), headless=headless, args=_ARGS, ignore_default_args=_IGNORE
+        )
 
 
 def verify() -> int:
@@ -40,7 +58,7 @@ def verify() -> int:
 
     d = _profile_dir("_verify")
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(str(d), headless=True)
+        ctx = _launch(p, d, headless=True)
         ctx.new_page().goto("about:blank")
         ctx.close()
     print("✓ browser automation works (persistent context OK)")
@@ -53,7 +71,7 @@ def login(site: str) -> int:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(str(d), headless=False)
+        ctx = _launch(p, d, headless=False)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto(url, wait_until="domcontentloaded")
         print(f"\nA browser opened at {url}.")
