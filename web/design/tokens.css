@@ -1,0 +1,62 @@
+/* Mimik Suite — design tokens (LOCKED reference: Studio White, brand-tuned)
+ * Light = default (:root). Dark = [data-theme="dark"]. A theme toggle only flips
+ * ground + accents; layout/spacing never change between themes.
+ * Reference artifact: https://claude.ai/code/artifact/b3cd6c31-85a9-412b-b933-2a3bd3e62d6f
+ * Brand colors sourced from mimikcreations.com.
+ */
+:root {
+  /* ground + surfaces */
+  --bg: #FFFFFF;
+  --panel: #FFFFFF;
+  --panel-2: #F7F8FA;
+  --text: #0B0D12;
+  --muted: #697086;
+  --line: #EBECF0;
+  --chip: #F4F5F8;
+
+  /* brand */
+  --accent: #2E5BFF;      /* royal blue — every PRIMARY action */
+  --accent-ink: #FFFFFF;
+  --pop: #C6F135;         /* electric lime — signature pop, SPARINGLY (active/selected, brand mark) */
+  --pop-ink: #0B0D12;
+
+  /* semantic (kept distinct from --pop so success never blurs with lime) */
+  --good: #12B76A;        /* emerald */
+  --warn: #F79009;        /* amber */
+  --crit: #E5484D;        /* red */
+
+  /* shape */
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+
+  /* elevation */
+  --shadow-sm: 0 1px 2px rgba(10,10,25,.05);
+  --shadow-lg: 0 22px 46px -26px rgba(10,10,35,.22);
+
+  /* type */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Production display/body (load via next/font, self-hosted): Syne (display), Space Grotesk (body). */
+}
+
+[data-theme="dark"] {
+  --bg: #0A0D15;          /* near-black navy — brand dark ground */
+  --panel: #12151F;
+  --panel-2: #171C27;
+  --text: #EEF0F5;
+  --muted: #9096A8;
+  --line: #232838;
+  --chip: #161B27;
+
+  --accent: #4E74FF;      /* royal blue, lifted for dark */
+  --accent-ink: #FFFFFF;
+  --pop: #C6F135;
+  --pop-ink: #0A0D15;
+
+  --good: #3DDC97;
+  --warn: #FBBF24;
+  --crit: #FF6B6B;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-lg: 0 24px 48px -24px rgba(0,0,0,.7);
+}

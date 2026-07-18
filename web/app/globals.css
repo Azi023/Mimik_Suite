@@ -1,0 +1,606 @@
+/* Locked design tokens — light = :root, dark = [data-theme="dark"]. */
+@import "../design/tokens.css";
+
+/* ---------------------------------------------------------------------------
+   Base
+   Every color/radius/shadow below is driven by a token variable. No literal
+   hex values live in this file (or in components) — the locked palette is the
+   single source of truth.
+--------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100dvh;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* A single, consistent, accessible focus ring for every interactive element. */
+:where(a, button, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   App shell
+--------------------------------------------------------------------------- */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  grid-template-rows: 1fr;
+  min-height: 100dvh;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.app-content {
+  flex: 1;
+  padding: 32px 40px 56px;
+  max-width: 1120px;
+  width: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   Sidebar
+--------------------------------------------------------------------------- */
+
+.sidebar {
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px 16px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+}
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--pop);
+  color: var(--pop-ink);
+  font-weight: 800;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.nav-item:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.nav-item[aria-current="page"] {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The lime pop is reserved for the active/selected marker only. */
+.nav-item[aria-current="page"] .nav-item__dot {
+  background: var(--pop);
+}
+
+.nav-item__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Top bar
+--------------------------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 40px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.topbar__hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.topbar__workspace {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+.client-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.client-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.client-chip__caret {
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Theme toggle
+--------------------------------------------------------------------------- */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--panel-2);
+}
+
+/* ---------------------------------------------------------------------------
+   Section headings
+--------------------------------------------------------------------------- */
+
+.section {
+  margin-bottom: 40px;
+}
+
+.section__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   Pillar chips
+--------------------------------------------------------------------------- */
+
+.pillar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pillar-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--chip);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.pillar-chip:hover {
+  border-color: var(--muted);
+}
+
+/* Active pillar is the single sanctioned lime pop. */
+.pillar-chip--active {
+  background: var(--pop);
+  border-color: var(--pop);
+  color: var(--pop-ink);
+  font-weight: 600;
+}
+
+.pillar-chip--active:hover {
+  border-color: var(--pop);
+}
+
+.pillar-chip--custom {
+  background: transparent;
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.pillar-chip--custom:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Board / job rows
+--------------------------------------------------------------------------- */
+
+.board {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.job-row:last-child {
+  border-bottom: none;
+}
+
+.job-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.job-row__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.job-row__sep {
+  color: var(--line);
+}
+
+.job-row__status {
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Status pill
+--------------------------------------------------------------------------- */
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.status-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.status-pill--neutral {
+  background: var(--chip);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.status-pill--good {
+  background: color-mix(in srgb, var(--good) 12%, transparent);
+  border-color: color-mix(in srgb, var(--good) 30%, transparent);
+  color: var(--good);
+}
+
+.status-pill--crit {
+  background: color-mix(in srgb, var(--crit) 12%, transparent);
+  border-color: color-mix(in srgb, var(--crit) 30%, transparent);
+  color: var(--crit);
+}
+
+/* ---------------------------------------------------------------------------
+   Review panel
+--------------------------------------------------------------------------- */
+
+.review-panel {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 24px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.review-panel__thumb {
+  display: flex;
+  align-items: flex-end;
+  aspect-ratio: 4 / 5;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  /* blue → lime, per the locked reference thumbnail. */
+  background: linear-gradient(150deg, var(--accent) 0%, var(--pop) 100%);
+  color: var(--accent-ink);
+}
+
+.review-panel__thumb-label {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.review-panel__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.review-panel__note {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.review-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Layer strip
+--------------------------------------------------------------------------- */
+
+.layer-strip {
+  display: flex;
+  gap: 8px;
+}
+
+.layer-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.layer-chip--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons
+--------------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn--primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+.btn--secondary {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.btn--secondary:hover {
+  background: var(--panel-2);
+  border-color: var(--muted);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--muted);
+}
+
+.btn--ghost:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive — sidebar collapses to a top hamburger on mobile.
+--------------------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .topbar {
+    padding: 14px 18px;
+  }
+
+  .topbar__hamburger {
+    display: inline-flex;
+  }
+
+  .app-content {
+    padding: 24px 18px 48px;
+  }
+
+  .review-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .review-panel__thumb {
+    aspect-ratio: 16 / 9;
+    max-width: 320px;
+  }
+}

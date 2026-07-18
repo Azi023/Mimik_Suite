@@ -1,0 +1,43 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+credentials*
+*.secret
+.keys
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.turbo/
+
+# Data / runtime artifacts (may contain client PII)
+runs/
+outputs/
+*.sqlite
+*.db
+uploads/
+storage/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

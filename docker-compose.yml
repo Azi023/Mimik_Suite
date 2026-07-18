@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mimik
+      POSTGRES_PASSWORD: mimik
+      POSTGRES_DB: mimik_suite
+    ports:
+      - "5434:5432"  # host 5434 -> container 5432 (5432 often taken by other local Postgres)
+    volumes:
+      - mimik_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mimik -d mimik_suite"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6381:6379"  # host 6381 -> container 6379 (6379 taken by other local Redis)
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mimik_pgdata:
