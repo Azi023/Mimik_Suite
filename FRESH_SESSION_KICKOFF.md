@@ -18,6 +18,14 @@ self-verifying against the acceptance gates, pausing only at the listed human ga
 ## Inviolable constraints (from CLAUDE.md)
 Schema-first (`mimik-contracts`) · tenant authZ at the DATA layer (the IDOR test must stay green) · client = untrusted (injection + SSRF guards) · no secrets in git · **no paid APIs during build** (subscriptions/free tiers behind the swappable adapter) · `uv run --no-sync` (network is flaky) · never touch `Mimik_Sales` · no UI styling without a reference (`web/design/tokens.css` IS the reference) · **best-standard managed auth, never self-rolled**.
 
+## ⚠️ Paid-credit budget — HARD limit
+Operator has only ~$3 on OpenAI and ~$3 on OpenRouter. Treat both as scarce.
+- **ALL development, testing, iteration, drafts, and A/B during the build → FREE backends only** (AI-Studio Nano Banana for images, free Gemini for text/copy). **NEVER spend a paid credit to test code.**
+- **OpenAI `gpt-image-1` (paid) is reserved for FINAL, human-approved HERO images only** — a handful, not the dev loop. (~1–4¢ each; $3 ≈ 75–150 images, so one careless test loop drains it.)
+- If the **free AI-Studio image path isn't wired** (`AISTUDIO_BROWSER_PROFILE_DIR` empty), do NOT substitute paid images for volume — **pause and ask the operator** to finish the free login first.
+- OpenRouter (~$3): fallback for text or a specific model only, used sparingly.
+- The spend-minimizing pipeline (A/B base only, generate-after-approval, cache-reuse) is not optional here — it's what keeps you inside the budget.
+
 ## Phases — goal + acceptance GATE (advance only when the gate is green)
 - **P0 ✅** — foundations. GATE: `uv run --no-sync pytest` all green; tenant-isolation/IDOR test passes.
 - **P1 ✅** — brand-brief backend. GATE: pytest green; a brief auto-drafts §1–5 from a URL fixture; SSRF guard rejects internal targets.
