@@ -1,14 +1,18 @@
 """One-time browser login for the image adapters.
 
 The image backends drive your PRO ChatGPT / Google AI-Studio through a LOGGED-IN Playwright
-profile. Run this ONCE per site: it opens a real browser window using a persistent profile
-directory; you log in by hand; close it. Automation then reuses that profile — no passwords
-are ever stored.
+profile. Run this ONCE per site: a real browser window opens; you log in by hand; then you
+just CLOSE the window and the session is saved. Automation reuses that profile afterward —
+no passwords are ever stored.
 
     uv run --no-sync python scripts/browser_login.py chatgpt
     uv run --no-sync python scripts/browser_login.py aistudio
+    uv run --no-sync python scripts/browser_login.py --verify   # headless self-test, no login
 
 Then paste the printed path into .env (CHATGPT_BROWSER_PROFILE_DIR / AISTUDIO_BROWSER_PROFILE_DIR).
+
+Note: it waits for you to CLOSE THE WINDOW (not for a keypress), so it works fine when run
+through Claude Code's `!` shell, which has no interactive stdin.
 """
 
 from __future__ import annotations
@@ -21,28 +25,60 @@ SITES = {
     "aistudio": ("https://aistudio.google.com", "AISTUDIO_BROWSER_PROFILE_DIR"),
 }
 
+_WAIT_MS = 20 * 60 * 1000  # give the operator up to 20 min to log in + close the window
 
-def main() -> int:
-    if len(sys.argv) != 2 or sys.argv[1] not in SITES:
-        print("usage: python scripts/browser_login.py [chatgpt|aistudio]")
-        return 2
-    site = sys.argv[1]
+
+def _profile_dir(site: str) -> Path:
+    d = Path.home() / ".mimik" / "browser-profiles" / site
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def verify() -> int:
+    """Headless self-test: proves Playwright + persistent context work. No login."""
+    from playwright.sync_api import sync_playwright
+
+    d = _profile_dir("_verify")
+    with sync_playwright() as p:
+        ctx = p.chromium.launch_persistent_context(str(d), headless=True)
+        ctx.new_page().goto("about:blank")
+        ctx.close()
+    print("✓ browser automation works (persistent context OK)")
+    return 0
+
+
+def login(site: str) -> int:
     url, env_var = SITES[site]
-    profile_dir = Path.home() / ".mimik" / "browser-profiles" / site
-    profile_dir.mkdir(parents=True, exist_ok=True)
-
+    d = _profile_dir(site)
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(str(profile_dir), headless=False)
+        ctx = p.chromium.launch_persistent_context(str(d), headless=False)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto(url, wait_until="domcontentloaded")
         print(f"\nA browser opened at {url}.")
-        print("Log in fully (finish any 2FA), then return here.")
-        input("Press Enter once you're logged in — this saves the session and closes the browser... ")
-        ctx.close()
-    print(f"\n✓ Saved. Add this line to your .env:\n{env_var}={profile_dir}\n")
+        print("→ Log in fully (finish any 2FA), then CLOSE the browser window to finish.")
+        print("  (waiting up to 20 min for you to close it…)")
+        try:
+            ctx.wait_for_event("close", timeout=_WAIT_MS)
+        except Exception:
+            pass  # timed out, or already closed — cookies are persisted to disk regardless
+        try:
+            ctx.close()
+        except Exception:
+            pass
+    print(f"\n✓ Session saved. Add this to your .env:\n{env_var}={d}\n")
     return 0
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if args == ["--verify"]:
+        return verify()
+    if len(args) == 1 and args[0] in SITES:
+        return login(args[0])
+    print("usage: python scripts/browser_login.py [chatgpt|aistudio|--verify]")
+    return 2
 
 
 if __name__ == "__main__":
