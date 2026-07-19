@@ -73,3 +73,20 @@ def test_no_image_falls_back_to_brand_ground() -> None:
     html = get_template("centered_hero").render(_ctx(image_ref=None, primary="#2E5BFF"))
     assert "#2E5BFF" in html
     assert "url(" not in html  # no broken image url when none supplied
+
+
+# The CSS-breakout payload the security review confirmed against real Chromium: html.escape
+# alone cannot stop it, so the render sink itself must reject the shape.
+_BREAKOUT = "https://ok/a.png'); outline:10px solid rgb(0,255,0); background-image:url('x"
+
+
+def test_template_context_rejects_css_breakout_refs() -> None:
+    for field in ("image_ref", "logo_ref"):
+        with pytest.raises(ValueError, match="asset ref"):
+            _ctx(**{field: _BREAKOUT})
+
+
+def test_template_context_accepts_safe_ref_shapes() -> None:
+    _ctx(image_ref="data:image/png;base64,aGk=")
+    _ctx(image_ref="artifacts/gpt_image_ab12.png")
+    _ctx(logo_ref="https://cdn.example.com/logo.png")

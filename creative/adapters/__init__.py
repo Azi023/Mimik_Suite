@@ -11,11 +11,25 @@ from mimik_contracts import ImageBackend
 from .base import ImageAdapter, ImageRequest, ImageResult
 from .chatgpt_browser import ChatGPTBrowserAdapter
 from .gemini_free import GeminiFreeAdapter
+from .gemini_image import GeminiImageAdapter
+from .gpt_image import GPTImageAdapter
+from .openrouter import OpenRouterAdapter
+from .router import (
+    ImageGenerationFailed,
+    PaidImageSpendNotApproved,
+    choose_backend,
+    generate_with_fallback,
+)
 
 _REGISTRY: dict[ImageBackend, type[ImageAdapter]] = {
     ImageBackend.CHATGPT_BROWSER: ChatGPTBrowserAdapter,
     ImageBackend.GEMINI_FREE: GeminiFreeAdapter,
-    # Paid APIs (IDEOGRAM, FLUX, GPT_IMAGE) register here once there's budget.
+    # Paid APIs — spend-gated inside each adapter (MIMIK_ALLOW_PAID_IMAGES=1):
+    ImageBackend.GPT_IMAGE: GPTImageAdapter,
+    ImageBackend.OPENROUTER: OpenRouterAdapter,
+    ImageBackend.GEMINI_IMAGE: GeminiImageAdapter,
+    # ImageBackend.NONE is the no-op placeholder route, NOT an adapter — stays unregistered.
+    # IDEOGRAM / FLUX register here once there's budget.
 }
 
 
@@ -32,8 +46,15 @@ __all__ = [
     "ImageAdapter",
     "ImageRequest",
     "ImageResult",
+    "ImageGenerationFailed",
+    "PaidImageSpendNotApproved",
+    "choose_backend",
+    "generate_with_fallback",
     "get_adapter",
     "available_backends",
     "ChatGPTBrowserAdapter",
     "GeminiFreeAdapter",
+    "GeminiImageAdapter",
+    "GPTImageAdapter",
+    "OpenRouterAdapter",
 ]

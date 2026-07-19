@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal
+from api.core.auth import Principal, get_principal, require_role
 from api.db import repo
 from api.db.mappers import to_brief
 from api.db.session import get_session
@@ -107,5 +107,34 @@ async def signoff_brief(
     row.status = BriefStatus.FROZEN.value
     row.signed_off_by = body.signed_off_by
     row.frozen_at = datetime.now(timezone.utc)
+    await session.commit()
+    return to_brief(row)
+
+
+@router.post("/{brief_id}/revise", response_model=Brief, status_code=201)
+async def revise_brief(
+    brief_id: str,
+    principal: Principal = Depends(require_role("owner", "ops", "designer", "team")),
+    session: AsyncSession = Depends(get_session),
+) -> Brief:
+    """The non-destructive versioning move: a post-signoff change is a NEW brief version, never
+    an in-place edit. Signoff freezes in place; revise is the forward path that mints version N+1
+    as a fresh DRAFT seeded from the source's sections. Works whether the source is FROZEN (the
+    normal case — revise a locked brief) or still a draft."""
+    source = await repo.get_brief(session, tenant_id=principal.tenant_id, brief_id=brief_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Brief not found")
+
+    row = await repo.create_brief(
+        session,
+        tenant_id=principal.tenant_id,
+        client_id=source.client_id,
+        brand_id=source.brand_id,
+        version=source.version + 1,
+        status=BriefStatus.DRAFT.value,
+        sections=source.sections,  # start from the frozen content
+        signed_off_by=None,
+        frozen_at=None,
+    )
     await session.commit()
     return to_brief(row)

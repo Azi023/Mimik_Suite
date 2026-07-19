@@ -2,25 +2,54 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from mimik_contracts import (
+    Actor,
+    Approval,
     Brand,
     BrandTokens,
     Brief,
     BriefSections,
     Client,
     ContentPillar,
+    CreativeDoc,
+    CreativeManifest,
+    Delivery,
     Job,
+    Notification,
+    PreferenceSignal,
+    Subscription,
+    Task,
     Tenant,
+    UserAccount,
 )
 
 from .models import (
+    ApprovalRow,
     BrandRow,
     BriefRow,
     ClientRow,
     ContentPillarRow,
+    CreativeDocRow,
+    DeliveryRow,
     JobRow,
+    NotificationRow,
+    PreferenceSignalRow,
+    SubscriptionRow,
+    TaskRow,
     TenantRow,
+    UserAccountRow,
 )
+
+
+def _utc(value: datetime | None) -> datetime | None:
+    """Re-attach UTC to a naive datetime. The app only ever stores aware-UTC; some drivers
+    (e.g. SQLite) drop tzinfo on read, so a naive value is the same instant minus its zone.
+    Postgres round-trips aware datetimes, making this a no-op there."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
 
 
 def to_tenant(row: TenantRow) -> Tenant:
@@ -102,8 +131,120 @@ def to_job(row: JobRow) -> Job:
         pillar_id=row.pillar_id,
         title=row.title,
         format_key=row.format_key,
-        publish_date=row.publish_date,
+        publish_date=_utc(row.publish_date),
         approval_lead_days=row.approval_lead_days,
         assignee=row.assignee,
         status=row.status,
+    )
+
+
+def to_user_account(row: UserAccountRow) -> UserAccount:
+    return UserAccount(
+        id=row.id,
+        created_at=row.created_at,
+        tenant_id=row.tenant_id,
+        auth_subject=row.auth_subject,
+        email=row.email,
+        role=row.role,
+        client_id=row.client_id,
+        name=row.name,
+        active=row.active,
+    )
+
+
+def to_creative_doc(row: CreativeDocRow) -> CreativeDoc:
+    return CreativeDoc(
+        id=row.id,
+        created_at=row.created_at,
+        tenant_id=row.tenant_id,
+        job_id=row.job_id,
+        manifest=CreativeManifest.model_validate(row.manifest),
+        version=row.version,
+    )
+
+
+def to_approval(row: ApprovalRow) -> Approval:
+    return Approval(
+        id=row.id,
+        created_at=row.created_at,
+        tenant_id=row.tenant_id,
+        job_id=row.job_id,
+        creative_doc_id=row.creative_doc_id,
+        actor=Actor.model_validate(row.actor),
+        action=row.action,
+        note=row.note,
+    )
+
+
+def to_delivery(row: DeliveryRow) -> Delivery:
+    return Delivery(
+        id=row.id,
+        created_at=row.created_at,
+        tenant_id=row.tenant_id,
+        job_id=row.job_id,
+        creative_doc_id=row.creative_doc_id,
+        drive_path=row.drive_path,
+        delivered_at=row.delivered_at,
+    )
+
+
+def to_task(row: TaskRow) -> Task:
+    return Task(
+        id=row.id,
+        created_at=row.created_at,
+        tenant_id=row.tenant_id,
+        client_id=row.client_id,
+        job_id=row.job_id,
+        type=row.type,
+        status=row.status,
+        title=row.title,
+        detail=row.detail,
+        created_by=Actor.model_validate(row.created_by),
+        assignee=row.assignee,
+        notified=row.notified,
+        updated_at=row.updated_at,
+    )
+
+
+def to_subscription(row: SubscriptionRow) -> Subscription:
+    return Subscription(
+        id=row.id,
+        created_at=row.created_at,
+        tenant_id=row.tenant_id,
+        client_id=row.client_id,
+        status=row.status,
+        stripe_customer_id=row.stripe_customer_id,
+        stripe_subscription_id=row.stripe_subscription_id,
+        price_id=row.price_id,
+        current_period_end=_utc(row.current_period_end),
+    )
+
+
+def to_preference_signal(row: PreferenceSignalRow) -> PreferenceSignal:
+    return PreferenceSignal(
+        source=row.source,
+        creative_doc_id=row.creative_doc_id,
+        job_id=row.job_id,
+        detail=row.detail,
+        weight=row.weight,
+        reason_tag=row.reason_tag,
+        attributes=row.attributes or {},
+        actor_role=row.actor_role,
+    )
+
+
+def to_notification(row: NotificationRow) -> Notification:
+    return Notification(
+        id=row.id,
+        created_at=row.created_at,
+        tenant_id=row.tenant_id,
+        client_id=row.client_id,
+        job_id=row.job_id,
+        task_id=row.task_id,
+        channel=row.channel,
+        status=row.status,
+        subject=row.subject,
+        body=row.body,
+        recipient=row.recipient,
+        sent_at=row.sent_at,
     )

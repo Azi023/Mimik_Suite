@@ -21,9 +21,10 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
+import urllib.error
 import urllib.request
 from html import unescape
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from mimik_contracts import BriefSections, BrandTokens, ColorRole, Typography
 
@@ -203,14 +204,47 @@ async def _fetch_html_via_browser(url: str) -> str:
     return snapshot.get("html", "")  # pragma: no cover - optional dep
 
 
+_MAX_REDIRECTS = 5
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never auto-follow a redirect — the default opener would follow a 3xx to an internal
+    target (e.g. cloud metadata) WITHOUT re-running the SSRF guard. We follow manually,
+    re-validating each hop, so the validated IP and the connected IP can't diverge via a
+    redirect."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
 def _fetch_html_via_urllib(url: str) -> str:
-    """DEFAULT path. Raw server-rendered HTML via stdlib. No JS, no browser needed."""
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    # nosec B310: scheme is validated by the caller (http/https only).
-    with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT_S) as resp:  # noqa: S310
-        raw = resp.read(_MAX_BYTES)
-    charset = resp.headers.get_content_charset() or "utf-8"
-    return raw.decode(charset, errors="replace")
+    """DEFAULT path. Raw server-rendered HTML via stdlib. No JS, no browser needed.
+
+    Redirects are followed manually with a per-hop SSRF re-check (`_assert_public_http_url`),
+    closing the validate-then-use TOCTOU where a public URL 3xx-redirects to an internal one.
+    (A same-host DNS rebind between check and connect remains a residual of the stdlib path —
+    fully closing it needs connect-to-pinned-IP, a follow-up if this graduates to the browser
+    fetch.)
+    """
+    opener = urllib.request.build_opener(_NoRedirect)
+    current = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        req = urllib.request.Request(current, headers={"User-Agent": _USER_AGENT})
+        try:
+            # nosec B310: scheme + public-IP validated by the caller / per-hop below.
+            with opener.open(req, timeout=_FETCH_TIMEOUT_S) as resp:  # noqa: S310
+                raw = resp.read(_MAX_BYTES)
+                charset = resp.headers.get_content_charset() or "utf-8"
+                return raw.decode(charset, errors="replace")
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (301, 302, 303, 307, 308):
+                raise
+            location = exc.headers.get("Location")
+            if not location:
+                raise ValueError("redirect without a Location header") from exc
+            current = urljoin(current, location)
+            _assert_public_http_url(current)  # re-validate the redirect target before following
+    raise ValueError(f"too many redirects (> {_MAX_REDIRECTS})")
 
 
 async def _fetch_html(url: str) -> str:

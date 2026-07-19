@@ -12,11 +12,12 @@ Layout is chosen FIRST (this library), then imagery is generated to keep the tex
 from __future__ import annotations
 
 import abc
+import math
 from html import escape
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from mimik_contracts import get_format
+from mimik_contracts import get_format, validate_asset_ref
 
 
 class TemplateContext(BaseModel):
@@ -37,18 +38,67 @@ class TemplateContext(BaseModel):
     image_ref: str | None = None  # the L1/L2 imagery artifact / data-URI
     scrim: bool = False
 
+    # Both refs are interpolated into CSS url('...') / HTML src="..." below; html.escape
+    # cannot protect the CSS string context, so the render sink re-validates their shape
+    # no matter which path constructed the context (contracts validate at rest too).
+    _refs_are_safe = field_validator("logo_ref", "image_ref")(staticmethod(validate_asset_ref))
+
     def size(self) -> tuple[int, int]:
         fmt = get_format(self.format_key)
         return fmt.width, fmt.height
 
 
-def _logo(ctx: TemplateContext, pad: int, height: int) -> str:
+class ZoneRect(BaseModel):
+    """Axis-aligned pixel rectangle in canvas coordinates (top-left origin)."""
+
+    x: int
+    y: int
+    w: int
+    h: int
+
+
+class TemplateGeometry(BaseModel):
+    """Where a template puts important content — lets QA reason about text/logo placement
+    (safe zones, contrast sampling) without pixel-parsing the render. text_zones[0] is the
+    headline block; text_over_imagery means the headline sits on the L1/L2 image."""
+
+    text_zones: list[ZoneRect]
+    logo_zone: ZoneRect | None
+    text_over_imagery: bool
+
+
+def _base_pad(w: int, h: int, frac: float) -> int:
+    return round(min(w, h) * frac)
+
+
+def _edge_pads(ctx: TemplateContext, frac: float) -> tuple[int, int, int, int]:
+    """Per-edge padding: the %-of-min-side house pad, clamped UP to the format's safe-zone
+    inset so important content never lands in a platform-obscured strip (ig_story's 250px
+    top/bottom bars are the motivating case). Returns (top, right, bottom, left)."""
+    fmt = get_format(ctx.format_key)
+    base = _base_pad(fmt.width, fmt.height, frac)
+    sz = fmt.safe_zone
+    return max(base, sz.top), max(base, sz.right), max(base, sz.bottom), max(base, sz.left)
+
+
+# Conservative width assumed for a horizontal logo lockup (height × this factor); the actual
+# <img> is width:auto, so QA checks the worst plausible footprint.
+_LOGO_WIDTH_FACTOR = 3
+
+
+def _logo(ctx: TemplateContext, top: int, left: int, height: int) -> str:
     if not ctx.logo_ref:
         return ""
     return (
         f'<img src="{escape(ctx.logo_ref, quote=True)}" alt="" '
-        f'style="position:absolute;top:{pad}px;left:{pad}px;height:{height}px;width:auto" />'
+        f'style="position:absolute;top:{top}px;left:{left}px;height:{height}px;width:auto" />'
     )
+
+
+def _logo_zone(ctx: TemplateContext, top: int, left: int, height: int) -> ZoneRect | None:
+    if not ctx.logo_ref:
+        return None
+    return ZoneRect(x=left, y=top, w=height * _LOGO_WIDTH_FACTOR, h=height)
 
 
 def _cta(label: str, bg: str, fg: str, font: str, size: int) -> str:
@@ -70,15 +120,22 @@ class LayoutTemplate(abc.ABC):
         """Return a self-contained HTML canvas at the format's exact pixel size."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def geometry(self, ctx: TemplateContext) -> TemplateGeometry:
+        """Content placement for QA — must use the same pad math as render()."""
+        raise NotImplementedError
+
 
 class CenteredHero(LayoutTemplate):
     key = "centered_hero"
     name = "Centered Hero"
     description = "Full-bleed imagery with one bold headline + CTA anchored low. Scrim on demand."
 
+    PAD_FRAC = 0.07
+
     def render(self, ctx: TemplateContext) -> str:
         w, h = ctx.size()
-        pad = round(min(w, h) * 0.07)
+        pad_t, pad_r, pad_b, pad_l = _edge_pads(ctx, self.PAD_FRAC)
         h_size = round(w * 0.072)
         sub_size = round(w * 0.03)
         cta_size = round(w * 0.028)
@@ -106,13 +163,38 @@ class CenteredHero(LayoutTemplate):
         return (
             f'<div style="position:relative;width:{w}px;height:{h}px;overflow:hidden;{ground}">'
             f"{scrim}"
-            f"{_logo(ctx, pad, round(h * 0.06))}"
-            f'<div style="position:absolute;left:{pad}px;right:{pad}px;bottom:{pad}px">'
+            f"{_logo(ctx, pad_t, pad_l, round(h * 0.06))}"
+            f'<div style="position:absolute;left:{pad_l}px;right:{pad_r}px;bottom:{pad_b}px">'
             f'<h1 style="font-family:{ctx.heading_font};color:#fff;font-size:{h_size}px;'
             f'font-weight:800;line-height:1.03;letter-spacing:-.02em;margin:0;'
             f'text-wrap:balance">{escape(ctx.headline)}</h1>'
             f"{sub}{cta}"
             f"</div></div>"
+        )
+
+    def geometry(self, ctx: TemplateContext) -> TemplateGeometry:
+        w, h = ctx.size()
+        pad_t, pad_r, pad_b, pad_l = _edge_pads(ctx, self.PAD_FRAC)
+        h_size = round(w * 0.072)
+        sub_size = round(w * 0.03)
+        cta_size = round(w * 0.028)
+        avail = w - pad_l - pad_r
+        # Copy-aware text-block height (margins/paddings mirror the render() math above).
+        # Line counts come from a conservative ~0.6×font-size average glyph width for the
+        # 800-weight headline (0.55 for the body face) — over-estimating keeps the QA zone
+        # a superset of the real DOM block, which the browser containment test asserts.
+        head_lines = max(1, math.ceil(len(ctx.headline) * h_size * 0.6 / avail))
+        text_h = round(h_size * 1.1 * head_lines)
+        if ctx.subhead:
+            sub_lines = max(1, math.ceil(len(ctx.subhead) * sub_size * 0.55 / (avail * 0.8)))
+            text_h += round(sub_size * 0.6 + sub_size * 1.35 * sub_lines)
+        if ctx.cta:
+            text_h += round(cta_size * 1.4 + cta_size * 2.2)  # margin-top + chip (font + 2×.6 pad)
+        text_zone = ZoneRect(x=pad_l, y=h - pad_b - text_h, w=w - pad_l - pad_r, h=text_h)
+        return TemplateGeometry(
+            text_zones=[text_zone],
+            logo_zone=_logo_zone(ctx, pad_t, pad_l, round(h * 0.06)),
+            text_over_imagery=ctx.image_ref is not None,
         )
 
 
@@ -121,10 +203,15 @@ class LowerBand(LayoutTemplate):
     name = "Lower Band"
     description = "Imagery on top, text in a solid brand band below — text never overlaps imagery, so it is always legible."
 
+    PAD_FRAC = 0.06
+
     def render(self, ctx: TemplateContext) -> str:
         w, h = ctx.size()
         band_h = round(h * 0.36)
-        pad = round(min(w, h) * 0.06)
+        pad_t, pad_r, pad_b, pad_l = _edge_pads(ctx, self.PAD_FRAC)
+        # The band's top edge is mid-canvas, so its internal top padding needs no safe-zone
+        # clamp — only the three canvas-edge sides do.
+        band_pad_top = _base_pad(w, h, self.PAD_FRAC)
         h_size = round(w * 0.055)
         cta_size = round(w * 0.026)
         top = (
@@ -142,14 +229,35 @@ class LowerBand(LayoutTemplate):
             f'<div style="position:relative;width:{w}px;height:{h}px;overflow:hidden;background:{ctx.primary}">'
             f'<div style="position:absolute;top:0;left:0;right:0;height:{h - band_h}px;{top}"></div>'
             f'<div style="position:absolute;left:0;right:0;bottom:0;height:{band_h}px;'
-            f'background:{ctx.primary};padding:{pad}px;box-sizing:border-box;'
+            f'background:{ctx.primary};padding:{band_pad_top}px {pad_r}px {pad_b}px {pad_l}px;'
+            f"box-sizing:border-box;"
             f'display:flex;flex-direction:column;justify-content:center">'
             f'<h1 style="font-family:{ctx.heading_font};color:{ctx.on_primary};font-size:{h_size}px;'
             f'font-weight:800;line-height:1.05;letter-spacing:-.02em;margin:0;text-wrap:balance">'
             f"{escape(ctx.headline)}</h1>{cta}"
             f"</div>"
-            f"{_logo(ctx, pad, round(h * 0.05))}"
+            f"{_logo(ctx, pad_t, pad_l, round(h * 0.05))}"
             f"</div>"
+        )
+
+    def geometry(self, ctx: TemplateContext) -> TemplateGeometry:
+        w, h = ctx.size()
+        band_h = round(h * 0.36)
+        pad_t, pad_r, pad_b, pad_l = _edge_pads(ctx, self.PAD_FRAC)
+        band_pad_top = _base_pad(w, h, self.PAD_FRAC)
+        # Text zone = the band's content box (band minus its padding) — text never overlaps
+        # imagery in this template. The logo renders top-left of the CANVAS (over the image
+        # region), per render() above.
+        text_zone = ZoneRect(
+            x=pad_l,
+            y=(h - band_h) + band_pad_top,
+            w=w - pad_l - pad_r,
+            h=band_h - band_pad_top - pad_b,
+        )
+        return TemplateGeometry(
+            text_zones=[text_zone],
+            logo_zone=_logo_zone(ctx, pad_t, pad_l, round(h * 0.05)),
+            text_over_imagery=False,
         )
 
 

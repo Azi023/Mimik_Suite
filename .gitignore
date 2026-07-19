@@ -41,3 +41,9 @@ storage/
 *.swp
 .idea/
 .vscode/
+
+# Claude Code — local agent state (per-machine, not shared)
+.claude/agent-memory-local/
+.claude/settings.local.json
+.claude/*.lock
+_archive/

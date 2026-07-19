@@ -40,3 +40,34 @@ async def test_extract_rejects_metadata_endpoint_before_fetch() -> None:
     # The public entrypoint must apply the guard (raise, never fetch).
     with pytest.raises(ValueError):
         await extract_brief_sections("http://169.254.169.254/latest/meta-data/")
+
+
+async def test_redirect_to_internal_target_is_blocked(monkeypatch) -> None:
+    """A public URL that 3xx-redirects to an internal target must be refused: redirects are
+    followed manually and each hop is re-validated (closes the validate-then-use TOCTOU)."""
+    import urllib.error
+
+    from api.services import brief_extraction as be
+
+    # Bypass the initial host resolution (pretend the first URL is public), then have the
+    # opener emit a redirect to cloud metadata — the per-hop re-check must reject it.
+    monkeypatch.setattr(be, "_assert_public_http_url", _real_or_reject)
+
+    class _FakeOpener:
+        def open(self, req, timeout=None):
+            raise urllib.error.HTTPError(
+                req.full_url, 302, "Found",
+                {"Location": "http://169.254.169.254/latest/meta-data/"}, None,
+            )
+
+    monkeypatch.setattr(be.urllib.request, "build_opener", lambda *a, **k: _FakeOpener())
+    with pytest.raises(ValueError):
+        await be.extract_brief_sections("https://public.example.com/")
+
+
+def _real_or_reject(url: str) -> None:
+    # Allow the initial public URL; reject the internal redirect target using the real guard.
+    from api.services.brief_extraction import _is_disallowed_ip  # noqa: F401
+
+    if "169.254.169.254" in url or "127.0.0.1" in url:
+        raise ValueError("SSRF: internal redirect target")

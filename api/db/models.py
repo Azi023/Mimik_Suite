@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -34,6 +34,11 @@ class TenantRow(Base):
 
 class ClientRow(Base):
     __tablename__ = "clients"
+    # Makes the claim-form email dedup atomic (NULL emails stay distinct, so non-prospect
+    # clients are unaffected). Backs api.routers.intake's IntegrityError-catch under concurrency.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "contact_email", name="uq_clients_tenant_email"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
@@ -123,4 +128,167 @@ class ContentPillarRow(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class UserAccountRow(Base):
+    """The authZ source of truth: a verified provider identity -> tenant + role.
+
+    `auth_subject` is the managed provider's user id (Supabase `sub`), globally unique. The
+    tenant + role live HERE (our DB), never in provider-controlled metadata."""
+
+    __tablename__ = "user_accounts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    auth_subject: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    client_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class CreativeDocRow(Base):
+    """The stored creative: the 5-layer manifest (copy + template + layer recipes) as JSON."""
+
+    __tablename__ = "creative_docs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    job_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    manifest: Mapped[dict] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ApprovalRow(Base):
+    """One review action, timestamped + attributed: the audit trail. Never updated in place."""
+
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    job_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    creative_doc_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    actor: Mapped[dict] = mapped_column(JSON, default=dict)  # {id, role, name}
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DeliveryRow(Base):
+    """The archival record: a creative landed at a stable path. Written by the auto-archive
+    procedure, never by a human remembering to upload."""
+
+    __tablename__ = "deliveries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    job_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    creative_doc_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    drive_path: Mapped[str] = mapped_column(String, nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class TaskRow(Base):
+    """A tracked unit of client<->ops collaboration. The portal and the ops board are two
+    views of this one table."""
+
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="open")
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    detail: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by: Mapped[dict] = mapped_column(JSON, default=dict)  # actor {id, role, name}
+    assignee: Mapped[str | None] = mapped_column(String, nullable=True)
+    notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class SubscriptionRow(Base):
+    """Billing state per client, mirrored from Stripe via verified webhook events. Gates the
+    client's access; one active subscription per client (unique client_id)."""
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="incomplete")
+    stripe_customer_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(
+        String, index=True, nullable=True
+    )
+    price_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class PreferenceSignalRow(Base):
+    """One learning-loop signal: a pick/edit/rejection/approval, client-scoped. Signals
+    accumulate into a per-client preference profile (aggregated on read). Client-sourced
+    signals feed ONLY their own client's profile — never the shared golden set (that path is
+    human-gated). Append-only."""
+
+    __tablename__ = "preference_signals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)  # pick|edit|rejection|approval
+    creative_doc_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    job_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    detail: Mapped[str | None] = mapped_column(String, nullable=True)
+    weight: Mapped[float] = mapped_column(default=1.0)
+    reason_tag: Mapped[str | None] = mapped_column(String, nullable=True)
+    # A snapshot of the salient creative attributes this signal is about (template_key,
+    # colors, etc.) so the ranker can score future variants without re-loading each creative.
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict)
+    actor_role: Mapped[str] = mapped_column(String, default="client")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class NotificationRow(Base):
+    """An outbound nudge, recorded first (the audit trail) then delivered by a channel adapter."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    task_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    channel: Mapped[str] = mapped_column(String, default="in_app")
+    status: Mapped[str] = mapped_column(String, default="pending")
+    subject: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str | None] = mapped_column(String, nullable=True)
+    recipient: Mapped[str | None] = mapped_column(String, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -9,3 +9,67 @@ Chronological audit trail of decisions. Newest at bottom.
 - Chose stack: Python 3.12 + uv, FastAPI + async SQLAlchemy + Alembic + Postgres + Redis + Arq, Next.js.
 - Chose orchestrator + satellites topology; contracts + knowledge as shared sibling packages.
 - Started P0: governance files + repo scaffold.
+
+## 2026-07-19 — Autonomous build loop (P2)
+
+- Verified 56-green baseline; extended contracts (CopyBlock/CopyStatus, manifest template_key+copy_block, ImageBackend none/openrouter/gemini_image). Renamed `copy`→`copy_block` (pydantic shadow warning).
+- Fanned P2 to parallel subagents: copy L0, image adapters+router+spend gate, brand-QA critic, reference fit-critic; assembly + pipeline built in main thread.
+- Session-limit cutoff killed 2 agents mid-run; on resume audited disk (no partial files), relaunched; QA agent stalled once — its modules were complete, tests finished inline.
+- Reviews before gate (pattern + security + code agents): fixed CRITICAL CSS-url() injection via asset refs (validation at contracts + render sink), hardened fence-stripper variants, router exception narrowing, gpt_image shape guard, copy-aware geometry estimate + DOM-containment tests.
+- DRY: extracted shared critic plumbing to creative/prompting.py.
+- Live sample: real free-tier Gemini copy on Mimik brand → 3 QA-passing renders (placeholder grounds, zero spend).
+- 116 tests green, ruff clean. P2 machine-checks GREEN; operator eyeball = the last gate item.
+- Deferred deliberately: preference persistence + A/B logging → P4; reference gathering (browser scrape) stubbed behind the fit-critic seam.
+
+## 2026-07-19 — Autonomous build loop (P3: ops + approval)
+
+- P2 gate PASSED (operator approved the sample creatives; loop advanced).
+- P3.1: contracts (UserAccount, Notification, ActorRole.OWNER) + 6 ORM tables + migration e26e196b8532 (Postgres) + repo/mappers. Built in main thread (shared foundation) to keep fan-out file boundaries clean.
+- P3.2 auth: managed Supabase auth (never self-rolled). Project signs ES256/JWKS → added pyjwt[crypto]+cryptography (in-service of "standards-compliant auth" constraint). Dual-issuer principal (Supabase-verified→UserAccount→tenant/role; first-party bootstrap retained for CI/founding owner). Admin provisioning (owner-gated), require_role. Tested with local ES256 keypair + injected JWKS, zero network.
+- P3.3 approval (main thread centerpiece): audited approve/request-change/comment; approve→auto-archive (deterministic re-render from manifest → ArchiveBackend → Delivery → status ARCHIVED); magic-link no-login capability; archive adapter (Local default + GoogleDrive via SA-JWT, both mocked-tested).
+- Fanned P3.4 (ops board+calendar+transitions+at-risk), P3.5 (tasks+notifications+brief revise), and GoogleDriveArchive to 3 parallel subagents; wired their routers into main.py myself (clean boundaries, no collisions).
+- Security review (automated) flagged creatives.py IDOR → fixed (team-role gate + client-scoping + regression tests). Centralized naive/aware datetime coercion at the mapper layer (removed per-call workarounds the ops agent added).
+- 174 tests green, ruff clean, contracts 11 green. e2e gate test proves intake→approve→auto-archive with real render + audit trail, zero manual upload.
+- Deferred: preference/A-B → P4; reference gathering stays stubbed.
+
+## 2026-07-19 — P3 gate PASSED (reviews clean)
+
+- Ran code-reviewer + security-reviewer on the full P3 surface (auth, magic-link, approval, archive, ops, tasks).
+- Code review found 1 CRITICAL (double-approve re-archives) + 1 CRITICAL (blocking JWKS on event loop) + warnings; security review found 2 Important latent footguns + 2 nice-to-have. All real findings FIXED with regression tests:
+  - double-approve → ApprovalConflictError/409 terminal guard (exactly-1-delivery test)
+  - JWKS fetch → asyncio.to_thread (no event-loop stall)
+  - access/magic-link token confusion → typ=access pinned (rejection test)
+  - Drive query f-string → re-sanitize in _ensure_folder
+  - at-risk O(N²) + dispatch_pending → targeted list_notifications(job_id/status) filters
+  - admin TOCTOU → IntegrityError→409; task cross-client job_id → ownership check; JWKS read cap 256KB
+- 177 tests green, ruff clean, contracts 11 green. P3 gate met: e2e intake→approve→auto-archive (real render, real PNG, audit trail, zero manual upload) + at-risk fires on breach.
+- Human gate flagged (not blocking): real Google Drive archive needs GOOGLE_SERVICE_ACCOUNT_JSON + DRIVE_ROOT_FOLDER_ID + ARCHIVE_BACKEND=google_drive; local backend satisfies the gate meanwhile.
+- Advancing to P4 (learning loop) — no new creds required.
+
+## 2026-07-19 — P4 learning loop (code-complete, gate green)
+
+- P4.1 PreferenceSignalRow + migration 5a396a1c513b; contract PreferenceSignal extended (attributes/job_id/actor_role) + PreferenceProfile.signal_count/ranker_active + RANKER_MIN_SIGNALS=20.
+- P4.2 heuristic taste-ranker (api/services/preferences.py): attribute scoring by net revealed preference; passthrough <20 signals, re-order ≥20; stable ties.
+- P4.3 signal capture wired into approval_flow (approve→APPROVAL, request_change→REJECTION w/ reason_tag), client-scoped.
+- P4.4 (fanned out): preferences router (record/profile/rank/promote, client-scoped, promote owner/ops-only) + human-gated golden promotion (promote_and_write writes only when accepted AND reviewer named; client corrections never write). P4 gate test green.
+- Security review flagged list_job_approvals IDOR → client-scoped + regression test.
+- 197 tests green, ruff clean, contracts 11. Real golden/ dir untouched in tests (MIMIK_GOLDEN_DIR→tmp).
+- Next: P5 storefront+billing — pauses at the Stripe test-keys human gate.
+
+## 2026-07-19 — P5.1 storefront intake (credential-free); PAUSED at Stripe gate
+
+- Public POST /intake/claim: storefront tenant by slug → prospect Client (email-dedup) + Brand + draft Brief. Deliberately NO outbound fetch on the public path (SSRF/DoS amplifier); URL shape-validated only.
+- Team POST /clients/{id}/bootstrap: cold-client bootstrap fetches the prospect site behind auth via extract_brief_sections (SSRF guard) → drafts §1-5.
+- repo helpers: get_tenant_by_slug, get_client_by_email, list_brands. 8 intake tests; 206 total green, ruff clean.
+- PAUSED at the P5.2 Stripe billing human gate — need STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_ID (all TEST mode). Asked the operator.
+
+## 2026-07-19 — P5.2 Stripe billing scaffolded (mocked) — ALL PHASES BUILT
+
+- Operator chose "scaffold P5.2 without keys" — built billing fully with mocked Stripe (stdlib only, no `stripe` dep).
+- Fixed the P5.1 intake security findings first: SSRF redirect/rebind TOCTOU (no-redirect opener + per-hop re-validation), dedup race (UNIQUE(tenant_id,contact_email) + IntegrityError catch → migration f05cd87bcf42), public-input length caps. +2 regression tests.
+- P5.2 foundation: Subscription contract + SubscriptionStatus enum, SubscriptionRow (unique client_id) + migration b08ff128c47c, repo + mapper.
+- Fanned billing service/router/gating/tests to a subagent: create_checkout_session (mocked _post_form seam), verify_webhook_signature (HMAC-SHA256 over t.rawbody, constant-time, replay tolerance), apply_webhook_event (upsert on checkout.completed, status on updated/deleted), client_has_access; 402-gated /portal/design-requests.
+- Wired billing router into main.py; removed test self-registration guards.
+- P5 gate green: claim→client→brief→mocked checkout→signed webhook activates sub→gated endpoint flips 402→200.
+- 222 tests green, ruff clean, contracts 11. Security review of the payment surface in flight.
+- All phases P0–P5 built. Optional human-gate turn-ons remain (Drive creds, real Stripe test keys, paid images) — none blocking; local/mocked backends satisfy every gate.

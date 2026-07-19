@@ -16,8 +16,8 @@ from mimik_contracts import ImageBackend
 
 class ImageRequest(BaseModel):
     prompt: str
-    width: int
-    height: int
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
     reference_urls: list[str] = Field(default_factory=list)
     params: dict[str, object] = Field(default_factory=dict)
 

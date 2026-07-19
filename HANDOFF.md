@@ -4,6 +4,102 @@
 
 ---
 
+## 2026-07-19 — Autonomous build loop: P2 ✅ · P3 ✅ · P4 ✅ · P5 ✅ (Stripe scaffolded, mocked) — ALL PHASES BUILT
+
+**State: 222 tests green, ruff clean** (Suite; contracts 11 green). Migrations head `b08ff128c47c`.
+
+**P5.2 Stripe billing — SCAFFOLDED (operator chose "mocked, ready to flip on"):**
+- `Subscription` contract + `SubscriptionStatus` enum (`grants_access` = trialing/active); `SubscriptionRow` (one per client, unique client_id) + migration `b08ff128c47c`.
+- `api/services/billing.py` — stdlib only (no `stripe` package): `create_checkout_session` (Stripe Checkout via a single monkeypatchable `_post_form` seam; `BillingNotConfigured`→503 without keys), `verify_webhook_signature` (real HMAC-SHA256 over `t.rawbody`, constant-time `compare_digest`, replay tolerance), `apply_webhook_event` (checkout.session.completed → upsert+activate sub; subscription.updated/deleted → status), `client_has_access`.
+- `api/routers/billing.py` — POST /billing/checkout (client-scoped), POST /billing/webhook (raw-body signature-verified, no auth), GET /clients/{id}/subscription, and the gated **POST /clients/{id}/portal/design-requests** (402 unless the sub grants access).
+- **P5 GATE green** (`test_p5_gate.py`): claim → client + draft brief → mocked checkout → **signed webhook activates the subscription** → the gated portal endpoint flips 402→200. Security review of the webhook/gating in flight.
+- **To go live:** operator adds `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`STRIPE_PRICE_ID` (test mode) to `.env`; endpoints refuse with 503 until then (no accidental charges). Register the webhook endpoint URL in the Stripe dashboard (or `stripe listen`).
+
+**ALL PHASES P0–P5 are now built and green.** Remaining human-gate items are optional turn-ons: Google Drive archive creds (P3), real Stripe test keys (P5), real paid image generation (P2). Nothing is blocked; the local/mocked backends satisfy every gate.
+
+---
+
+## 2026-07-19 — Autonomous build loop: P2 ✅ · P3 ✅ · P4 ✅ · P5.1 ✅ → PAUSED at Stripe human gate (superseded above)
+
+**State: 206 tests green, ruff clean** (Suite; contracts 11 green).
+
+**P5.1 storefront intake — DONE (credential-free half of P5):**
+- Public `POST /intake/claim` (the mimikcreations.com/unlimited "3 free designs" form): resolves the storefront tenant by slug → creates a prospect Client (email-dedup: a resubmit returns the same prospect, `created:false`) + a prospect Brand + a DRAFT Brief. **Never fetches** — a public endpoint that fetched an attacker URL would be an SSRF/DoS amplifier; it only validates URL shape (http/https, no DNS).
+- Team-only `POST /clients/{id}/bootstrap`: the cold-client bootstrap — fetches the prospect's site behind auth via `extract_brief_sections` (SSRF guard resolves + rejects non-public IPs) → auto-drafts brief §1-5.
+- `tests/test_intake.py` (8): claim creates prospect+draft brief; idempotent by email; unknown storefront 404; non-http URL 422; public endpoint proven not to fetch; bootstrap extracts behind auth (stubbed, no network) + requires auth + 422 without a URL. Security review of the public endpoint in flight.
+
+**⛔ PAUSED — P5.2 Stripe billing needs the operator (HUMAN GATE).** See the ask below / in chat.
+
+---
+
+## 2026-07-19 — Autonomous build loop: P2 ✅ · P3 ✅ · P4 ✅ (superseded by entry above)
+
+**State: 198 tests green, ruff clean** (Suite; contracts 11 green). P4 review clean — findings fixed: promote endpoint validates `kind`/`source_role` (422, so the client-guard's string match can't be bypassed by a typo); golden exemplars carry a provenance header (promoted-by / source_role / client). Reviewer confirmed NO path — auto capture, promote endpoint, or `promote_and_write` — lets a client correction mutate the shared golden set.
+
+**P4 learning loop — PASSED ✅ (gate green, reviews clean):**
+- `PreferenceSignalRow` + migration `5a396a1c513b`; contract `PreferenceSignal` (+attributes/job_id/actor_role), `PreferenceProfile.signal_count`/`ranker_active()`, `RANKER_MIN_SIGNALS=20`.
+- `api/services/preferences.py` — heuristic taste-ranker: scores creative attributes by net revealed preference (approval/pick +, edit −0.25, rejection −1), passthrough below 20 signals, re-orders above; `build_profile` + `build_summary`.
+- Signal capture wired into `approval_flow`: approve→APPROVAL signal, request_change→REJECTION (reason_tag threaded through the approvals router), client-scoped, `actor_role` recorded.
+- `api/routers/preferences.py` — record / profile / rank / promote (promote is owner/ops-only). Human-gated promotion: `mimik_knowledge.promote_and_write` writes a golden exemplar ONLY when accepted AND a reviewer is named; **client-sourced corrections can never produce a golden write** (poisoning guard).
+- **P4 GATE green** (`test_p4_gate.py`): signals recorded from real approve/reject; ≥20 signals → re-ranked variants; auto path writes nothing to the shared golden set; client promote refused; team+reviewer writes. Real `golden/` dir untouched (tests redirect via `MIMIK_GOLDEN_DIR`→tmp).
+- Security fix mid-run (automated review): `list_job_approvals` IDOR — client-scoped the audit-trail read (404 for foreign client) + regression test.
+
+**NEXT: P5 (storefront + billing) — HAS A HUMAN GATE** (Stripe **test-mode** keys: `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`STRIPE_PRICE_ID`). The claim-form intake + cold-bootstrap can be built without keys, but the Stripe checkout/webhook gate needs test keys — I'll pause and ask before the billing slice.
+
+---
+
+## 2026-07-19 — Autonomous build loop: P2 PASSED ✅ · P3 PASSED ✅
+
+**State: 177 tests green, ruff clean** (Suite; contracts 11 green). P2 gate PASSED (operator approved samples). **P3 gate PASSED** (e2e machine gate green + code/security reviews clean). P3 (ops + approval) built this run:
+
+**P3.1 foundation** — contracts `UserAccount` + `Notification` (+ `NotificationChannel/Status`, `ActorRole.OWNER`); ORM rows UserAccount/CreativeDoc/Approval/Delivery/Task/Notification; migration `e26e196b8532` applied to Postgres; tenant-scoped repo funcs + mappers (incl. `_utc` naive→aware coercion for SQLite).
+**P3.2 auth (Supabase, managed — never self-rolled)** — `api/core/supabase_auth.py` verifies Supabase JWTs (this project signs **ES256/JWKS**; needed `cryptography` → added `pyjwt[crypto]`). Dual-issuer `get_principal` (Supabase-verified → `UserAccount` → tenant+role, OR first-party bootstrap token). `admin.py` provisions accounts (owner-gated, client bound to one client_id). `require_role` helper. Tested with a **local ES256 keypair + injected JWKS** (zero network).
+**P3.3 approval centerpiece** — `approval_flow.py`: audited approve/request-change/comment → on APPROVE: status→APPROVED → auto-archive (deterministic re-render from manifest → `ArchiveBackend` → Delivery) → status→ARCHIVED + notification. Magic-link (`magic_link.py`, signed capability, no login). Archive adapter: `LocalArchive` (default, zero-cred) + `GoogleDriveArchive` (real SA-JWT→Drive, mocked tests, gated on creds). `creatives.py` = the generate step.
+**P3.4 ops** — `ops.py` Kanban board (jobs by status + at-risk flags) + calendar + status transitions (→approved fires the same archive procedure); `at_risk.py` scan (idempotent, system-scope worker).
+**P3.5 tasks/versioning** — `tasks.py` (portal+board two views, client-scoped); `notifications.py` recording sink; brief `POST /revise` (frozen → new draft version, non-destructive).
+
+**Review findings (code + security agents) — ALL RESOLVED with regression tests:**
+- CRITICAL double-approve re-archived/re-delivered → terminal-state guard in `submit_approval` (`ApprovalConflictError`→409); test asserts exactly 1 delivery survives.
+- CRITICAL blocking JWKS fetch stalled the async event loop → `verify_supabase_jwt` now runs via `asyncio.to_thread` in `get_principal`.
+- Token confusion (magic-link vs access, shared secret) → access tokens carry `typ=access`, `decode_access_token` pins it; test asserts a magic link is rejected (401) as a Bearer.
+- Drive folder query built by f-string → `_ensure_folder` re-sanitizes `name`.
+- `creatives.py` IDOR → team-role gate on create + client-scoping on list.
+- at-risk O(N²) + `dispatch_pending` full scan → targeted `job_id`/`status` filters on `list_notifications`.
+- admin duplicate-identity TOCTOU → `IntegrityError`→409 (no 500 leak).
+- task same-tenant cross-client `job_id` association → verified job belongs to the task's client.
+- JWKS unbounded read → capped at 256KB.
+
+**P3 GATE PASSED:** `test_e2e_gate.py` GREEN — intake→generate→approve→auto-archive produces a real 1080² PNG at the archive path with a timestamped audit trail, ZERO manual upload; at-risk fires on buffer breach (`test_at_risk.py`). 177 tests green, ruff clean, reviews clean.
+
+**Human gate for real Google Drive archive:** set `ARCHIVE_BACKEND=google_drive` + `GOOGLE_SERVICE_ACCOUNT_JSON` (SA json/path) + `DRIVE_ROOT_FOLDER_ID`. Until then the local backend satisfies the gate (auto-archive, zero manual upload). Supabase creds ARE set; the ES256/JWKS path is live.
+
+**Deferred to P4:** preference capture/A-B logging; reference *gathering* (browser scrape) stays stubbed behind the fit-critic seam.
+
+---
+
+## 2026-07-19 — Autonomous build loop: P2 CODE-COMPLETE (pending operator eyeball)
+
+**State: 116 tests green, ruff clean** (suite; contracts 11 green). Built this run:
+- `mimik-contracts`: `CopyBlock` + `CopyStatus`; `CreativeManifest.template_key`/`copy_block`; `ImageBackend` gains `none`/`openrouter`/`gemini_image`; **asset-ref shape validation** on `Layer.artifact_ref` + `LogoSpec.ref` (CSS-injection defense, see below).
+- `creative/assemble.py` — Brand tokens + manifest → TemplateContext (hex normalize, font CSS-sanitize, L2>L1 artifact precedence, draft-copy delivery guard).
+- `creative/copy/l0.py` — L0 copy on free Gemini TEXT; injection-fenced topic; headline ≤9w/≤60ch enforced in code; retry×1 → `CopyDraftError`. Prompt `copy_l0@v1` in mimik-knowledge.
+- `creative/adapters/` — gpt_image/openrouter/gemini_image (stdlib REST, mocked tests) + router (env routing, retry→alternate, `ImageGenerationFailed` = L2-human signal). **Hard spend gate: `MIMIK_ALLOW_PAID_IMAGES=1` required for ANY paid call.**
+- `creative/qa/` — brand-QA hard checks: exact dims, safe zones (geometry API on templates + ig_story 250px clamp), logo presence, WCAG contrast (pure math on solid grounds; in-browser pixel sampling under imagery). **Conditional scrim** via `needs_scrim` only.
+- `creative/references/fit_critic.py` — reference fit-critic + StyleDescriptor, reasoning mandatory, `reference_fit@v1` prompt + rubric.
+- `creative/pipeline.py` — e2e: copy → manifest → assemble → composite → QA → (scrim re-render). `creative/prompting.py` — shared critic plumbing.
+- **Security review (3 agents ran: pattern/security/code):** CRITICAL fixed — `logo_ref`/`image_ref` CSS-`url()` injection (html.escape can't protect CSS context; confirmed breakout) → shape validation at contracts AND TemplateContext sink + negative tests. Also: fence-stripper hardened (spaced/attribute tags), router re-raises programming bugs, gpt_image response-shape guard, copy-aware geometry + DOM-containment tests.
+- **Live gate sample produced** (scratchpad `mimik_*.png`): real Gemini copy ("Unlimited design. $750 a month." / CTA "Start free") on Mimik brand, 3 renders, all QA-pass.
+
+**P2 gate: PASSED ✅** — machine checks green AND operator approved the samples in-session ("Approve — advance to P3", no nudge).
+
+**Deliberate deferrals:** preference-capture persistence + A/B pick logging → P4 (its gate lives there; router already supports 2 backends). Reference *gathering* (Pinterest scrape) → stub seam; fit-critic ready.
+
+**Env for later phases:** browser profile dirs not set (browser image paths confirmed dead — Cloudflare); paid images stay OFF until operator explicitly approves spend per-deliverable. P3 needs: Supabase keys (auth), Google service account + Drive folder (archive).
+
+**Next:** P3 — ops + approval (dashboard→API auth wiring via Supabase, Kanban board, calendar + at-risk worker, in-portal + magic-link approval, Drive auto-archive, brief freeze versioning, task/notification system).
+
+---
+
 ## 2026-07-18 — Session 1: P0 scaffold kickoff
 
 **Goal:** Stand up the P0 foundation for Mimik Suite (multi-tenant done-for-you creative-agency SaaS).

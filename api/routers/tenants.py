@@ -34,5 +34,6 @@ class TenantCreated(BaseModel):
 async def create_tenant(body: CreateTenant, session: AsyncSession = Depends(get_session)) -> TenantCreated:
     row = await repo.create_tenant(session, name=body.name, slug=body.slug)
     await session.commit()
-    token = create_access_token(tenant_id=row.id, role="team")
+    # The founding principal of a tenant is its owner (can provision accounts via /admin).
+    token = create_access_token(tenant_id=row.id, role="owner")
     return TenantCreated(tenant=to_tenant(row), access_token=token)
