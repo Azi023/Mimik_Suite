@@ -8,6 +8,13 @@
 credentials*
 *.secret
 .keys
+# Google service-account keys (Drive archive) — the JSON IS a credential
+secure repo/
+secure_repo/
+*service-account*.json
+*service_account*.json
+gen-lang-client-*.json
+gcp-*.json
 
 # Python
 __pycache__/

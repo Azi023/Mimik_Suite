@@ -20,7 +20,8 @@ from .base import ImageAdapter, ImageRequest, ImageResult
 from .router import ensure_spend_approved, write_image_artifact
 
 _ENDPOINT = "https://api.openai.com/v1/images/generations"
-_DEFAULT_MODEL = "gpt-image-1"
+# Operator preference: the BEST tier for real deliverables. Overridable via OPENAI_IMAGE_MODEL.
+_DEFAULT_MODEL = "gpt-image-2"
 # gpt-image-1 supports exactly these output sizes; requests map to the closest aspect ratio.
 _SIZES: tuple[tuple[int, int], ...] = ((1024, 1024), (1024, 1536), (1536, 1024))
 

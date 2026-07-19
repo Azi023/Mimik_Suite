@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-07-19 — NEXT SESSION: G2G brand-memory ingestion + dogfood → read `docs/NEXT_SESSION_G2G.md`
+
+All P0–P5 built & green (222 tests, ruff clean, migrations head `b08ff128c47c`), committed on `main`
+(not pushed): contracts `fd082c9`, knowledge `186cfc5`, Suite `e9cee23` (+ this doc/config commit).
+
+**The next session's job** (full plan + paste-in loop prompt in `docs/NEXT_SESSION_G2G.md`): build the
+**brand-memory ingestion slice** (per-brand Asset Library + free-Gemini **vision** seam +
+reference-creative ingestion into the fit-critic/preference/golden systems + copy-voice golden) and
+**dogfood it on Glo2Go Aesthetics**.
+
+**Key steer from operator:** the **live site `https://glo2goaesthetics.co.uk/` + socials are the source
+of truth**, NOT the old Drive brief/creatives (the brand has moved on — now "luxury, expertise,
+affordability", added Polynucleotides + Aqualyx/Lemon Bottle fat-dissolving, London EC3R address). Draft
+a **fresh, better brief + marketing plan + content pillars** from the current site; use the ~3–5 past
+Drive creatives as a **style headstart only**. No content-planner sheet needed (app calendar replaces it).
+
+**Done this turn:** service-account key (`secure repo/…json`) gitignored + verified never committed;
+image model set to `gpt-image-2` (top tier, spend-gated); Drive scouted (G2G brief + folder IDs captured
+in the plan doc); `docs/RESEARCH.md` updated with the honest build-vs-R&D gap.
+
+**Human gates for next session:** SA `drive.readonly` scope + Clients folder shared (to READ past
+creatives server-side); explicit go-ahead before any paid `gpt-image-2` call; design reference for any new
+UI; commit on request.
+
+---
+
 ## 2026-07-19 — Autonomous build loop: P2 ✅ · P3 ✅ · P4 ✅ · P5 ✅ (Stripe scaffolded, mocked) — ALL PHASES BUILT
 
 **State: 222 tests green, ruff clean** (Suite; contracts 11 green). Migrations head `b08ff128c47c`.
