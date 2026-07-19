@@ -13,6 +13,7 @@ import re
 
 from mimik_contracts import Brand, ColorRole, CopyStatus, CreativeManifest, LayerKind, get_format
 
+from creative.render.color import tint
 from creative.render.templates import TemplateContext, get_template
 
 # Mimik house defaults — used ONLY when a brand carries no tokens yet (early-stage /
@@ -92,13 +93,20 @@ def assemble_context(
 
     colors = brand.tokens.colors
     primary = _color(colors, "primary") or _DEFAULT_PRIMARY
+    # A brand that carries ANY palette never borrows a house color (client-feedback lesson:
+    # Mimik's lime leaked into a client CTA). A missing accent is DERIVED from the brand's
+    # own primary — a soft tint chip that carries the brand, reads with dark labels, and
+    # can never be another company's color.
+    accent = _color(colors, "accent", "secondary")
+    if accent is None:
+        accent = tint(primary, 0.82) if colors else _DEFAULT_ACCENT
     return TemplateContext(
         format_key=manifest.format_key,
         headline=manifest.copy_block.headline,
         subhead=manifest.copy_block.subhead,
         cta=manifest.copy_block.cta,
         primary=primary,
-        accent=_color(colors, "accent", "secondary") or _DEFAULT_ACCENT,
+        accent=accent,
         on_primary=_color(colors, "on_primary") or _DEFAULT_ON_PRIMARY,
         ink=_color(colors, "ink", "dark") or _DEFAULT_INK,
         heading_font=_font(brand.tokens.typography.heading_font) or TemplateContext.model_fields["heading_font"].default,

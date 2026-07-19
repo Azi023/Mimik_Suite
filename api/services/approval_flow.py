@@ -31,6 +31,7 @@ from mimik_contracts import (
     JobStatus,
     NotificationChannel,
     PreferenceSource,
+    RevisionTarget,
     TaskType,
 )
 
@@ -80,6 +81,7 @@ async def _record_signal(
     actor: Actor,
     reason_tag: str | None = None,
     detail: str | None = None,
+    extra_attributes: dict[str, str] | None = None,
 ) -> None:
     """Capture a learning-loop signal, scoped to the job's client. Client-sourced signals
     feed ONLY this client's profile — never the shared golden set (that path is human-gated)."""
@@ -92,7 +94,7 @@ async def _record_signal(
         job_id=job.id,
         reason_tag=reason_tag,
         detail=detail,
-        attributes=_creative_attributes(doc),
+        attributes={**_creative_attributes(doc), **(extra_attributes or {})},
         actor_role=actor.role.value,
     )
 
@@ -165,6 +167,7 @@ async def submit_approval(
     action: ApprovalAction,
     note: str | None = None,
     reason_tag: str | None = None,
+    targets: list[RevisionTarget] | None = None,
     archive: ArchiveBackend | None = None,
     render: Renderer | None = None,
 ) -> dict:
@@ -191,6 +194,11 @@ async def submit_approval(
     ):
         raise ApprovalConflictError(f"job is already {job.status}; a change now is a new request")
 
+    # Targets only make sense on a change request. The router 422s this before we're
+    # called; a direct caller gets the same rule enforced loud — silently dropping audit
+    # data would violate the non-destructive/audited invariant (locked constraint #8).
+    if targets and action != ApprovalAction.REQUEST_CHANGE:
+        raise ApprovalFlowError("targets are only valid on a request_change action")
     approval = await repo.create_approval(
         session,
         tenant_id=tenant_id,
@@ -199,6 +207,7 @@ async def submit_approval(
         actor=actor.model_dump(mode="json"),
         action=action.value,
         note=note,
+        targets=[t.model_dump(mode="json") for t in targets] if targets else [],
     )
     result: dict = {"approval": to_approval(approval)}
 
@@ -225,6 +234,18 @@ async def submit_approval(
         )
     elif action == ApprovalAction.REQUEST_CHANGE:
         job.status = JobStatus.INTERNAL_REVIEW.value  # back to ops to action the change
+        # Pin-pointed targets make the ops task actionable: each line says WHERE + WHAT,
+        # so the designer edits the named layer/zone instead of guessing from prose.
+        detail = note
+        if targets:
+            # One line per target; embedded newlines in the (client freeform) instruction
+            # are flattened so a crafted instruction can't forge extra "- [zone]" lines.
+            target_lines = "\n".join(
+                f"- [{t.zone.value}{f'/{t.layer.value}' if t.layer else ''}] "
+                + " ".join(t.instruction.split())
+                for t in targets
+            )
+            detail = f"{note}\n{target_lines}" if note else target_lines
         task = await repo.create_task(
             session,
             tenant_id=tenant_id,
@@ -232,7 +253,7 @@ async def submit_approval(
             job_id=job_id,
             type=TaskType.CHANGE_REQUEST.value,
             title=f"Change requested: {job.title}",
-            detail=note,
+            detail=detail,
             created_by=actor.model_dump(mode="json"),
         )
         result["task"] = to_task(task)
@@ -250,6 +271,17 @@ async def submit_approval(
             session, tenant_id=tenant_id, job=job, doc=doc,
             source=PreferenceSource.REJECTION, actor=actor, reason_tag=reason_tag, detail=note,
         )
+        # One signal per pin-pointed target: the ranker learns WHICH zones/layers this
+        # client pushes back on, not just that they pushed back.
+        for t in targets or []:
+            attrs = {"revision_zone": t.zone.value}
+            if t.layer:
+                attrs["revision_layer"] = t.layer.value
+            await _record_signal(
+                session, tenant_id=tenant_id, job=job, doc=doc,
+                source=PreferenceSource.REJECTION, actor=actor, reason_tag=reason_tag,
+                detail=t.instruction, extra_attributes=attrs,
+            )
     elif action == ApprovalAction.COMMENT:
         task = await repo.create_task(
             session,

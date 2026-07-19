@@ -10,7 +10,7 @@ from api.core.auth import Principal, get_principal
 from api.db import repo
 from api.db.mappers import to_brand
 from api.db.session import get_session
-from mimik_contracts import Brand
+from mimik_contracts import Brand, BrandTokens
 
 router = APIRouter(prefix="/brands", tags=["brands"])
 
@@ -28,6 +28,9 @@ class CreateBrand(BaseModel):
     donts: list[str] = Field(default_factory=list)
     handles: dict[str, str] = Field(default_factory=dict)
     imagery_style: str | None = None
+    # Design tokens at creation (colors/typography/logo) — validated by the contract, so a
+    # payload can't smuggle an unsafe logo ref past the asset-ref validator.
+    tokens: BrandTokens = Field(default_factory=BrandTokens)
 
 
 @router.post("", response_model=Brand, status_code=201)
@@ -42,7 +45,9 @@ async def create_brand(
     )
     if client is None:
         raise HTTPException(status_code=404, detail="Client not found")
-    row = await repo.create_brand(session, tenant_id=principal.tenant_id, **body.model_dump())
+    fields = body.model_dump()
+    fields["tokens"] = body.tokens.model_dump(mode="json")
+    row = await repo.create_brand(session, tenant_id=principal.tenant_id, **fields)
     await session.commit()
     return to_brand(row)
 

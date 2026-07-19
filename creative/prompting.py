@@ -21,8 +21,6 @@ from typing import TypeVar
 
 from mimik_knowledge import load_prompt
 
-from creative.copy.gemini_text import _FALLBACK_MODEL, generate_text
-
 T = TypeVar("T")
 
 # ```json ... ``` (or bare ```) wrapping the whole reply — models add these despite the ask.
@@ -79,6 +77,11 @@ def parse_json_reply(reply: str) -> dict[str, object]:
 def default_generate() -> tuple[Callable[[str], str], str]:
     """The free Gemini TEXT wrapper with the model pinned up front, so provenance
     (`source_model`) matches the actual call. Returns (generate, model_name)."""
+    # Imported here, not at module level: creative.copy imports this module, so a
+    # top-level import back into creative.copy is a circular-import trap whose failure
+    # depends on which package a test file happens to import first.
+    from creative.copy.gemini_text import _FALLBACK_MODEL, generate_text
+
     model = os.environ.get("GEMINI_TEXT_MODEL") or _FALLBACK_MODEL
 
     def generate(prompt: str, *, _model: str = model) -> str:

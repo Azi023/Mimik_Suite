@@ -42,6 +42,8 @@ outputs/
 *.db
 uploads/
 storage/
+# Brand Asset Library files + browser session profiles (client assets / auth cookies)
+var/
 
 # OS / editor
 .DS_Store

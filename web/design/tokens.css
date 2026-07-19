@@ -1,62 +1,97 @@
-/* Mimik Suite — design tokens (LOCKED reference: Studio White, brand-tuned)
- * Light = default (:root). Dark = [data-theme="dark"]. A theme toggle only flips
- * ground + accents; layout/spacing never change between themes.
- * Reference artifact: https://claude.ai/code/artifact/b3cd6c31-85a9-412b-b933-2a3bd3e62d6f
- * Brand colors sourced from mimikcreations.com.
- */
+/* ---------------------------------------------------------------------------
+   Mimik Suite — design tokens
+   Reference: Conceptzilla "Team Management Dashboard" (Dribbble shot 19198544)
+   Local copy: see web/DESIGN_NOTES.md for the reference image paths.
+
+   Light is the flagship theme (:root). Dark = [data-theme="dark"].
+   A theme flip only swaps ground/ink/line values — the accent + tag palette,
+   radii, shadows-as-roles, spacing and type never change between themes.
+--------------------------------------------------------------------------- */
+
 :root {
-  /* ground + surfaces */
-  --bg: #FFFFFF;
-  --panel: #FFFFFF;
-  --panel-2: #F7F8FA;
-  --text: #0B0D12;
-  --muted: #697086;
-  --line: #EBECF0;
-  --chip: #F4F5F8;
+  /* ---- ground ---- */
+  --canvas: #f5f6f8;        /* page background — near-white gray */
+  --surface: #ffffff;       /* cards, sidebar, panel — pure white */
+  --surface-2: #f1f2f4;     /* soft fills: search field, secondary buttons */
+  --surface-3: #f8f9fb;     /* hover wash on white surfaces */
+  --line: #ecedf1;          /* hairline separators */
+  --card-border: transparent; /* cards float on shadow alone in light */
 
-  /* brand */
-  --accent: #2E5BFF;      /* royal blue — every PRIMARY action */
-  --accent-ink: #FFFFFF;
-  --pop: #C6F135;         /* electric lime — signature pop, SPARINGLY (active/selected, brand mark) */
-  --pop-ink: #0B0D12;
+  /* ---- ink ---- */
+  --ink: #1a1d26;           /* headings, titles (600–700) */
+  --ink-2: #4a4f5c;         /* body copy */
+  --muted: #8a8f98;         /* secondary text, glyph icons */
+  --faint: #b9bdc6;         /* placeholders, disabled */
 
-  /* semantic (kept distinct from --pop so success never blurs with lime) */
-  --good: #12B76A;        /* emerald */
-  --warn: #F79009;        /* amber */
-  --crit: #E5484D;        /* red */
+  /* ---- accent ---- */
+  --accent: #3b82f6;        /* primary actions, active nav */
+  --accent-hover: #2f6fe0;
+  --accent-soft: #eaf2fe;   /* active-nav tint */
+  --accent-ink: #ffffff;
 
-  /* shape */
-  --radius: 14px;
-  --radius-sm: 10px;
-  --radius-pill: 999px;
+  /* ---- tag palette (saturated pastel fills, white text) ---- */
+  --tag-blue: #4e9cf5;
+  --tag-green: #58c25b;
+  --tag-orange: #f5a623;
+  --tag-pink: #ef5da8;
+  --tag-purple: #a16bf7;
+  --tag-gray: #b0b4bf;
 
-  /* elevation */
-  --shadow-sm: 0 1px 2px rgba(10,10,25,.05);
-  --shadow-lg: 0 22px 46px -26px rgba(10,10,35,.22);
+  /* ---- kanban status dots ---- */
+  --dot-new: #f04438;       /* red — at risk / new */
+  --dot-progress: #f5a623;  /* orange — in review / in progress */
+  --dot-done: #3bb966;      /* green — approved / complete */
 
-  /* type */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  /* Production display/body (load via next/font, self-hosted): Syne (display), Space Grotesk (body). */
+  /* ---- shape ---- */
+  --r-lg: 16px;             /* cards, panel */
+  --r-md: 14px;             /* inner cards, thumbs */
+  --r-sm: 10px;             /* buttons, inputs, add-rows */
+  --r-xs: 8px;              /* tiny chips */
+  --r-full: 999px;          /* pills, dots, avatars */
+
+  /* ---- elevation ---- */
+  --shadow-card: 0 2px 8px rgba(20, 20, 43, 0.06);
+  --shadow-lift: 0 8px 20px rgba(20, 20, 43, 0.1);
+  --shadow-pop: 0 4px 14px rgba(20, 20, 43, 0.1);
+  --shadow-panel: -12px 0 36px rgba(20, 20, 43, 0.08);
+
+  /* ---- spacing scale ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+
+  /* ---- type ---- */
+  --font-sans: var(--font-inter, "Inter"), -apple-system, "Segoe UI", Roboto,
+    sans-serif;
 }
 
 [data-theme="dark"] {
-  --bg: #0A0D15;          /* near-black navy — brand dark ground */
-  --panel: #12151F;
-  --panel-2: #171C27;
-  --text: #EEF0F5;
-  --muted: #9096A8;
-  --line: #232838;
-  --chip: #161B27;
+  --canvas: #17181c;
+  --surface: #1f2127;
+  --surface-2: #272a32;
+  --surface-3: #24272e;
+  --line: #2b2e37;
+  --card-border: #2b2e37;  /* shadows vanish on dark — a hairline keeps edges */
 
-  --accent: #4E74FF;      /* royal blue, lifted for dark */
-  --accent-ink: #FFFFFF;
-  --pop: #C6F135;
-  --pop-ink: #0A0D15;
+  --ink: #f2f3f6;
+  --ink-2: #c9ccd4;
+  --muted: #8a8f98;
+  --faint: #5c6068;
 
-  --good: #3DDC97;
-  --warn: #FBBF24;
-  --crit: #FF6B6B;
+  --accent: #4e8ef7;
+  --accent-hover: #6ba1f9;
+  --accent-soft: rgba(78, 142, 247, 0.16);
+  --accent-ink: #ffffff;
 
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
-  --shadow-lg: 0 24px 48px -24px rgba(0,0,0,.7);
+  /* tag + dot palette holds — saturated fills read well on both grounds */
+
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 8px 20px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 4px 14px rgba(0, 0, 0, 0.4);
+  --shadow-panel: -12px 0 36px rgba(0, 0, 0, 0.45);
 }

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from api.routers import (
     admin,
     approvals,
+    assets,
     billing,
     brands,
     briefs,
@@ -32,6 +33,7 @@ app.include_router(admin.router)
 app.include_router(intake.router)
 app.include_router(clients.router)
 app.include_router(brands.router)
+app.include_router(assets.router)
 app.include_router(pillars.router)
 app.include_router(briefs.router)
 app.include_router(jobs.router)

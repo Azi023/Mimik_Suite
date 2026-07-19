@@ -34,7 +34,7 @@ _PREFERENCE_SOURCE_VALUES = {s.value for s in PreferenceSource}
 _ROLE_VALUES = {r.value for r in ActorRole}
 # The kinds a promotion may target. The poisoning guard keys on source_role == "client", so
 # both fields are validated here rather than silently falling through to a promotable branch.
-_PROMOTION_KINDS = {"golden_positive", "golden_negative", "rubric", "prompt"}
+_PROMOTION_KINDS = {"golden_positive", "golden_negative", "rubric", "prompt", "copy_voice"}
 
 
 class RecordSignal(BaseModel):

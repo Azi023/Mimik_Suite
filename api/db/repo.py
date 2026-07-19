@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     ApprovalRow,
+    BrandAssetRow,
     BrandRow,
     BriefRow,
     ClientRow,
@@ -374,6 +375,34 @@ async def get_subscription_by_stripe_id(
 
 
 # --- PreferenceSignal (learning loop; append-only, client-scoped) ---
+async def create_brand_asset(session: AsyncSession, *, tenant_id: str, **fields) -> BrandAssetRow:
+    row = BrandAssetRow(tenant_id=tenant_id, **fields)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_brand_asset(
+    session: AsyncSession, *, tenant_id: str, asset_id: str
+) -> BrandAssetRow | None:
+    stmt = select(BrandAssetRow).where(
+        BrandAssetRow.id == asset_id, BrandAssetRow.tenant_id == tenant_id
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def list_brand_assets(
+    session: AsyncSession, *, tenant_id: str, brand_id: str, kind: str | None = None
+) -> list[BrandAssetRow]:
+    stmt = select(BrandAssetRow).where(
+        BrandAssetRow.tenant_id == tenant_id, BrandAssetRow.brand_id == brand_id
+    )
+    if kind is not None:
+        stmt = stmt.where(BrandAssetRow.kind == kind)
+    stmt = stmt.order_by(BrandAssetRow.created_at)
+    return list((await session.execute(stmt)).scalars())
+
+
 async def create_preference_signal(
     session: AsyncSession, *, tenant_id: str, **fields
 ) -> PreferenceSignalRow:

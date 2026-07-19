@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from mimik_contracts import (
     Actor,
     Approval,
+    AssetStudy,
     Brand,
+    BrandAsset,
     BrandTokens,
     Brief,
     BriefSections,
@@ -27,6 +29,7 @@ from mimik_contracts import (
 
 from .models import (
     ApprovalRow,
+    BrandAssetRow,
     BrandRow,
     BriefRow,
     ClientRow,
@@ -90,6 +93,25 @@ def to_brand(row: BrandRow) -> Brand:
         tokens=BrandTokens.model_validate(row.tokens) if row.tokens else BrandTokens(),
         imagery_style=row.imagery_style,
         references=row.references or [],
+    )
+
+
+def to_brand_asset(row: BrandAssetRow) -> BrandAsset:
+    return BrandAsset(
+        id=row.id,
+        created_at=_utc(row.created_at),
+        tenant_id=row.tenant_id,
+        client_id=row.client_id,
+        brand_id=row.brand_id,
+        kind=row.kind,
+        filename=row.filename,
+        mime=row.mime,
+        local_path=row.local_path,
+        drive_file_id=row.drive_file_id,
+        approved=row.approved,
+        license=row.license,
+        notes=row.notes,
+        study=AssetStudy.model_validate(row.study) if row.study else None,
     )
 
 
@@ -173,6 +195,7 @@ def to_approval(row: ApprovalRow) -> Approval:
         actor=Actor.model_validate(row.actor),
         action=row.action,
         note=row.note,
+        targets=row.targets or [],
     )
 
 

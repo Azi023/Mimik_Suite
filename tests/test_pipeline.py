@@ -54,19 +54,24 @@ def test_suggest_template_by_copy_density() -> None:
         headline="Everything your new smile needs this season",
         subhead="Implants, aligners and same-day fittings under one roof",
     )
-    assert suggest_template(short, "ig_post") == "centered_hero"
-    assert suggest_template(dense, "ig_post") == "lower_band"
+    # With imagery: density decides hero vs band.
+    assert suggest_template(short, "ig_post", has_imagery=True) == "centered_hero"
+    assert suggest_template(dense, "ig_post", has_imagery=True) == "lower_band"
+    # Without imagery: never a flat color plate — the designed soft ground carries it.
+    assert suggest_template(short, "ig_post") == "soft_editorial"
+    assert suggest_template(dense, "ig_post") == "soft_editorial"
 
 
 def test_build_manifest_layers_and_template_default() -> None:
     brand = _brand()
     copy = CopyBlock(headline="Big smile")
     bare = build_manifest(brand, copy, "ig_post")
-    assert bare.template_key == "centered_hero"
+    assert bare.template_key == "soft_editorial"  # placeholder path gets the designed ground
     assert bare.layers == []  # no imagery → free placeholder ground
     with_img = build_manifest(brand, copy, "ig_post", image_artifact="l1.png")
     l1 = with_img.layer(LayerKind.L1_BASE)
     assert l1 is not None and l1.artifact_ref == "l1.png"
+    assert with_img.template_key == "centered_hero"
 
 
 @_browser
@@ -85,7 +90,7 @@ async def test_e2e_placeholder_creative_passes_qa() -> None:
     assert not result.scrim_applied
     assert result.manifest.copy_block is not None
     assert result.manifest.copy_block.status == CopyStatus.DRAFT  # human gate still ahead
-    assert result.manifest.template_key == "centered_hero"
+    assert result.manifest.template_key == "soft_editorial"
 
 
 @_browser

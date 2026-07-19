@@ -42,9 +42,15 @@ class CreativeResult(BaseModel):
     scrim_applied: bool = False
 
 
-def suggest_template(copy_block: CopyBlock, format_key: str) -> str:
-    """v1 heuristic for the layout-FIRST pick: dense copy goes on a solid band (always
-    legible); short punchy copy carries a full-bleed hero. Humans can override the pick."""
+def suggest_template(
+    copy_block: CopyBlock, format_key: str, *, has_imagery: bool = False
+) -> str:
+    """v2 heuristic for the layout-FIRST pick. With imagery: dense copy goes on a solid
+    band (always legible), punchy copy carries a full-bleed hero. WITHOUT imagery (the
+    free placeholder path) the pick is soft_editorial — a flat single-color plate is not
+    what a designer would ship (real client feedback). Humans can override the pick."""
+    if not has_imagery:
+        return "soft_editorial"
     density = len(copy_block.headline) + len(copy_block.subhead or "")
     return "lower_band" if density > 90 else "centered_hero"
 
@@ -67,7 +73,8 @@ def build_manifest(
     return CreativeManifest(
         format_key=format_key,
         brand_id=brand.id,
-        template_key=template_key or suggest_template(copy_block, format_key),
+        template_key=template_key
+        or suggest_template(copy_block, format_key, has_imagery=image_artifact is not None),
         copy_block=copy_block,
         layers=layers,
     )

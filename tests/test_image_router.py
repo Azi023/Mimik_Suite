@@ -87,7 +87,7 @@ async def test_gpt_image_generates_from_canned_payload(
     monkeypatch.setattr(gpt_image_mod, "_post", fake_post)
     result = await GPTImageAdapter(artifacts_dir=tmp_path).generate(_request())
     _assert_artifact(result, ImageBackend.GPT_IMAGE, tmp_path)
-    assert result.model == "gpt-image-1"
+    assert result.model == "gpt-image-2"
     assert bodies[0]["size"] == "1024x1024"  # 1080x1080 maps to the closest supported square
 
 

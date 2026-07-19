@@ -11,9 +11,10 @@ Fetch strategy (degrades cleanly, no network install ever attempted):
   2. Stdlib path (DEFAULT): `urllib` GETs the raw HTML. No JS execution, so it sees only
      server-rendered markup + linked/inline CSS. This is what runs today.
 
-The LLM/vision enrichment (voice/tone polish, palette-from-screenshot on the free Gemini
-tier) is deferred to P2 and sits behind the `_vision_pass` seam — see the TODO there. We do
-NOT call any paid LLM/vision API here.
+The LLM/vision enrichment (voice/tone polish, snapshot/logo refinement on the free Gemini
+tier) lives behind the `_vision_pass` seam, called from the network entrypoint only — it
+no-ops without GEMINI_API_KEY and falls back to the heuristic draft on any model failure.
+We do NOT call any paid LLM/vision API here.
 """
 
 from __future__ import annotations
@@ -253,42 +254,140 @@ async def _fetch_html(url: str) -> str:
     return _fetch_html_via_urllib(url)
 
 
-def _vision_pass(sections: BriefSections, html: str) -> BriefSections:
-    """Seam for the P2 free-Gemini vision/LLM enrichment. No-op today.
+def _merge_llm_sections(sections: BriefSections, data: dict[str, object]) -> BriefSections:
+    """Fold the model's evidence-bound observations into the heuristic draft.
 
-    TODO(P2): screenshot the rendered page, send it (plus the extracted copy) to the free
-    Gemini tier using `mimik-knowledge/prompts/brand_brief_extraction.md`, and fill/refine
-    §1 snapshot, §2 logo_notes, and §5 voice_tone from what the model *observes* — still
-    evidence-bound, never invented. No paid API. Returns sections unchanged for now.
+    Merge policy: the model may REFINE prose fields (§1 snapshot, §2 logo_notes, §5
+    voice_tone — it reads the whole page, the heuristic reads title+meta+h1) but only
+    FILL GAPS in tokens (§3/4): a hex extracted from the site's actual CSS outranks a
+    model estimate, so heuristic colors/fonts are never overwritten.
     """
-    return sections
+    updates: dict[str, object] = {}
+    for field in ("snapshot", "logo_notes", "voice_tone"):
+        value = data.get(field)
+        if isinstance(value, str) and value.strip():
+            updates[field] = value.strip()
+
+    tokens_raw = data.get("tokens")
+    if isinstance(tokens_raw, dict):
+        try:
+            llm_tokens = BrandTokens.model_validate(tokens_raw)
+        except Exception:  # noqa: BLE001 — a malformed tokens block is dropped, not fatal
+            llm_tokens = None
+        if llm_tokens is not None:
+            merged = sections.tokens.model_copy()
+            if not merged.colors and llm_tokens.colors:
+                merged = merged.model_copy(update={"colors": llm_tokens.colors})
+            if not merged.typography.heading_font and not merged.typography.body_font:
+                merged = merged.model_copy(update={"typography": llm_tokens.typography})
+            if llm_tokens.logo.assessment and not merged.logo.assessment:
+                merged = merged.model_copy(
+                    update={"logo": merged.logo.model_copy(
+                        update={"assessment": llm_tokens.logo.assessment}
+                    )}
+                )
+            updates["tokens"] = merged
+    return sections.model_copy(update=updates) if updates else sections
+
+
+_SITE_TAG_RE: "re.Pattern[str] | None" = None
+_VISION_PROMPT_NAME = "brand_brief_extraction"
+_VISION_OVERRIDE_VAR = "MIMIK_BRIEF_EXTRACTION_PROMPT"
+_MAX_SITE_CHARS = 15_000
+
+
+class BriefVisionError(RuntimeError):
+    """The model failed to produce a coherent brief refinement after the retry."""
+
+
+def _vision_pass(
+    sections: BriefSections,
+    html: str,
+    # TODO(G2+): no caller passes a screenshot yet — the Playwright page-capture caller
+    # (browser fetch path) lands with the ProofKit integration; the branch below is ready.
+    screenshot: bytes | None = None,
+) -> BriefSections:
+    """Free-Gemini enrichment of the heuristic draft — §1 snapshot, §2 logo_notes,
+    §5 voice_tone (+ token gap-fill), evidence-bound by the versioned prompt.
+
+    Degrades cleanly: without GEMINI_API_KEY (tests, offline dev) the heuristic draft
+    passes through unchanged. A model/parse failure also falls back to the heuristics —
+    the draft is a starting point for a human, and heuristics are the safe floor.
+    """
+    import logging
+    import os
+
+    if not os.environ.get("GEMINI_API_KEY"):
+        return sections
+
+    from creative import prompting
+
+    global _SITE_TAG_RE
+    if _SITE_TAG_RE is None:
+        _SITE_TAG_RE = prompting.tag_stripper("site")
+
+    # Scraped page copy is UNTRUSTED — it only ever fills the <site> data fence, and any
+    # literal fence tags inside it are stripped so the fence can't be broken out of.
+    site_text = _SITE_TAG_RE.sub("", _strip_tags(html))[:_MAX_SITE_CHARS]
+    template = prompting.load_template(_VISION_PROMPT_NAME, _VISION_OVERRIDE_VAR)
+    prompt = prompting.fill_slots(template, {"site_content": site_text})
+
+    if screenshot is not None:
+        from creative.vision.gemini_vision import generate_vision
+
+        def generate(p: str) -> str:
+            return generate_vision(p, screenshot, "image/png")
+    else:
+        generate, _ = prompting.default_generate()
+
+    retry_suffix = (
+        "\n\nYour previous reply was rejected: it was not one strict JSON object matching "
+        "the output spec. Reply again with ONLY the JSON object."
+    )
+    try:
+        return prompting.generate_with_retry(
+            prompt,
+            retry_suffix,
+            generate,
+            lambda data: _merge_llm_sections(sections, data),
+            BriefVisionError,
+        )
+    except (BriefVisionError, OSError) as exc:
+        # Enrichment is best-effort on top of a safe heuristic floor — log, don't fail
+        # the whole extraction over a flaky model reply or network hiccup.
+        logging.getLogger(__name__).warning("brief vision pass skipped: %s", exc)
+        return sections
 
 
 # --- public entrypoint -----------------------------------------------------------------
 
 def extract_brief_sections_from_html(html: str) -> BriefSections:
-    """Pure, network-free core: HTML string -> BriefSections. Unit-testable with a fixture."""
+    """Pure, network-free core: HTML string -> BriefSections. Unit-testable with a fixture.
+
+    No LLM here by design — the free-Gemini enrichment happens in the network entrypoint
+    (`extract_brief_sections`), so this core stays deterministic.
+    """
     snapshot = build_snapshot(html)
     tokens = BrandTokens(
         colors=extract_colors(html),
         typography=extract_fonts(html),
     )
-    sections = BriefSections(
+    return BriefSections(
         snapshot=snapshot,
-        logo_notes=None,  # §2 needs vision (logo mark + assessment) — a P2/human task.
+        logo_notes=None,  # §2 needs vision (logo mark + assessment) — vision/human fills it.
         tokens=tokens,
         voice_tone=_voice_tone_note(snapshot),
         # §6-9 are human-filled; leave defaults (empty).
     )
-    return _vision_pass(sections, html)
 
 
 async def extract_brief_sections(url: str) -> BriefSections:
-    """Scrape `url` and auto-draft brief sections §1-5.
+    """Scrape `url` and auto-draft brief sections §1-5, then enrich via the free-Gemini
+    pass (which no-ops cleanly without a GEMINI_API_KEY).
 
     The URL is untrusted (tenant-supplied); `_assert_public_http_url` rejects non-public
     targets before any network call (SSRF defence).
     """
     _assert_public_http_url(url)
     html = await _fetch_html(url)
-    return extract_brief_sections_from_html(html)
+    return _vision_pass(extract_brief_sections_from_html(html), html)

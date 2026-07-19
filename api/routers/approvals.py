@@ -11,7 +11,7 @@ data layer). Magic links are minted by a team member for a specific job.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.auth import Principal, get_principal, require_role
@@ -23,7 +23,7 @@ from api.services.approval_flow import (
     ApprovalFlowError,
     submit_approval,
 )
-from mimik_contracts import Actor, ActorRole, ApprovalAction
+from mimik_contracts import Actor, ActorRole, ApprovalAction, RevisionTarget
 
 router = APIRouter(tags=["approvals"])
 
@@ -36,6 +36,9 @@ class ApprovalRequest(BaseModel):
     # reject-reason taxonomy tag on a change request (feeds the learning loop):
     # "too_busy" | "wrong_color" | "logo_small" | "tone_off" | ...
     reason_tag: str | None = None
+    # Pin-pointed change asks (REQUEST_CHANGE only): WHERE (zone/layer) + WHAT. Validated
+    # by the contract (enum zones, capped instruction); at most a handful per request.
+    targets: list[RevisionTarget] = Field(default_factory=list, max_length=10)
 
 
 class MagicApprovalRequest(BaseModel):
@@ -44,6 +47,7 @@ class MagicApprovalRequest(BaseModel):
     creative_doc_id: str | None = None
     note: str | None = None
     reason_tag: str | None = None
+    targets: list[RevisionTarget] = Field(default_factory=list, max_length=10)
 
 
 def _actor_role(role: str) -> ActorRole:
@@ -65,8 +69,21 @@ async def _latest_creative_id(
 
 
 async def _apply(
-    session: AsyncSession, *, tenant_id, job_id, creative_doc_id, actor, action, note, reason_tag
+    session: AsyncSession,
+    *,
+    tenant_id,
+    job_id,
+    creative_doc_id,
+    actor,
+    action,
+    note,
+    reason_tag,
+    targets=None,
 ):
+    if targets and action != ApprovalAction.REQUEST_CHANGE:
+        raise HTTPException(
+            status_code=422, detail="targets are only valid on a request_change action"
+        )
     try:
         return await submit_approval(
             session,
@@ -77,6 +94,7 @@ async def _apply(
             action=action,
             note=note,
             reason_tag=reason_tag,
+            targets=targets or None,
         )
     except ApprovalConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -110,6 +128,7 @@ async def create_approval(
         action=body.action,
         note=body.note,
         reason_tag=body.reason_tag,
+        targets=body.targets,
     )
 
 
@@ -162,6 +181,7 @@ async def magic_approval(
         action=body.action,
         note=body.note,
         reason_tag=body.reason_tag,
+        targets=body.targets,
     )
 
 

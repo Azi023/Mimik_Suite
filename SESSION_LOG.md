@@ -73,3 +73,129 @@ Chronological audit trail of decisions. Newest at bottom.
 - P5 gate green: claim→client→brief→mocked checkout→signed webhook activates sub→gated endpoint flips 402→200.
 - 222 tests green, ruff clean, contracts 11. Security review of the payment surface in flight.
 - All phases P0–P5 built. Optional human-gate turn-ons remain (Drive creds, real Stripe test keys, paid images) — none blocking; local/mocked backends satisfy every gate.
+
+## 2026-07-19 — Session 4 (G2G loop, evening)
+
+- Fixed stale `gpt-image-2` assertion in test_image_router (baseline back to 222 green).
+- **G1 built**: BrandAsset contract/ORM/migration `4bbd7db38ad2`/repo/mappers/router; free-Gemini
+  vision client (`creative/vision/`) + `creative_study` prompt; reference-creative ingestion →
+  fit-critic → Brand.references + preference signals; `copy_voice` golden kind with client-scoped
+  L0 few-shot; `_vision_pass` implemented (evidence-bound, degrades to heuristics).
+- **Decisions**: approved logo → data URI (set_content page can't load file:// subresources);
+  reference URL scheme `asset://<id>`; heuristic CSS hexes outrank model estimates in brief merge;
+  ingestion attach = critic-fits OR human force (verdict always audited).
+- **Security (from gate reviews)**: golden audit-header injection fixed (sanitized header fields +
+  exact-field client-scope parse; regression tests incl. prefix-collision); Gemini keys moved from
+  query string to `x-goog-api-key`; register-drive-asset now mime-allow-listed.
+- Fixed latent circular import prompting↔creative.copy (deferred import, order-independent).
+- `CreateBrand` now accepts `tokens` (was silently dropped).
+- **G2 dogfood on real Glo2Go**: fresh vision-enriched brief from the live site; 5 pillars;
+  real logo approved+wired; 4 Drive refs registered; live L0 copy on-voice; creative rendered +
+  local archive. Finding: purple logo invisible on purple ground → logo-contrast QA backlog.
+- **G3**: first eval fixture green (frozen G2G homepage snapshot). Drive archive pending operator
+  (.env values + folder share to SA); SA OAuth verified working.
+- **FE**: Conceptzilla reference (dribbble 19198544) captured at full res; web/ styled to it —
+  tokens.css, two-tier sidebar, kanban, review panel, GSAP motion; build+lint clean.
+- Suite 253 / contracts 12 / knowledge 8 tests green; ruff clean. Nothing committed yet.
+
+## 2026-07-19 — Session 4, iteration 2 (autonomous)
+
+- Logo-visibility QA check: `logo_mean_luminance` (alpha-weighted opaque pixels, data-URI only,
+  no network) + `luminance_ratio` in creative/qa/contrast.py; check #4 in run_brand_qa vs
+  WCAG 1.4.11 threshold 3.0; imagery grounds sampled under the logo zone with imgs hidden
+  (`sampled_zone_luminance` gained `hide_css`). Live-proofed on the G2G dogfood ctx: 1.04 → FAIL.
+- Regression tests: stdlib PNG encoder helper; purple-on-purple fails / white knockout passes
+  (browser-gated); non-data logo refs skip; ratio math.
+- Service-level unit tests added for wire_approved_logo + ingest_reference_creative
+  (code-reviewer gap): data-URI round-trip, fail-loud missing file, attach+signal semantics,
+  forced-attach preserves the reject verdict.
+- Suite 262 green, ruff clean. Still uncommitted (operator gate).
+
+## 2026-07-19 — Session 4, iteration 3 (autonomous)
+
+- Knockout logo derivation: creative/render/knockout.py (browser-canvas, RGB→white alpha-kept,
+  no PIL, data-URI in/out) + brand_memory.derive_knockout_logo (new UNAPPROVED asset, provenance
+  notes) + POST /assets/{id}/knockout (team; 422 non-logo, 409 no file).
+- Tests: pixel-truth browser test (purple mark → mean opaque luminance > 0.95), router test with
+  mocked seam + non-logo refusal. 264 green, ruff clean.
+- Live proof on real G2G: knockout derived → approved (auto-wired as active logo) → re-rendered
+  the polynucleotides creative → brand-QA PASSES (was 1.04 contrast fail). Full failure→fix→green
+  loop works end to end.
+- Noted: G2G brand tokens lack an accent color (CTA renders default lime) — operator to pick one.
+
+## 2026-07-19 — Session 4, iteration 4 (operator design feedback)
+
+- Operator rejected the flat-purple creative + flagged the Mimik-lime CTA leak; senior-designer
+  art-direction critique received. All three addressed:
+- creative/render/color.py: brand-derived mix/tint/shade — extra color roles DERIVE from the
+  client primary, never house defaults. assemble.py accent fallback now tint(primary) for any
+  brand with a palette (Mimik lime only for token-less dev brands).
+- NEW soft_editorial template (modeled on the real G2G IG posts): tint-gradient ground, layered
+  bottom waves (SVG), edge-bleeding badge-pill logo (logo box stays in safe zone), deep-brand
+  headline, white-on-brand subhead pill, brand CTA pill; imagery gets its own rounded window
+  (text never overlaps); column flex-centers without imagery. Per-template QA semantics added
+  (headline/CTA/logo-ground) — QA computes exactly what renders.
+- suggest_template v2: imagery-aware; placeholder path never ships a flat color plate.
+- Copy editor rules (designer feedback): display type never ends in terminal punctuation
+  (stripped in code), semicolons rejected with retry; copy_l0.md updated.
+- mimik-knowledge/rubrics/art_direction.md: distilled designer critique (2-second hierarchy,
+  grid/negative space, type pairing, imagery, brand-only color, elements, logo, CTA, benchmark).
+- G2G palette updated to source of truth (#642766 primary, #8C4F8D secondary, #F6EDF7 wash);
+  operator rejection recorded as a real preference signal (reason_tag=too_plain).
+- Leonardo.ai browser-session route: scripts/leonardo_login.py (persistent Chrome profile,
+  one-time headed login, --check probe); LEONARDO_BROWSER_PROFILE_DIR env slot; var/ gitignored.
+- 271 tests green, ruff clean. New render: QA-green soft_editorial G2G creative.
+
+## 2026-07-19 — Session 4, iteration 5 (autonomous)
+
+- soft_editorial verified on ig_story (QA green; badge clears the 250px story bar).
+- Real-post IG ingestion blocked (Instagram refuses anonymous access) → rides the Drive-share gate.
+- FE wired to the real API (agent): web/lib/api.ts (typed client, NEXT_PUBLIC_API_URL +
+  NEXT_PUBLIC_DEV_TOKEN, 3s timeouts, ApiError), web/lib/data.ts (facade, mock fallback —
+  board never blank), page.tsx → async server component (force-dynamic). Build+lint clean.
+- E2E smoke: uvicorn + next dev + real dev token → board rendered REAL G2G data (5 pillars,
+  archived polynucleotides job in Approved, review panel with real creative). Screenshot saved.
+- Known FE gaps: sidebar client list + top chip still mock; Supabase login UI pending.
+
+## 2026-07-19 — Session 4, iteration 6 (Zaid feedback: pin-pointed revisions)
+
+- Contracts: RevisionZone enum (headline|subhead|cta|logo|imagery|background|layout|other) +
+  RevisionTarget (zone, optional LayerKind, capped instruction); Approval.targets list.
+- ORM/migration 79fa3959d12f: approvals.targets JSON. Mapper included.
+- approval_flow.submit_approval accepts targets (REQUEST_CHANGE only, dropped elsewhere):
+  audit-trail persistence, ops-task detail gets "- [zone/layer] instruction" lines, and one
+  zone-tagged REJECTION preference signal per target (ranker learns WHICH areas get pushback).
+- Both approval entry points (in-portal + magic-link) accept targets; 422 on non-change actions;
+  max 10 per request.
+- Targeted re-draft seam: draft_copy(revision_note=...) fills a fenced <revision> block in
+  copy_l0 (untrusted reviewer text, tag-stripped; Do/Don't lists override it). Injection test.
+- 275 Suite + 12 contracts green, ruff clean.
+
+## 2026-07-19 — Session 4, iteration 7 (autonomous)
+
+- FE revision-pin UI landed (agent stalled once; resumed with context): ReviewPanel inline
+  composer — 7 zone chips (aria-pressed), 500-char instruction, 10-pin cap, pin cards with
+  remove, optional note, Send N pins → POST /approvals request_change with targets; Approve
+  wired too. Token-only styling, staggerFadeUp reveal, reduced-motion safe. Offline/mock mode:
+  no fetch, quiet "offline — pins not sent" note, pins kept. Build+lint clean.
+- Visual verification via headless Chromium: composer screenshot captured.
+
+## 2026-07-19 — Session 4, iteration 8 (pre-commit review gate)
+
+- Ran code-reviewer + security-reviewer on the iterations 2–7 delta. All findings fixed:
+- SECURITY (low): task-detail line forgery via newline in target instruction → instructions
+  whitespace-flattened before interpolation; regression test (line-count assertion).
+  Reviewer confirmed safe: both approval entry points identically capped; magic-link
+  401/409 behavior; revision fence; knockout mime forcing; leonardo profile gitignored;
+  React-escaped pin rendering; prior golden-poisoning fix verified landed.
+- CODE (critical 1): SoftEditorial.geometry clamped the text zone to the available span →
+  silent QA false-pass on overflowing copy. Clamp removed — the estimate stays a superset,
+  overflow breaches the bottom safe zone and QA fails loud. Regression test (fb_post long copy).
+- CODE (critical 2): trailing semicolon was stripped before the semicolon reject-check →
+  laundered past the editor rule. Check moved to the ORIGINAL text. Regression test.
+- CODE (warnings): ReviewPanel now distinguishes "error (server said NNN) — pins kept" from
+  "offline"; submit_approval raises ApprovalFlowError on targets with non-change actions
+  (was silent drop); Approval.targets capped (10) on the audited contract itself;
+  contrast.py's three function-scoped SoftEditorial imports consolidated (no cycle exists).
+- Gate: 278 Suite + 12 contracts + 8 knowledge green; ruff clean; npm build+lint clean.
+  ALL review findings resolved — the tree is commit-ready.

@@ -21,10 +21,14 @@ _FALLBACK_MODEL = "gemini-flash-latest"
 
 
 def _call(model: str, key: str, prompt: str, timeout: int) -> dict:
-    url = f"{_ENDPOINT.format(model=model)}?key={key}"
+    url = _ENDPOINT.format(model=model)
     body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
+    # Key in a header, never the query string — query strings leak into proxy/access logs.
     req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        url,
+        data=body,
+        headers={"Content-Type": "application/json", "x-goog-api-key": key},
+        method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed google host)
         return json.loads(resp.read())

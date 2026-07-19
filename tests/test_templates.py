@@ -90,3 +90,83 @@ def test_template_context_accepts_safe_ref_shapes() -> None:
     _ctx(image_ref="data:image/png;base64,aGk=")
     _ctx(image_ref="artifacts/gpt_image_ab12.png")
     _ctx(logo_ref="https://cdn.example.com/logo.png")
+
+
+# --- soft_editorial (the client-feedback template) -------------------------------------
+
+
+def test_color_utils_mix_tint_shade() -> None:
+    from creative.render.color import mix, shade, tint
+
+    assert tint("#642766", 1.0) == "#FFFFFF"
+    assert shade("#642766", 1.0) == "#000000"
+    assert mix("#000000", "#FFFFFF", 0.5) == "#808080"
+    assert tint("#642766", 0.0) == "#642766"
+    assert mix("#642766", "#FFFFFF", 2.0) == "#FFFFFF"  # t clamps
+
+
+def test_soft_editorial_registered_and_derives_from_brand_only() -> None:
+    from creative.render.templates import SoftEditorial
+
+    keys = {t["key"] for t in available_templates()}
+    assert "soft_editorial" in keys
+    ctx = _ctx(primary="#642766", accent="#C6F135")  # accent deliberately foreign
+    html = get_template("soft_editorial").render(ctx)
+    # Every rendered color derives from the brand primary; a foreign accent (another
+    # company's color) never reaches the canvas.
+    assert "#C6F135" not in html
+    pal = SoftEditorial.palette(ctx)
+    assert pal["headline"] in html and pal["pill"] in html
+
+
+@pytest.mark.parametrize("format_key", ["ig_post", "ig_story"])
+def test_soft_editorial_zones_respect_safe_area(format_key: str) -> None:
+    from mimik_contracts import get_format as _gf
+
+    ctx = _ctx(
+        format_key=format_key,
+        primary="#642766",
+        logo_ref="data:image/png;base64,aGk=",
+        subhead="Restores skin quality and elasticity naturally",
+    )
+    geo = get_template("soft_editorial").geometry(ctx)
+    fmt = _gf(format_key)
+    sz = fmt.safe_zone
+    zones = list(geo.text_zones) + ([geo.logo_zone] if geo.logo_zone else [])
+    for zone in zones:
+        assert zone.x >= sz.left
+        assert zone.y >= sz.top
+        assert zone.x + zone.w <= fmt.width - sz.right
+        assert zone.y + zone.h <= fmt.height - sz.bottom
+    assert geo.text_over_imagery is False
+
+
+def test_soft_editorial_imagery_gets_own_window_not_ground() -> None:
+    ctx = _ctx(primary="#642766", image_ref="data:image/png;base64,aGk=")
+    html = get_template("soft_editorial").render(ctx)
+    # Imagery sits in its rounded window; the ground stays the brand-tint gradient.
+    assert "linear-gradient" in html
+    assert "center/cover" in html
+    assert get_template("soft_editorial").geometry(ctx).text_over_imagery is False
+
+
+def test_soft_editorial_overflowing_copy_fails_safe_zone_loud() -> None:
+    """Review regression: the QA zone is a SUPERSET of the real content — copy that can't
+    fit the badge→wave span must breach the bottom safe zone (fail loud, route to human),
+    never be silently clamped into a false pass."""
+    from mimik_contracts import get_format as _gf
+
+    ctx = _ctx(
+        format_key="fb_post",  # short format: least vertical room
+        primary="#642766",
+        logo_ref="data:image/png;base64,aGk=",
+        image_ref="data:image/png;base64,aGk=",  # imagery window eats 40% of height
+        headline="A very long headline that wraps across several lines easily here",
+        subhead="An equally long supporting line that keeps going and going with detail "
+        "after detail so the pill wraps repeatedly",
+    )
+    geo = get_template("soft_editorial").geometry(ctx)
+    fmt = _gf("fb_post")
+    zone = geo.text_zones[0]
+    # The estimate is honest: it extends past the bottom safe boundary.
+    assert zone.y + zone.h > fmt.height - fmt.safe_zone.bottom

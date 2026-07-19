@@ -181,6 +181,8 @@ class ApprovalRow(Base):
     actor: Mapped[dict] = mapped_column(JSON, default=dict)  # {id, role, name}
     action: Mapped[str] = mapped_column(String, nullable=False)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Pin-pointed change asks: [{zone, layer, instruction}] — WHERE + WHAT, per target.
+    targets: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -270,6 +272,31 @@ class PreferenceSignalRow(Base):
     # colors, etc.) so the ranker can score future variants without re-loading each creative.
     attributes: Mapped[dict] = mapped_column(JSON, default=dict)
     actor_role: Mapped[str] = mapped_column(String, default="client")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class BrandAssetRow(Base):
+    """One stored brand file (logo | font | imagery | reference_creative). Non-destructive:
+    re-uploads create new rows; `approved` is a human-set flag. Reference creatives carry a
+    `study` JSON (vision-pass observations) once ingested — the brand's style memory."""
+
+    __tablename__ = "brand_assets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    brand_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # AssetKind values
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    mime: Mapped[str] = mapped_column(String, nullable=False)
+    local_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    drive_file_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    license: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    study: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

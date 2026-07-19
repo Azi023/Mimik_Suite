@@ -178,3 +178,59 @@ async def test_geometry_zone_contains_real_dom_text_block(
     assert rect["bottom"] <= zone.y + zone.h + tol, f"real text overflows the QA zone: {rect} vs {zone}"
     assert rect["left"] >= zone.x - tol
     assert rect["right"] <= zone.x + zone.w + tol
+
+
+# --- logo visibility (the Glo2Go dogfood lesson) --------------------------------------
+
+
+def _solid_png_data_uri(hex_color: str, size: int = 8) -> str:
+    """A real solid-color RGBA PNG as a data URI, stdlib-only (no PIL)."""
+    import base64
+    import zlib
+
+    r, g, b = (int(hex_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
+    row = b"\x00" + bytes((r, g, b, 255)) * size
+    raw = row * size
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        payload = typ + data
+        return struct.pack(">I", len(data)) + payload + struct.pack(">I", zlib.crc32(payload))
+
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
+def test_luminance_ratio_math() -> None:
+    from creative.qa.contrast import luminance_ratio
+
+    assert luminance_ratio(1.0, 0.0) == pytest.approx(21.0)
+    assert luminance_ratio(0.2, 0.2) == pytest.approx(1.0)
+    assert luminance_ratio(0.0, 1.0) == luminance_ratio(1.0, 0.0)  # order-independent
+
+
+async def test_logo_luminance_skips_non_data_refs() -> None:
+    from creative.qa.contrast import logo_mean_luminance
+
+    # External URLs would mean a network fetch inside QA — skipped, no browser needed.
+    assert await logo_mean_luminance("https://cdn.example.com/logo.png") is None
+
+
+@_browser
+async def test_purple_logo_on_purple_ground_fails_visibility() -> None:
+    # The dogfood regression: brand-primary mark on the brand-primary hero ground.
+    ctx = _ctx(primary="#8C4F8D", logo_ref=_solid_png_data_uri("#8C4F8D"))
+    report = await run_brand_qa(_fake_png(1080, 1080), ctx, "centered_hero", expect_logo=True)
+    assert any("mark-vs-ground" in f for f in report.failures), report.failures
+
+
+@_browser
+async def test_white_knockout_logo_on_purple_ground_passes_visibility() -> None:
+    ctx = _ctx(primary="#8C4F8D", logo_ref=_solid_png_data_uri("#FFFFFF"))
+    report = await run_brand_qa(_fake_png(1080, 1080), ctx, "centered_hero", expect_logo=True)
+    assert not any("mark-vs-ground" in f for f in report.failures), report.failures

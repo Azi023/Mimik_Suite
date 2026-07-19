@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     def supabase_issuer(self) -> str:
         return f"{self.supabase_url.rstrip('/')}/auth/v1" if self.supabase_url else ""
 
+    # Brand Asset Library — where uploaded brand files (logos, reference creatives) live.
+    # Local disk during the build; a bucket later is a config change, not a code change.
+    assets_local_root: str = "var/assets"
+
     # Billing (Stripe, TEST mode during the build). Empty until the operator provides test keys;
     # the billing endpoints refuse to call Stripe without them (no accidental live/charge calls).
     stripe_secret_key: str = ""

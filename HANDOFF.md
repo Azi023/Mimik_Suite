@@ -4,6 +4,88 @@
 
 ---
 
+## 2026-07-19 (evening) — G1+G2 BUILT & DOGFOODED · FE foundation styled · G3 half-done (uncommitted)
+
+**State:** Suite **253 tests green**, ruff clean; contracts 12 green (+BrandAsset); knowledge 8 green.
+Migration head `4bbd7db38ad2` (brand_assets) applied to local PG. `web/` builds + lints clean.
+ALL UNCOMMITTED — review + commit is the next human step.
+
+**G1 (done, both reviewers passed):** Asset Library end-to-end (BrandAsset contract + ORM/migration/
+repo/mappers + `/brands/{id}/assets` upload·register·list·approve + `/assets/{id}/ingest`);
+free-Gemini **vision** client + `creative_study` prompt (live smoke on the real G2G logo:
+`#8C4F8D`/`#6B6A6A`, "usable as-is"); ingestion → fit-critic → `Brand.references` + preference
+signals; copy-voice goldens (`copy_voice` kind, client-scoped few-shot into L0 via `{voice_examples}`);
+`_vision_pass` implemented (evidence-bound, no-key no-op, heuristics-win-on-tokens merge). Security
+fixes landed: golden audit-header injection (exact-field scope match + sanitized header — regression
+tests), Gemini key moved to `x-goog-api-key` header, register-path mime allow-list. Latent circular
+import (prompting↔creative.copy) fixed via deferred import.
+
+**G2 (dogfooded on real Glo2Go):** live site = source of truth. Fresh brief auto-extracted WITH live
+Gemini enrichment (real voice quote, honest logo-absent note, site css colors `#7a4d7b…`); marketing
+plan + 5 pillars in `docs/dogfood/glo2go_marketing_plan.md` (operator to confirm); real logo uploaded→
+approved→data-URI wired to `tokens.logo.ref`; 4 past Drive creatives registered by id (bytes pending SA
+read); live L0 copy in the fresh voice ("Polynucleotides: skin regeneration, not dermal filler."); one
+creative rendered + locally archived. **The 1 nudge:** purple logo invisible on purple ground — needs a
+logo-contrast QA check / knockout-logo variant (top backlog item). Dogfood script: session scratchpad
+`dogfood_g2g.py`; tenant slug `mimik` in local PG.
+
+**G3 (half):** eval fixture green (`tests/test_evals_g2g.py` + frozen homepage snapshot in
+`mimik-knowledge/evals/fixtures/`). Real Drive archive BLOCKED on operator: `.env`
+`GOOGLE_SERVICE_ACCOUNT_JSON` + `DRIVE_ROOT_FOLDER_ID` are empty (key at `secure repo/…json`, SA auth
+verified OK); archive root must be shared to `mimik-archiver@gen-lang-client-0936115045.iam.gserviceaccount.com`.
+
+**FE:** Conceptzilla dribbble 19198544 reference captured (full-res in session scratchpad + CDN url in
+`web/DESIGN_NOTES.md`); tokens.css palette/radii/shadows, two-tier sidebar, kanban cards, review panel,
+GSAP motion (reduced-motion safe). Light = flagship, dark works. Operator's extra reference images
+never reached the session — re-share if the direction should blend more than this one shot.
+
+**Iteration 2 (same evening):** logo-visibility QA check LANDED — WCAG 1.4.11 (3.0) on the mark's
+alpha-weighted opaque-pixel luminance vs its actual ground (solid + imagery paths, data-URI-only,
+browser-gated like all sampling). Live-proofed on the dogfooded G2G context: flags `1.04 < 3.0` with
+"use a knockout/light logo variant or a lighter ground" — this morning's invisible-logo creative now
+gets routed back by QA instead of shipping. Also closed the reviewer's service-test gap
+(wire_approved_logo + ingest_reference_creative unit tests). **262 tests green**, ruff clean.
+
+**Iteration 3 (same evening):** knockout-logo derivation LANDED — `creative/render/knockout.py`
+(browser-canvas, no PIL) + `derive_knockout_logo` service + `POST /assets/{id}/knockout` (new
+unapproved asset, human still gates). Live-proved the full failure→fix→green loop on real G2G:
+knockout derived → approved → re-rendered → **QA passes** (was 1.04 fail). **264 tests green.**
+Noted: G2G brand tokens lack an accent color (CTA falls back to default lime) — operator to pick.
+
+**Iteration 4 (operator design feedback):** flat-plate + Mimik-lime-leak rejection handled at the
+system level — `creative/render/color.py` (brand-derived tints/shades; accent falls back to
+tint(primary), never a house color for a brand with a palette), NEW `soft_editorial` template
+(modeled on the real G2G IG posts: tint ground, layered waves, badge-pill logo, subhead pill;
+per-template QA color semantics; flex-centered without imagery), imagery-aware `suggest_template`
+(placeholder path never ships a flat plate), display-copy editor rules enforced in code (no
+terminal punctuation, no semicolons — retry), `rubrics/art_direction.md` distilled from the
+senior-designer critique, G2G palette set to source of truth (#642766), operator rejection stored
+as a preference signal, and `scripts/leonardo_login.py` (persistent-profile Leonardo session
+bootstrap; LEONARDO_BROWSER_PROFILE_DIR; `var/` gitignored). **271 tests green.** New QA-green
+render delivered.
+
+**Iterations 5–6:** FE wired to the REAL API (web/lib/api.ts typed client + data.ts facade with
+mock fallback; board page → async server component; E2E-smoked against live uvicorn with a dev
+token — board rendered real G2G pillars/job/creative; sidebar+client chip still mock). soft_editorial
+verified on ig_story. **Pin-pointed revisions (Zaid feedback) BUILT:** RevisionZone/RevisionTarget
+contracts, approvals.targets column (migration `79fa3959d12f`), targets ride both approval entry
+points → audit trail + "- [zone/layer] instruction" ops-task lines + zone-tagged preference signals;
+draft_copy(revision_note=…) fenced re-draft seam. **275 Suite + 12 contracts green, ruff clean.**
+
+**Iterations 7–8:** FE revision-pin UI landed (ReviewPanel composer: zone chips, 10-pin cap, offline
+mode; verified via headless screenshot). Full pre-commit REVIEW GATE run on the it.2–7 delta — all
+findings fixed: SoftEditorial geometry clamp (QA false-pass) → superset honesty + regression;
+trailing-semicolon launder → reject-first; task-detail newline forgery → flattened + regression;
+ReviewPanel error≠offline states; service-level targets raise (no silent drop); contract-level
+10-target cap; import consolidation. **278 Suite + 12 contracts + 8 knowledge green; ruff + npm
+build/lint clean. TREE IS COMMIT-READY.**
+
+**Next:** operator gates (say "commit" — 3 repos, phase-tagged; Drive folder+share; Leonardo login via
+`scripts/leonardo_login.py`; paid image go) → then Leonardo generation driver, real-post style-anchor
+ingestion, FE sidebar/auth wiring.
+
+---
+
 ## 2026-07-19 — NEXT SESSION: G2G brand-memory ingestion + dogfood → read `docs/NEXT_SESSION_G2G.md`
 
 All P0–P5 built & green (222 tests, ruff clean, migrations head `b08ff128c47c`), committed on `main`
