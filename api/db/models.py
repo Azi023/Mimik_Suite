@@ -114,6 +114,11 @@ class JobRow(Base):
     approval_lead_days: Mapped[int] = mapped_column(default=3)
     assignee: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="draft")
+    # Stamped on entering GENERATING, cleared on leaving — drives the board's honest
+    # "generating since / pending delivery" state (imagery generation is human-paced).
+    generation_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

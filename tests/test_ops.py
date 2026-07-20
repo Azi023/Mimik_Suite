@@ -241,6 +241,53 @@ async def test_transition_forbidden_for_client_role(client: AsyncClient) -> None
     assert resp.status_code == 403
 
 
+async def test_generating_window_stamped_on_enter_surfaced_on_board_cleared_on_exit(
+    client: AsyncClient,
+) -> None:
+    owner, _client_id, brand_id = await _bootstrap(client)
+    job_id = await _make_job(client, owner, brand_id)  # draft -> generation_started_at is None
+
+    # draft -> generating stamps the human-paced generation window.
+    gen = await client.post(
+        f"/ops/jobs/{job_id}/transition",
+        json={"to_status": "generating"},
+        headers=_auth(owner),
+    )
+    assert gen.status_code == 200, gen.text
+    assert gen.json()["job"]["generation_started_at"] is not None
+
+    # The board surfaces it so the FE can show "generating since X" (not imply instant output).
+    board = (await client.get("/ops/board", headers=_auth(owner))).json()
+    card = next(c for c in board["columns"]["generating"] if c["job"]["id"] == job_id)
+    assert card["job"]["generation_started_at"] is not None
+
+    # generating -> internal_review closes the window.
+    done = await client.post(
+        f"/ops/jobs/{job_id}/transition",
+        json={"to_status": "internal_review"},
+        headers=_auth(owner),
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["job"]["generation_started_at"] is None
+
+
+async def test_add_creative_closes_generation_window(client: AsyncClient) -> None:
+    owner, _client_id, brand_id = await _bootstrap(client)
+    job_id = await _make_job(client, owner, brand_id)
+    await client.post(
+        f"/ops/jobs/{job_id}/transition",
+        json={"to_status": "generating"},
+        headers=_auth(owner),
+    )
+    # The first creative landing moves generating -> internal_review AND clears the window.
+    await _add_creative(client, owner, job_id)
+
+    board = (await client.get("/ops/board", headers=_auth(owner))).json()
+    card = next(c for c in board["columns"]["internal_review"] if c["job"]["id"] == job_id)
+    assert card["job"]["status"] == "internal_review"
+    assert card["job"]["generation_started_at"] is None
+
+
 async def test_transition_on_foreign_tenant_job_is_404(client: AsyncClient) -> None:
     owner_a, _client_id, brand_id = await _bootstrap(client, slug="a")
     job_a = await _make_job(client, owner_a, brand_id)
