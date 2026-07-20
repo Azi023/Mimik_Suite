@@ -547,6 +547,37 @@ export function getJobAuditTrail(jobId: string, sessionToken?: string): Promise<
 }
 
 /* ---------------------------------------------------------------------------
+   Tasks — the shared ops/portal work table.
+--------------------------------------------------------------------------- */
+
+/** GET /tasks — the tenant's tasks (a client principal is auto-confined to its own client).
+ *  Optional filters: client, job, status. */
+export function listTasks(
+  filters: { clientId?: string; jobId?: string; status?: string },
+  sessionToken?: string,
+): Promise<ApiTask[]> {
+  const q = new URLSearchParams();
+  if (filters.clientId !== undefined) q.set("client_id", filters.clientId);
+  if (filters.jobId !== undefined) q.set("job_id", filters.jobId);
+  if (filters.status !== undefined) q.set("status", filters.status);
+  const query = q.toString();
+  return apiGet<ApiTask[]>(`/tasks${query !== "" ? `?${query}` : ""}`, sessionToken);
+}
+
+/** POST /tasks/{id}/status — advance a task open -> in_progress -> done (team roles only). */
+export function advanceTaskStatus(
+  taskId: string,
+  status: string,
+  sessionToken?: string,
+): Promise<ApiTask> {
+  return apiPost<ApiTask>(
+    `/tasks/${encodeURIComponent(taskId)}/status`,
+    { status },
+    sessionToken,
+  );
+}
+
+/* ---------------------------------------------------------------------------
    Briefs — the versioned, sign-off-able brand-brief document.
 --------------------------------------------------------------------------- */
 

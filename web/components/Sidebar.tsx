@@ -30,6 +30,13 @@ interface SidebarProps {
   groups: SidebarGroup[];
 }
 
+/** Rail items that map to a real route (the rest stay un-wired placeholder buttons). */
+const NAV_ROUTES: Partial<Record<NavItem["id"], string>> = {
+  board: "/",
+  calendar: "/calendar",
+  "brand-briefs": "/briefs",
+};
+
 export function Sidebar({ groups }: SidebarProps): JSX.Element {
   const railItems = navItems.filter((item) => item.id !== "settings");
   const settings = navItems.find((item) => item.id === "settings");
@@ -42,13 +49,14 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
         </Link>
 
         <nav className="rail__nav" aria-label="Sections">
-          {railItems.map((item) =>
-            // Brand Briefs is a real route; the rest are not wired yet (plain buttons).
-            item.id === "brand-briefs" ? (
+          {railItems.map((item) => {
+            // Items with a real route render as Links; the rest are not wired yet (plain buttons).
+            const href = NAV_ROUTES[item.id];
+            return href !== undefined ? (
               <Link
                 key={item.id}
                 className="rail-btn"
-                href="/briefs"
+                href={href}
                 aria-label={item.label}
                 title={item.label}
               >
@@ -68,8 +76,11 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
                   <span className="rail-btn__badge">{item.badge}</span>
                 )}
               </button>
-            ),
-          )}
+            );
+          })}
+          <Link className="rail-btn" href="/tasks" aria-label="Tasks" title="Tasks">
+            <TasksGlyph />
+          </Link>
         </nav>
 
         <div className="rail__footer">
@@ -146,6 +157,16 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
         </Link>
       </aside>
     </div>
+  );
+}
+
+/** A small checklist glyph for the Tasks rail entry (no matching icon in ./icons). */
+function TasksGlyph(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M9 6h11M9 12h11M9 18h11" strokeLinecap="round" />
+      <path d="M4 6l1 1 1.5-2M4 12l1 1 1.5-2M4 18l1 1 1.5-2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
