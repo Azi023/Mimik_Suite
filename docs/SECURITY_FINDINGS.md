@@ -40,29 +40,37 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 
 ---
 
-## F-002 — Same IDOR class on clients / brands / ops board + calendar  ✅ FIXED
+## F-002 — Same IDOR class across clients / brands / ops / briefs / pillars  ✅ FIXED (full sweep)
 
-- **Where:** `api/routers/clients.py` (`GET /clients`, `GET /clients/{id}`), `api/routers/brands.py`
-  (`GET /brands/{id}`), `api/routers/ops.py` (`GET /ops/board`, `GET /ops/calendar`).
+- **Where:** `clients.py` (`GET /clients`, `GET /clients/{id}`), `brands.py` (`GET /brands/{id}`),
+  `ops.py` (`GET /ops/board`, `GET /ops/calendar`), `briefs.py` (`GET /briefs`, `GET /briefs/{id}`),
+  `pillars.py` (`GET /pillars`).
 - **Finding:** the **same missing client-principal confinement** as F-001, systemic across the read
   routes that weren't tasks/creatives/approvals. A `client`-role principal could:
   - `GET /clients` → **enumerate every other client in the agency incl. contact PII** (name, email,
     phone, instagram, notes) — the most sensitive of the set;
-  - `GET /clients/{id}` / `GET /brands/{id}` → read any client / brand in the tenant by id;
-  - `GET /ops/board` / `GET /ops/calendar` → enumerate **all** tenant jobs (cross-client).
+  - `GET /clients/{id}` / `GET /brands/{id}` / `GET /briefs/{id}` → read any client / brand / brief in
+    the tenant by id (brief = brand strategy, voice, guardrails);
+  - `GET /ops/board` / `GET /ops/calendar` / `GET /briefs` / `GET /pillars` → enumerate **all** tenant
+    jobs / briefs / content pillars (cross-client).
 - **Impact:** cross-**client** (within-tenant) disclosure of client PII, brand config, and job pipeline.
   Cross-tenant was never possible (tenant filter held). Note the frontend route-guard (H-001) does NOT
   mitigate this — a client could call these API routes directly; the fix is at the data layer per #2.
-- **Fix:** `<pending-commit>` — client principals are now confined on every one of these routes:
-  `list_clients` returns only the own client; `get_client` / `get_brand` 404 on another client's id;
-  `ops.board` passes `client_id=principal.client_id` for clients; `ops.calendar` filters to own jobs.
+- **Fix:** commits `11d9e58` (clients/brands/ops) + `<pillars/briefs>` — client principals are now
+  confined on every one of these routes: list endpoints force `client_id = principal.client_id`; get-by-id
+  endpoints 404 on another client's id; `ops.calendar` filters the window to own jobs.
 - **Re-verify:**
   ```
-  uv run --no-sync pytest -q tests/test_jobs.py::test_client_principal_isolation_clients_brands_board
+  uv run --no-sync pytest -q tests/test_jobs.py -k "client_principal_isolation"
   ```
-  Asserts: `/clients` list = own only, `/clients/{B}` → 404, `/brands/{B}` → 404, board shows only own
-  jobs. Manual: as a client-A account, `GET /clients` should return exactly one row (client A).
-- **Discovered:** 2026-07-21, auditing the F-001 open-items (the leak was a repeated pattern).
+  Two tests: clients-list/get + brands-get + board confined; briefs-get/list + pillars-list confined.
+  Manual: as a client-A account, `GET /clients` returns exactly one row (client A); `GET /briefs` shows
+  only A's briefs.
+- **Discovered:** 2026-07-21, auditing the F-001 open-items — the leak was a repeated pattern, so a full
+  sweep of every `Depends(get_principal)` GET route was run. **Now covered:** jobs (F-001), clients,
+  brands, ops, briefs, pillars, tasks, creatives, approvals, preferences, billing (already confined);
+  assets, invitations, admin, intake are role-gated (clients 403). Every client-data read route now
+  either confines a client principal or 403s it.
 
 ---
 
@@ -102,13 +110,14 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 ---
 
 ## Open items for a security pass (not yet done)
-- ~~GET /ops/board, GET /clients, GET /brands/{id} client-principal scoping~~ → **AUDITED + FIXED, F-002.**
-- **Sweep the remaining read routes** for the same pattern: `pillars`, `briefs`, `preferences`, `billing`,
-  `assets`, `invitations`, `admin` — confirm each either 403s clients (require_role) or confines them by
-  client_id. F-001/F-002 proved the confinement was applied inconsistently, so assume nothing. *(Not yet
-  audited — recommend a systematic pass: for every `Depends(get_principal)` GET, ask "what does a client
-  principal see?".)*
+- ~~Client-principal read scoping across jobs/clients/brands/ops/briefs/pillars~~ → **AUDITED + FIXED
+  (F-001, F-002). Full sweep done — every client-data GET now confines or 403s a client principal.**
+- **Re-audit trigger:** any NEW `Depends(get_principal)` route that returns client-scoped data MUST add
+  the confinement (or `require_role`). Consider a lint/CI check or a shared dependency to make it
+  impossible to forget (e.g. a `require_client_scope(resource.client_id)` helper).
 - **Rate-limiting** on `POST /approvals/magic` + `POST /portal/session` — a leaked/guessed token has no
   throttle today. *(Not implemented.)*
 - **Magic-link revocation** — no way to invalidate a shared link before its TTL (D-001). *(Not implemented.)*
+- **Write-route review** — this pass focused on READS. Spot-check client-principal WRITE routes (create
+  pillar/brief/job) confine `client_id` too (tasks.py does; the rest use team-role gates — confirm). *(Partial.)*
 - **2 temp login passwords** flagged for rotation (see HANDOFF).

@@ -19,7 +19,7 @@ from api.db import repo
 from api.db.mappers import to_brief
 from api.db.session import get_session
 from api.services.brief_extraction import extract_brief_sections
-from mimik_contracts import Brief, BriefSections, BriefStatus
+from mimik_contracts import ActorRole, Brief, BriefSections, BriefStatus
 
 router = APIRouter(prefix="/briefs", tags=["briefs"])
 
@@ -75,6 +75,10 @@ async def get_brief(
     row = await repo.get_brief(session, tenant_id=principal.tenant_id, brief_id=brief_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Brief not found")
+    # A client principal may only read its OWN client's brief — another client's id is a 404
+    # (bounded portal, data-layer authZ; constraint #2).
+    if principal.role == ActorRole.CLIENT.value and row.client_id != principal.client_id:
+        raise HTTPException(status_code=404, detail="Brief not found")
     return to_brief(row)
 
 
@@ -84,6 +88,10 @@ async def list_briefs(
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_session),
 ) -> list[Brief]:
+    # A client principal is confined to its own client's briefs, whatever the query asks for
+    # (bounded portal, data-layer authZ; constraint #2).
+    if principal.role == ActorRole.CLIENT.value:
+        client_id = principal.client_id
     rows = await repo.list_briefs(
         session, tenant_id=principal.tenant_id, client_id=client_id
     )

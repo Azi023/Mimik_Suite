@@ -338,3 +338,35 @@ async def test_client_principal_isolation_clients_brands_board(
     board_ids = [c["job"]["id"] for col in board["columns"].values() for c in col]
     assert a_job in board_ids
     assert all(jid == a_job for jid in board_ids), "client saw another client's jobs on the board!"
+
+
+async def test_client_principal_isolation_briefs_pillars(
+    client: AsyncClient, supabase_env, tenant_two_clients
+) -> None:
+    """Client principal must not read another client's briefs or pillars (F-002 sweep)."""
+    owner, a_cid, b_cid = tenant_two_clients
+    a_brand = await _new_brand_for(client, owner, a_cid, "ABr")
+    b_brand = await _new_brand_for(client, owner, b_cid, "BBr")
+    a_brief = (await client.post("/briefs", json={"brand_id": a_brand}, headers=_auth(owner))).json()["id"]
+    b_brief = (await client.post("/briefs", json={"brand_id": b_brand}, headers=_auth(owner))).json()["id"]
+    await client.post("/pillars", json={"client_id": a_cid, "preset_key": "promotional"}, headers=_auth(owner))
+    await client.post("/pillars", json={"client_id": b_cid, "preset_key": "promotional"}, headers=_auth(owner))
+
+    prov = await client.post(
+        "/admin/accounts",
+        json={"auth_subject": "portal-a", "role": "client", "client_id": a_cid},
+        headers=_auth(owner),
+    )
+    assert prov.status_code == 201, prov.text
+    ctoken = supabase_env("portal-a")
+
+    # briefs — own readable, B's is 404, listing confined to A.
+    assert (await client.get(f"/briefs/{a_brief}", headers=_auth(ctoken))).status_code == 200
+    assert (await client.get(f"/briefs/{b_brief}", headers=_auth(ctoken))).status_code == 404
+    briefs = (await client.get("/briefs", headers=_auth(ctoken))).json()
+    assert b_brief not in [b["id"] for b in briefs]
+    assert all(b["client_id"] == a_cid for b in briefs)
+
+    # pillars — listing (even asking for client B) only returns A's pillars.
+    pillars = (await client.get(f"/pillars?client_id={b_cid}", headers=_auth(ctoken))).json()
+    assert all(p["client_id"] == a_cid for p in pillars), "client saw another client's pillars!"

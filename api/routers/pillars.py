@@ -14,7 +14,7 @@ from api.core.auth import Principal, get_principal
 from api.db import repo
 from api.db.mappers import to_pillar
 from api.db.session import get_session
-from mimik_contracts import PILLAR_PRESETS, ContentPillar, PillarPreset, preset
+from mimik_contracts import PILLAR_PRESETS, ActorRole, ContentPillar, PillarPreset, preset
 
 router = APIRouter(prefix="/pillars", tags=["pillars"])
 
@@ -80,6 +80,10 @@ async def list_pillars(
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_session),
 ) -> list[ContentPillar]:
+    # A client principal is confined to its own client's pillars, whatever the query asks for
+    # (bounded portal, data-layer authZ; constraint #2).
+    if principal.role == ActorRole.CLIENT.value:
+        client_id = principal.client_id
     rows = await repo.list_pillars(
         session, tenant_id=principal.tenant_id, client_id=client_id
     )
