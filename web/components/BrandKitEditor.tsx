@@ -3,6 +3,7 @@
 import { useRef, useState, type CSSProperties, type JSX, type PointerEvent } from "react";
 import Link from "next/link";
 import { saveBrandKit, type KitSaveResult } from "@/app/brands/[id]/kit/actions";
+import { useAutosave, useUnsavedGuard } from "@/lib/hooks";
 import type {
   ApiBrand,
   ApiBrandLayout,
@@ -95,6 +96,8 @@ export function BrandKitEditor({ brand, clientName }: BrandKitEditorProps): JSX.
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<KitSaveResult | null>(null);
+  // Bumped on every edit → the autosave debounce resets on each change (true idle-save).
+  const [rev, setRev] = useState(0);
 
   const artRef = useRef<HTMLDivElement>(null);
   const dragIndex = useRef<number | null>(null);
@@ -106,6 +109,7 @@ export function BrandKitEditor({ brand, clientName }: BrandKitEditorProps): JSX.
   function touched(): void {
     setDirty(true);
     setResult(null);
+    setRev((r) => r + 1);
   }
 
   function setMargin(edge: keyof ApiMargins, value: number): void {
@@ -151,6 +155,10 @@ export function BrandKitEditor({ brand, clientName }: BrandKitEditorProps): JSX.
     if (res.ok) setDirty(false);
     setBusy(false);
   }
+
+  // Resilience (FRONTEND_ROADMAP §2): warn on leave with unsaved edits + debounced background save.
+  useUnsavedGuard(dirty);
+  useAutosave(onSave, dirty && !busy, rev);
 
   // --- guide dragging ---
   function onGuideDown(e: PointerEvent<HTMLDivElement>, i: number): void {

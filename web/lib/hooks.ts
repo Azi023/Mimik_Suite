@@ -74,6 +74,34 @@ export function useLocalDraft<T>(
 }
 
 /**
+ * Debounced autosave. Calls `save` once, `delayMs` after the last change, whenever `enabled` is true.
+ * `trigger` is any value that changes on every edit (a revision counter / serialized state) — it resets
+ * the debounce timer, so continuous typing coalesces into one save on idle. The save fn is held in a ref
+ * so its changing identity across renders never re-fires the effect; only `trigger`/`enabled` do.
+ *
+ * Non-destructive by design: the editors it serves PATCH a draft (brief, brand kit) and clear `dirty`
+ * on success, so a failed autosave just leaves the work dirty for the next attempt or a manual save.
+ */
+export function useAutosave(
+  save: () => Promise<void> | void,
+  enabled: boolean,
+  trigger: unknown,
+  delayMs = 1500,
+): void {
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      void saveRef.current();
+    }, delayMs);
+    return (): void => window.clearTimeout(timer);
+  }, [enabled, trigger, delayMs]);
+}
+
+/**
  * Warn before the tab closes/navigates away while `dirty` is true. The native `beforeunload`
  * prompt is the only cross-browser guarantee against losing unsaved work to an accidental
  * close; it is intentionally coarse (no custom text is honored by modern browsers).

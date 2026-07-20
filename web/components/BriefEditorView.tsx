@@ -10,6 +10,7 @@ import {
   type BriefActionResult,
 } from "@/app/briefs/actions";
 import type { ApiBrief, ApiBriefSections } from "@/lib/api";
+import { useAutosave, useUnsavedGuard } from "@/lib/hooks";
 import { CheckIcon, LockIcon } from "./icons";
 
 interface BriefEditorViewProps {
@@ -56,6 +57,8 @@ export function BriefEditorView({ brief, clientName }: BriefEditorViewProps): JS
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<BriefActionResult | null>(null);
   const [signOpen, setSignOpen] = useState(false);
+  // Bumped on every edit → the autosave debounce resets on each keystroke (true idle-save).
+  const [rev, setRev] = useState(0);
 
   // Any edit marks the form dirty and clears the last save banner.
   function edited<T>(setter: (v: T) => void): (v: T) => void {
@@ -63,6 +66,7 @@ export function BriefEditorView({ brief, clientName }: BriefEditorViewProps): JS
       setter(v);
       setDirty(true);
       setResult(null);
+      setRev((r) => r + 1);
     };
   }
 
@@ -87,6 +91,11 @@ export function BriefEditorView({ brief, clientName }: BriefEditorViewProps): JS
     if (res.ok) setDirty(false);
     setBusy(false);
   }
+
+  // Resilience (FRONTEND_ROADMAP §2): warn on leave with unsaved edits + debounced background save.
+  // A locked (signed-off) brief is immutable, so neither applies there.
+  useUnsavedGuard(dirty && !locked);
+  useAutosave(onSave, dirty && !locked && !busy, rev);
 
   async function onSignOff(signedOffBy: string): Promise<void> {
     setBusy(true);

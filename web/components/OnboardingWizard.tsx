@@ -4,6 +4,7 @@ import { useRef, useState, type JSX } from "react";
 import { useRouter } from "next/navigation";
 import { createOnboarding, type OnboardingPayload } from "@/app/onboarding/actions";
 import type { ApiPillarPreset } from "@/lib/api";
+import { useUnsavedGuard } from "@/lib/hooks";
 import { ChipsInput } from "./ChipsInput";
 import { CheckIcon } from "./icons";
 
@@ -83,6 +84,10 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
 
   const canAdvance = step > 0 || (clientName.trim() !== "" && brandName.trim() !== "");
   const isLast = step === STEPS.length - 1;
+
+  // Resilience (FRONTEND_ROADMAP §2): the wizard only persists at the end, so guard against losing a
+  // half-filled onboarding to an accidental tab-close. Dirty once the operator has started + not done.
+  useUnsavedGuard(done === null && (step > 0 || clientName.trim() !== "" || brandName.trim() !== ""));
 
   function setHandle(key: string, value: string): void {
     setHandles((h) => ({ ...h, [key]: value }));
