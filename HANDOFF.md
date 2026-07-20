@@ -38,6 +38,13 @@ review+approval (Filestage ref) — the sellable core; (3) client portal; (4) fi
 (dev-token path is read-only); 2 temp passwords to rotate; Meta portfolio for WhatsApp. `.env` confirmed
 **not in git** (only .example tracked) — safe for colleagues to clone.
 
+**Operator R&D asks (added — FRONTEND_ROADMAP.md §4b):** (a) **custom font upload** — client/us upload
+the brand's actual font file(s), multiple allowed; hook exists (`AssetKind.FONT` + assets upload),
+work = kit/onboarding UI + `@font-face` in the compositor. (b) **brand-deck ingestion** — upload/share a
+brand-guideline/portfolio deck and the intelligence layer auto-extracts palette/fonts/logo/voice/refs to
+fill the kit + brief; partial backend (extract_brief_sections, ingest_reference_creative, vision/study.py),
+work = a NEW deck-ingest path with human-review-before-apply. Next fresh session prompt: `NEXT_SESSION.md`.
+
 ---
 
 ## ► (2026-07-20 late-night, main `249959c`) — IAM increment B + Members/roles screen (Opus)

@@ -100,6 +100,23 @@ every editor. Priority: **HIGH** (cheap insurance; the editors already exist).
 
 ---
 
+## 4b. Brand-kit & intake R&D (Track A — operator asks)
+
+- **Custom font upload** — the client (or us) uploads the brand's actual font file(s); support
+  **multiple**. **Backend hook exists:** `AssetKind.FONT` is already in the enum and
+  `POST /brands/{id}/assets` accepts uploads. Work: (a) kit editor + onboarding UI to upload font
+  assets and bind them to `Typography.heading_font`/`body_font`; (b) the compositor emits `@font-face`
+  from the uploaded font asset (today `heading_font`/`body_font` are just names → generic fallback).
+  Validate mime (woff2/woff/ttf/otf) + licence field (already on `BrandAsset`).
+- **Brand-guideline / portfolio-deck ingestion** — for brands that already have branding done: upload
+  or share a **brand deck / portfolio (PDF/images/URL)** and the **intelligence layer extracts
+  everything** — palette, fonts, logo, voice/tone, dos/donts, references — to auto-populate the brand
+  kit + brief. **Partial backend:** `extract_brief_sections(url)` (URL→brief §1-5), `ingest_reference_
+  creative` (image→references via the fit-critic), and `creative/vision/study.py` already exist. Work:
+  a NEW deck-ingest path (accept PDF/multi-image/deck) that runs vision+LLM extraction → fills
+  `BrandTokens` + `BriefSections`, presented for human review before it's applied (client text is data,
+  never instructions — locked constraint #3). High-wow onboarding accelerator.
+
 ## 5. Command-center add-on backlog (Track B) — Studio Admin references
 
 Operator flagged these from `next-shadcn-admin-dashboard.vercel.app`. **Not urgent**; marked with the
