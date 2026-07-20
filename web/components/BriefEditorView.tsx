@@ -211,6 +211,9 @@ export function BriefEditorView({ brief, clientName }: BriefEditorViewProps): JS
           hint="Palette and typography — managed in the brand kit; shown here for reference."
         >
           <TokensPreview tokens={sections.tokens} />
+          <Link href={`/brands/${brief.brand_id}/kit`} className="brief-kit-link">
+            Edit in brand kit →
+          </Link>
         </Section>
 
         <Section n={5} title="Voice & tone" hint="Adjectives and short examples of how the brand speaks.">

@@ -85,11 +85,52 @@ export interface ApiReference {
   note: string | null;
 }
 
-/** mimik_contracts.brand.BrandTokens */
+/** mimik_contracts.enums.LogoPlacement — the 9-anchor grid the logo defaults to. */
+export type ApiLogoPlacement =
+  | "top_left"
+  | "top_center"
+  | "top_right"
+  | "middle_left"
+  | "center"
+  | "middle_right"
+  | "bottom_left"
+  | "bottom_center"
+  | "bottom_right";
+
+/** mimik_contracts.brand.Margins — safe-zone margins as % of the shortest edge, per edge. */
+export interface ApiMargins {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** mimik_contracts.brand.LayoutGuide — one draggable alignment guide (x = vertical, y = horizontal). */
+export interface ApiLayoutGuide {
+  axis: "x" | "y";
+  pos: number;
+}
+
+/** mimik_contracts.brand.BrandLayout — the brand's default layout rules. */
+export interface ApiBrandLayout {
+  logo_placement: ApiLogoPlacement;
+  logo_scale: number;
+  margins: ApiMargins;
+  header: boolean;
+  footer: boolean;
+  grid_columns: number;
+  grid_gutter_pct: number;
+  guides: ApiLayoutGuide[];
+  show_guides: boolean;
+}
+
+/** mimik_contracts.brand.BrandTokens. `layout` is optional on the wire — the backend fills the
+ *  default when omitted (e.g. at brand creation), so older payloads stay valid. */
 export interface ApiBrandTokens {
   colors: ApiColorRole[];
   typography: ApiTypography;
   logo: ApiLogoSpec;
+  layout?: ApiBrandLayout;
 }
 
 /** mimik_contracts.brand.Brand */
@@ -608,6 +649,15 @@ export interface CreateBrandBody {
 /** POST /brands — create a brand (with tokens + client-shared references) in one call. */
 export function createBrand(body: CreateBrandBody, sessionToken?: string): Promise<ApiBrand> {
   return apiPost<ApiBrand>("/brands", body, sessionToken);
+}
+
+/** PATCH /brands/{id} — full-replace the brand's design tokens (the brand-kit editor). */
+export function updateBrandTokens(
+  brandId: string,
+  tokens: ApiBrandTokens,
+  sessionToken?: string,
+): Promise<ApiBrand> {
+  return apiPatch<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, tokens, sessionToken);
 }
 
 export interface CreatePillarBody {
