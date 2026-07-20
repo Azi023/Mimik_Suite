@@ -4,13 +4,14 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `403cbde`) — GAPS CLOSED: magic portal + /me + route-gating + resilience → Track A ~70%
+## ► LATEST (2026-07-21, main `4b7e771`) — GAPS CLOSED + IDOR SWEEP: magic portal + /me + route-gating + resilience → Track A ~70%
 
-**366 Suite (was 359) / 18 contracts green, ruff clean, web tsc + next lint clean.** Continued the same
-day: closed the portal backend gaps, added the no-login magic flow, hardened routing, and shipped the
-resilience layer. **Track A frontend now ~70%** (was ~40%). Commits `4b8575b` (backend portal+/me+security
-log) · `6c58f59` (magic portal + route-gating) · `403cbde` (resilience). **Still LOCAL — no git remote
-configured** (`git remote -v` empty); add a remote then `git push` (≈11 local commits total).
+**368 Suite (was 359) / 18 contracts green, ruff clean, web tsc + next lint clean.** Continued the same
+day: closed the portal backend gaps, added the no-login magic flow, hardened routing, shipped the
+resilience layer, and ran a **full IDOR sweep** (6 routers fixed). **Track A frontend now ~70%** (was
+~40%). Commits `4b8575b` (backend portal+/me+security log) · `6c58f59` (magic portal + route-gating) ·
+`403cbde` (resilience) · `11d9e58` + `4b7e771` (IDOR sweep). **Still LOCAL — no git remote configured**
+(`git remote -v` empty); add a remote then `git push` (≈14 local commits total).
 
 ### What landed
 - **Magic-link no-login portal is COMPLETE.** New `POST /portal/session` (backend READ path — resolves a
@@ -25,10 +26,15 @@ configured** (`git remote -v` empty); add a remote then `git push` (≈11 local 
 - **Security log:** `docs/SECURITY_FINDINGS.md` — F-001 (IDOR, fixed), D-001 (magic-link shareable-capability
   trade-off, by design), H-001 (route-gating), + an OPEN-ITEMS audit list (⚠ below).
 
-### ⚠ Security open-items for @atheeque to re-verify (in docs/SECURITY_FINDINGS.md)
-Not yet audited (flagged, NOT fixed): **GET /ops/board**, **GET /clients**, **GET /brands/{id}** — confirm
-each confines a `client` principal (do they leak cross-client like /jobs did?). No **rate-limiting** on
-`/approvals/magic` + `/portal/session` (a leaked token has no throttle). 2 temp passwords still to rotate.
+### 🔒 Full IDOR sweep DONE (F-001 + F-002 in docs/SECURITY_FINDINGS.md) — @atheeque re-verify
+The jobs IDOR turned out to be a **systemic pattern** — the client-principal confinement was applied
+inconsistently. Swept EVERY `Depends(get_principal)` GET returning client data and fixed all leaks:
+**jobs, clients (was leaking contact PII!), brands, ops/board+calendar, briefs, pillars** now confine a
+`client` principal (or 403 via role-gate: assets/invitations/admin/intake). tasks/creatives/approvals/
+preferences/billing were already confined. Commits `a924a00`, `11d9e58`, `4b7e771`. Re-verify:
+`uv run --no-sync pytest -q tests/test_jobs.py -k "client_principal"` (5 IDOR tests).
+**Still OPEN (not fixed):** no **rate-limiting** on `/approvals/magic` + `/portal/session`; no magic-link
+**revocation**; WRITE routes only spot-checked; 2 temp passwords to rotate. See SECURITY_FINDINGS.md.
 
 ### Needs YOUR input (can't do autonomously)
 - **git remote** — none configured; give me the URL (or add it) and I'll push all local commits.
