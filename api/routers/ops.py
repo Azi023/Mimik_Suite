@@ -173,6 +173,13 @@ async def transition(
         except ApprovalFlowError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
 
+    # Track the human-paced generation window: stamp on entering GENERATING, clear on leaving,
+    # so the board can show an honest "generating since X" rather than imply instant output.
+    if target == JobStatus.GENERATING:
+        row.generation_started_at = _now()
+    elif current == JobStatus.GENERATING:
+        row.generation_started_at = None
+
     row.status = target.value
     await session.commit()
     return {"job": to_job(row)}

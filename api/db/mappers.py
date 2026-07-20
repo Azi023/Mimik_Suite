@@ -157,6 +157,7 @@ def to_job(row: JobRow) -> Job:
         approval_lead_days=row.approval_lead_days,
         assignee=row.assignee,
         status=row.status,
+        generation_started_at=_utc(row.generation_started_at),
     )
 
 

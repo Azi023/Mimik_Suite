@@ -56,6 +56,8 @@ async def create_creative(
     # First creative moves the job into internal review (ops looks before the client does).
     if job.status in (JobStatus.DRAFT.value, JobStatus.GENERATING.value):
         job.status = JobStatus.INTERNAL_REVIEW.value
+        # Generation produced output: close the human-paced generation window.
+        job.generation_started_at = None
     await session.commit()
     return to_creative_doc(row)
 
