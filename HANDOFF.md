@@ -4,6 +4,21 @@
 
 ---
 
+## ► LATEST (2026-07-20, commit `4f5f290`) — read this + `docs/NEXT_SESSION.md`
+
+**Everything is built, committed, and green** (295 Suite / 12 contracts, ruff clean). Done this
+run: G1–G3 (Drive archive verified live via user-OAuth), full FE (interactive board + sidebar +
+**Supabase login**, both owner accounts provisioned + verified), pin-point revisions, art-direction
+engine, and the **Leonardo stealth harness** (attach-to-real-Chrome via CDP + **patchright** + human
+pacing — proven live on a burner). ChatGPT confirmed drivable via the same pattern.
+
+**Next session = WhatsApp adapter** — paste-in prompt + the deferred R&D shortlist are in
+`docs/NEXT_SESSION.md`. Full detail for THIS run is in the "iteration 13 / 11" entries below.
+Open loops: change the 2 temp login passwords; ~2 days of burner volume before the main Leonardo
+account; migrate Leonardo → API when payment clears; deploy is parked (`docs/DEPLOY.md`).
+
+---
+
 ## 2026-07-19 (evening) — G1+G2 BUILT & DOGFOODED · FE foundation styled · G3 half-done (uncommitted)
 
 **State:** Suite **253 tests green**, ruff clean; contracts 12 green (+BrandAsset); knowledge 8 green.
