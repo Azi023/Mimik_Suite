@@ -7,6 +7,8 @@ interface PortalShellProps {
   title?: string;
   /** When set, a back link to the portal index. */
   back?: boolean;
+  /** No-login magic-link mode: hide sign-out + back (there is no session and no index). */
+  bare?: boolean;
 }
 
 /**
@@ -15,7 +17,7 @@ interface PortalShellProps {
  * Just a wordmark, an optional title, a back link, and sign-out. Everything the client sees is their
  * own client's data, enforced at the API data layer (client principals are confined server-side).
  */
-export function PortalShell({ children, title, back }: PortalShellProps): JSX.Element {
+export function PortalShell({ children, title, back, bare }: PortalShellProps): JSX.Element {
   return (
     <div className="portal">
       <header className="portal__bar">
@@ -25,19 +27,21 @@ export function PortalShell({ children, title, back }: PortalShellProps): JSX.El
           </span>
           <span className="portal__wordmark">Mimik · Review portal</span>
         </div>
-        <div className="portal__bar-right">
-          {back === true && (
-            <Link href="/portal" className="portal__back">
-              ← All creatives
-            </Link>
-          )}
-          {/* Logout is a POST so a prefetch/link can't sign the client out. */}
-          <form action="/api/auth/logout" method="post">
-            <button type="submit" className="btn btn--ghost btn--sm">
-              Sign out
-            </button>
-          </form>
-        </div>
+        {bare !== true && (
+          <div className="portal__bar-right">
+            {back === true && (
+              <Link href="/portal" className="portal__back">
+                ← All creatives
+              </Link>
+            )}
+            {/* Logout is a POST so a prefetch/link can't sign the client out. */}
+            <form action="/api/auth/logout" method="post">
+              <button type="submit" className="btn btn--ghost btn--sm">
+                Sign out
+              </button>
+            </form>
+          </div>
+        )}
       </header>
       {title !== undefined && <h1 className="portal__title">{title}</h1>}
       <main className="portal__content">{children}</main>

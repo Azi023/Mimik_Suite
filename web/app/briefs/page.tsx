@@ -5,6 +5,7 @@ import { BriefsListView } from "@/components/BriefsListView";
 import { type ApiBrief, type ApiClient, listBriefs, listClients } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
 
 // Briefs reflect live sign-off state — always per-request, never a build snapshot.
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export default async function BriefsPage(): Promise<JSX.Element> {
     redirect("/login");
   }
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
 
   const [sidebar, briefs, clients] = await Promise.all([
     getSidebarData(bearer),

@@ -16,6 +16,8 @@ import {
 } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
+import { mintMagicLinkAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +48,7 @@ export default async function CreativeReviewPage({
     redirect("/login");
   }
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
 
   const [sidebar, job] = await Promise.all([
     getSidebarData(bearer),
@@ -105,6 +108,7 @@ export default async function CreativeReviewPage({
         creatives={creatives}
         approvals={audit.approvals}
         deliveries={audit.deliveries}
+        mintLink={mintMagicLinkAction.bind(null, job.id)}
       />
     </AppShell>
   );

@@ -3567,6 +3567,7 @@ ul {
 .creview__decide { display: flex; flex-direction: column; gap: var(--sp-2); }
 .creview__decide .btn { width: 100%; }
 .creview__reject { display: flex; flex-direction: column; gap: var(--sp-3); }
+.creview__share { width: 100%; }
 .creview__decided {
   font-size: 13px;
   font-weight: 600;

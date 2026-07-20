@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import {
   ApiError,
   type ApprovalSubmission,
+  mintMagicLink,
   submitApproval,
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
@@ -51,5 +52,29 @@ export async function submitReviewAction(
       }
     }
     return { ok: false, error: "Could not submit your decision. Your notes are kept — try again." };
+  }
+}
+
+export interface MintLinkResult {
+  ok: boolean;
+  /** The magic-link token, on success — the caller builds the shareable /review/{token} URL. */
+  token?: string;
+  error?: string;
+}
+
+/** Mint a shareable, no-login client review link for a job (72h). Team-gated at the API. */
+export async function mintMagicLinkAction(jobId: string): Promise<MintLinkResult> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return { ok: false, error: "Your session has expired — sign in again." };
+  }
+  try {
+    const result = await mintMagicLink(jobId, 72, token);
+    return { ok: true, token: result.token };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      return { ok: false, error: "You don't have permission to share this creative." };
+    }
+    return { ok: false, error: "Could not create a share link. Try again." };
   }
 }

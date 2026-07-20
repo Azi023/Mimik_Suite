@@ -546,6 +546,65 @@ export function getJobAuditTrail(jobId: string, sessionToken?: string): Promise<
   return apiGet<JobAuditTrail>(`/jobs/${encodeURIComponent(jobId)}/approvals`, sessionToken);
 }
 
+/** GET /me — the caller's own identity (role lives in UserAccount, not the provider token). */
+export interface ApiMe {
+  tenant_id: string;
+  role: string;
+  client_id: string | null;
+  user_id: string | null;
+}
+
+/** GET /me — resolve the verified principal (for role-based route steering). */
+export function getMe(sessionToken?: string): Promise<ApiMe> {
+  return apiGet<ApiMe>("/me", sessionToken);
+}
+
+/* ---------------------------------------------------------------------------
+   Magic-link portal — no-login, single-job capability (token in the body).
+--------------------------------------------------------------------------- */
+
+/** POST /portal/session response — one job's review bundle, resolved from a magic-link grant. */
+export interface PortalBundle {
+  job: ApiJob;
+  brand: ApiBrand | null;
+  creatives: ApiCreativeDoc[];
+  approvals: ApiApproval[];
+  deliveries: ApiDelivery[];
+}
+
+/** POST /portal/session — resolve a magic-link token to its job's review bundle (no login). */
+export function getPortalSession(token: string): Promise<PortalBundle> {
+  return apiPost<PortalBundle>("/portal/session", { token });
+}
+
+/** POST /jobs/{id}/magic-link — a team member mints a shareable, single-job review grant. */
+export function mintMagicLink(
+  jobId: string,
+  ttlHours: number,
+  sessionToken?: string,
+): Promise<{ token: string; job_id: string }> {
+  return apiPost<{ token: string; job_id: string }>(
+    `/jobs/${encodeURIComponent(jobId)}/magic-link`,
+    { ttl_hours: ttlHours },
+    sessionToken,
+  );
+}
+
+/** POST /approvals/magic body — a no-login approve/request-change/comment via a magic-link grant. */
+export interface MagicApprovalSubmission {
+  token: string;
+  action: ApprovalActionKind;
+  creative_doc_id?: string;
+  note?: string;
+  reason_tag?: string;
+  targets?: ApprovalTarget[];
+}
+
+/** POST /approvals/magic — submit a decision with a magic-link token instead of a session. */
+export function submitMagicApproval(body: MagicApprovalSubmission): Promise<ApprovalResponse> {
+  return apiPost<ApprovalResponse>("/approvals/magic", body);
+}
+
 /* ---------------------------------------------------------------------------
    Tasks — the shared ops/portal work table.
 --------------------------------------------------------------------------- */

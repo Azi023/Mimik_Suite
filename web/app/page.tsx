@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { BoardView } from "@/components/BoardView";
 import { getBoardData, getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
 
 // The board reflects live job state — always render per-request, never a build-time
 // snapshot (and never let `next build` try to reach the API).
@@ -44,6 +45,7 @@ export default async function BoardPage(): Promise<JSX.Element> {
   // `?? undefined` keeps the dev-fallback path (dev token) usable when there is no
   // session but the fallback is allowed.
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
   const [{ pillars, jobs, reviewDoc }, sidebar] = await Promise.all([
     getBoardData(bearer),
     getSidebarData(bearer),

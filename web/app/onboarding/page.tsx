@@ -5,6 +5,7 @@ import { OnboardingWizard } from "@/components/OnboardingWizard";
 import { type ApiPillarPreset, listPillarPresets } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ export default async function OnboardingPage(): Promise<JSX.Element> {
     redirect("/login");
   }
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
 
   const [sidebar, presets] = await Promise.all([
     getSidebarData(bearer),

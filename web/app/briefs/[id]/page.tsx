@@ -6,6 +6,7 @@ import { BriefEditorView } from "@/components/BriefEditorView";
 import { type ApiBrief, type ApiClient, getBrief, listClients } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ export default async function BriefEditorPage({
     redirect("/login");
   }
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
 
   const [sidebar, brief, clients] = await Promise.all([
     getSidebarData(bearer),

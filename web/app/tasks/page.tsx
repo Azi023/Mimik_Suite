@@ -5,6 +5,7 @@ import { TasksView } from "@/components/TasksView";
 import { type ApiClient, type ApiTask, listClients, listTasks } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export default async function TasksPage(): Promise<JSX.Element> {
     redirect("/login");
   }
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
 
   const [sidebar, tasks, clients] = await Promise.all([
     getSidebarData(bearer),

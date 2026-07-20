@@ -6,6 +6,7 @@ import { BrandKitEditor } from "@/components/BrandKitEditor";
 import { type ApiBrand, type ApiClient, getBrand, listClients } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,7 @@ export default async function BrandKitPage({
     redirect("/login");
   }
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
 
   const [sidebar, brand, clients] = await Promise.all([
     getSidebarData(bearer),

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
+import { redirectClientToPortal } from "@/lib/guard";
 
 // Members/roles reflect live authЗ state — always per-request, never a build snapshot.
 export const dynamic = "force-dynamic";
@@ -37,6 +38,7 @@ export default async function MembersPage(): Promise<JSX.Element> {
     redirect("/login");
   }
   const bearer = sessionToken ?? undefined;
+  await redirectClientToPortal(sessionToken);
 
   // Each read degrades independently — a missing endpoint or a scoped role (403) yields an empty
   // section, never a broken page. The capabilities endpoint is newest, so guard it hardest.

@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { useLocalDraft, useUnsavedGuard } from "@/lib/hooks";
 import { submitReviewAction } from "@/app/jobs/[id]/review/actions";
+import { submitMagicApprovalAction } from "@/app/review/[token]/actions";
 
 /* ---------------------------------------------------------------------------
    Contract-bound constants.
@@ -150,6 +151,12 @@ interface CreativeReviewProps {
   /** The append-only audit trail (comments + decisions), oldest first. */
   approvals: ApiApproval[];
   deliveries: ApiDelivery[];
+  /** When set, this is the no-login magic-link flow: decisions post via the magic grant (token in
+   *  the body) instead of the session cookie. The client acts bounded to this one job. */
+  magicToken?: string;
+  /** Team-only: mint a shareable no-login client review link. When provided, a "Share with client"
+   *  control appears (internal review). Bound to the job id server-side by the caller. */
+  mintLink?: () => Promise<{ ok: boolean; token?: string; error?: string }>;
 }
 
 /**
@@ -169,9 +176,12 @@ export function CreativeReview({
   creatives,
   approvals,
   deliveries,
+  magicToken,
+  mintLink,
 }: CreativeReviewProps): JSX.Element {
   const router = useRouter();
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [shareState, setShareState] = useState<"idle" | "working" | "copied" | "error">("idle");
 
   const latestIdx = creatives.length - 1;
   const [versionIdx, setVersionIdx] = useState(latestIdx);
@@ -253,14 +263,18 @@ export function CreativeReview({
     if (doc === undefined) return false;
     setState("sending");
     setError("");
-    const result = await submitReviewAction({
-      job_id: job.id,
-      creative_doc_id: doc.id,
+    const common = {
       action,
+      creative_doc_id: doc.id,
       ...(extra.note !== undefined && extra.note !== "" ? { note: extra.note } : {}),
       ...(extra.reason_tag !== undefined ? { reason_tag: extra.reason_tag } : {}),
       ...(extra.targets !== undefined ? { targets: extra.targets } : {}),
-    });
+    };
+    // No-login magic flow posts via the grant (token in body); the in-app flow via the session cookie.
+    const result =
+      magicToken !== undefined
+        ? await submitMagicApprovalAction({ token: magicToken, ...common })
+        : await submitReviewAction({ job_id: job.id, ...common });
     if (result.ok) {
       setState("done");
       return true;
@@ -315,6 +329,26 @@ export function CreativeReview({
       setComment("");
       setBanner("Comment posted.");
       router.refresh();
+    }
+  }
+
+  async function shareLink(): Promise<void> {
+    if (mintLink === undefined || shareState === "working") return;
+    setShareState("working");
+    const result = await mintLink();
+    if (result.ok && result.token !== undefined) {
+      const url = `${window.location.origin}/review/${result.token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        setShareState("copied");
+      } catch {
+        // Clipboard blocked (permissions / insecure context) — still surface the link to copy manually.
+        setBanner(url);
+        setShareState("copied");
+      }
+    } else {
+      setShareState("error");
+      setError(result.error ?? "Could not create a share link.");
     }
   }
 
@@ -426,6 +460,21 @@ export function CreativeReview({
           <h1 className="creview__title">{job.title}</h1>
           <ReviewStatus status={job.status} />
         </header>
+
+        {mintLink !== undefined && (
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm creview__share"
+            disabled={shareState === "working"}
+            onClick={(): void => void shareLink()}
+          >
+            {shareState === "working"
+              ? "Creating link…"
+              : shareState === "copied"
+                ? "✓ Client link copied"
+                : "Share with client ↗"}
+          </button>
+        )}
 
         {/* version selector */}
         {creatives.length > 1 && (
