@@ -227,3 +227,20 @@ Chronological audit trail of decisions. Newest at bottom.
   in .env → run `uv run --no-sync python scripts/drive_oauth.py` → paste refresh token +
   ARCHIVE_BACKEND=google_drive_oauth. Then the approve→archive writes to their real Drive.
 - Rotate the 4 keys (optional, precaution).
+
+## 2026-07-20 — Session 4, iteration 11 (Supabase users + Leonardo harness LIVE)
+
+- Provisioned Supabase owners: atheequeniyas23@gmail.com + mimik.creat@gmail.com → tenant mimik
+  (Glo2Go). Verified full login chain: password grant → JWT → API authorized → Glo2Go returned.
+- Leonardo/OpenAI decision: API later (payment issue) → burner-account browser automation now.
+- Stealth harness proven LIVE on the burner: the Playwright-LAUNCHED browser ("Chrome for
+  Testing") is Cloudflare-blocked; fix = attach to the human's REAL Chrome via CDP.
+  scripts/chrome_debug.py launches real Chrome (found on Desktop, via bundle id com.google.Chrome)
+  with --remote-debugging-port=9222 + dedicated profile; user logs in (Cloudflare passes);
+  stealth_browser.connect_cdp_session attaches (owns_context=False → never closes their window);
+  LeonardoBrowserAdapter._acquire_session prefers CDP (LEONARDO_CDP_URL default :9222) → launch
+  fallback; _pick_page targets the leonardo tab (never hijacks ChatGPT). First real generation
+  succeeded — a luxury lavender skincare hero downloaded. Live-confirmed selectors: prompt box
+  get_by_placeholder(/prompt/i); Generate button role/name (.first visible+enabled); RESULT =
+  img[src*='/generations/'] (NOT the broad cdn.leonardo — that matched the static UI gradient).
+- 295 Suite + 12 contracts green, ruff clean. Migrate to Leonardo API later = adapter swap.

@@ -52,7 +52,13 @@ async def _launch(headless: bool):
 async def login() -> None:
     p, ctx = await _launch(headless=False)
     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-    await page.goto(LEONARDO_URL)
+    # Leonardo is a heavy SPA — the full "load" event can exceed 30s. Wait only for
+    # domcontentloaded (fires early) and never let a slow load abort the login: the
+    # window is open and usable regardless.
+    try:
+        await page.goto(LEONARDO_URL, wait_until="domcontentloaded", timeout=60000)
+    except Exception as exc:  # noqa: BLE001 — page kept loading; you can still log in
+        print(f"(page still finishing load — that's fine, just log in: {exc})")
     print("Sign in to Leonardo in the window (Google or email), then CLOSE the window.")
     try:
         await ctx.wait_for_event("close", timeout=15 * 60 * 1000)

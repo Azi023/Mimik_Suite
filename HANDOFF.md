@@ -72,6 +72,27 @@ contracts, approvals.targets column (migration `79fa3959d12f`), targets ride bot
 points → audit trail + "- [zone/layer] instruction" ops-task lines + zone-tagged preference signals;
 draft_copy(revision_note=…) fenced re-draft seam. **275 Suite + 12 contracts green, ruff clean.**
 
+## 2026-07-20 (iteration 11) — Supabase owners provisioned · Leonardo harness LIVE on burner
+
+**Auth end-to-end WORKS:** provisioned Supabase owners atheequeniyas23@gmail.com +
+mimik.creat@gmail.com → tenant `mimik` (Glo2Go). Verified: password login → JWT → API authorized →
+Glo2Go returned. (Temp passwords were shared in chat — operator to change.)
+
+**Leonardo automation — PROVEN LIVE (burner account):** the Cloudflare block is on the Playwright-
+*launched* "Chrome for Testing"; the fix is attaching to the human's REAL Chrome via CDP.
+`scripts/chrome_debug.py` launches real Chrome (bundle id `com.google.Chrome`, found on the Desktop)
+with `--remote-debugging-port=9222` + a dedicated profile → operator logs in (Cloudflare passes) →
+`stealth_browser.connect_cdp_session` attaches (`owns_context=False`) → `LeonardoBrowserAdapter`
+(`_acquire_session` CDP-first via `LEONARDO_CDP_URL` default :9222, launch fallback; `_pick_page`
+targets the Leonardo tab). **First real generation succeeded** — a lavender skincare hero downloaded.
+Live-confirmed selectors: prompt `get_by_placeholder(/prompt/i)`, Generate `role/name .first`, RESULT
+`img[src*='/generations/']`. Flow: `chrome_debug.py` (log in, leave open) → `leonardo_generate.py "…"`.
+Migrate to Leonardo API later = adapter swap (payment issue defers it). 295 Suite + 12 contracts green.
+
+**Everything committed** through the Drive OAuth + FE + auth work; committing the Leonardo harness now.
+
+---
+
 ## 2026-07-20 (iteration 10) — G3 DONE (Drive verified) · FE auth built · committing
 
 **G3 CLOSED — verified live:** a real creative uploaded to Drive via OAuth →
