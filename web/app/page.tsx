@@ -50,7 +50,7 @@ export default async function BoardPage(): Promise<JSX.Element> {
   ]);
 
   return (
-    <AppShell sidebar={sidebar}>
+    <AppShell sidebar={sidebar} title="Board" crumb="This week · approvals">
       <BoardView pillars={pillars} jobs={jobs} reviewDoc={reviewDoc} />
     </AppShell>
   );

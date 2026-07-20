@@ -45,7 +45,7 @@ export default async function BriefEditorPage({
 
   if (brief === null) {
     return (
-      <AppShell sidebar={sidebar}>
+      <AppShell sidebar={sidebar} title="Brand brief">
         <div className="brief">
           <div className="empty-state">
             <p className="empty-state__title">Brief not found</p>
@@ -64,7 +64,7 @@ export default async function BriefEditorPage({
   const clientName = clients.find((c) => c.id === brief.client_id)?.name ?? null;
 
   return (
-    <AppShell sidebar={sidebar}>
+    <AppShell sidebar={sidebar} title="Brand brief">
       <BriefEditorView brief={brief} clientName={clientName} />
     </AppShell>
   );

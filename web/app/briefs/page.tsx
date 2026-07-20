@@ -42,7 +42,7 @@ export default async function BriefsPage(): Promise<JSX.Element> {
   }
 
   return (
-    <AppShell sidebar={sidebar}>
+    <AppShell sidebar={sidebar} title="Brand briefs">
       <BriefsListView briefs={briefs} clientNames={clientNames} />
     </AppShell>
   );

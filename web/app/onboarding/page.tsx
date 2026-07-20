@@ -36,7 +36,7 @@ export default async function OnboardingPage(): Promise<JSX.Element> {
   ]);
 
   return (
-    <AppShell sidebar={sidebar}>
+    <AppShell sidebar={sidebar} title="Onboarding a client">
       <OnboardingWizard presets={presets} />
     </AppShell>
   );

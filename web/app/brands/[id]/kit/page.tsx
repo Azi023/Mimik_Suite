@@ -44,7 +44,7 @@ export default async function BrandKitPage({
 
   if (brand === null) {
     return (
-      <AppShell sidebar={sidebar}>
+      <AppShell sidebar={sidebar} title="Brand kit">
         <div className="kit">
           <div className="empty-state">
             <p className="empty-state__title">Brand not found</p>
@@ -63,7 +63,7 @@ export default async function BrandKitPage({
   const clientName = clients.find((c) => c.id === brand.client_id)?.name ?? null;
 
   return (
-    <AppShell sidebar={sidebar}>
+    <AppShell sidebar={sidebar} title="Brand kit">
       <BrandKitEditor brand={brand} clientName={clientName} />
     </AppShell>
   );

@@ -48,7 +48,7 @@ export default async function MembersPage(): Promise<JSX.Element> {
   ]);
 
   return (
-    <AppShell sidebar={sidebar}>
+    <AppShell sidebar={sidebar} title="Members & roles">
       <MembersView accounts={accounts} invitations={invitations} capabilities={capabilities} />
     </AppShell>
   );

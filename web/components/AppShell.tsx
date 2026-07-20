@@ -7,6 +7,10 @@ interface AppShellProps {
   children: ReactNode;
   /** Sidebar client groups + active-client chip (live API or mock — see lib/data). */
   sidebar: SidebarData;
+  /** Top-bar page title (defaults to the board). */
+  title?: string;
+  /** Optional secondary crumb next to the title. */
+  crumb?: string;
 }
 
 /**
@@ -14,12 +18,12 @@ interface AppShellProps {
  * On mobile the sidebar collapses (see globals.css) and the TopBar hamburger
  * stands in for it.
  */
-export function AppShell({ children, sidebar }: AppShellProps): JSX.Element {
+export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JSX.Element {
   return (
     <div className="app-shell">
       <Sidebar groups={sidebar.groups} />
       <div className="app-main">
-        <TopBar activeClient={sidebar.activeClient} />
+        <TopBar activeClient={sidebar.activeClient} title={title} crumb={crumb} />
         <main className="app-content">{children}</main>
       </div>
     </div>

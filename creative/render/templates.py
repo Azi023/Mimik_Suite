@@ -17,7 +17,7 @@ from html import escape
 
 from pydantic import BaseModel, Field, field_validator
 
-from mimik_contracts import get_format, validate_asset_ref
+from mimik_contracts import BrandLayout, LogoPlacement, get_format, validate_asset_ref
 
 from creative.render.color import shade, tint
 
@@ -39,6 +39,10 @@ class TemplateContext(BaseModel):
     logo_ref: str | None = None   # asset reference / data-URI for the approved logo
     image_ref: str | None = None  # the L1/L2 imagery artifact / data-URI
     scrim: bool = False
+    # The brand's default layout (logo placement/size, safe-zone margins, ...). When present it
+    # drives logo anchoring/size and raises the safe-zone floor; when None the templates keep
+    # their built-in defaults, so pre-layout callers render exactly as before.
+    layout: BrandLayout | None = None
 
     # Both refs are interpolated into CSS url('...') / HTML src="..." below; html.escape
     # cannot protect the CSS string context, so the render sink re-validates their shape
@@ -80,7 +84,23 @@ def _edge_pads(ctx: TemplateContext, frac: float) -> tuple[int, int, int, int]:
     fmt = get_format(ctx.format_key)
     base = _base_pad(fmt.width, fmt.height, frac)
     sz = fmt.safe_zone
-    return max(base, sz.top), max(base, sz.right), max(base, sz.bottom), max(base, sz.left)
+    top, right, bottom, left = (
+        max(base, sz.top),
+        max(base, sz.right),
+        max(base, sz.bottom),
+        max(base, sz.left),
+    )
+    # A brand's safe-zone margins (% of the shortest edge) raise the floor — never below the
+    # platform safe zone, but the brand can demand more breathing room.
+    layout = ctx.layout
+    if layout is not None:
+        short = min(fmt.width, fmt.height)
+        m = layout.margins
+        top = max(top, round(m.top / 100 * short))
+        right = max(right, round(m.right / 100 * short))
+        bottom = max(bottom, round(m.bottom / 100 * short))
+        left = max(left, round(m.left / 100 * short))
+    return top, right, bottom, left
 
 
 # Conservative width assumed for a horizontal logo lockup (height × this factor); the actual
@@ -88,19 +108,61 @@ def _edge_pads(ctx: TemplateContext, frac: float) -> tuple[int, int, int, int]:
 _LOGO_WIDTH_FACTOR = 3
 
 
-def _logo(ctx: TemplateContext, top: int, left: int, height: int) -> str:
+def _resolve_logo(ctx: TemplateContext, top: int, left: int, height: int) -> tuple[int, int, int] | None:
+    """Final (top, left, height) for the logo. With a BrandLayout, the logo is sized by
+    `logo_scale` (fraction of the short edge) and anchored to `logo_placement` inside the brand's
+    margins; without one it keeps the template's passed-in default (legacy behaviour)."""
     if not ctx.logo_ref:
+        return None
+    layout = ctx.layout
+    if layout is None:
+        return top, left, height
+
+    w, h = ctx.size()
+    short = min(w, h)
+    lh = max(1, round(layout.logo_scale * short))
+    lw = lh * _LOGO_WIDTH_FACTOR
+    m = layout.margins
+    m_top = round(m.top / 100 * short)
+    m_right = round(m.right / 100 * short)
+    m_bottom = round(m.bottom / 100 * short)
+    m_left = round(m.left / 100 * short)
+    place = layout.logo_placement
+
+    if place in (LogoPlacement.TOP_LEFT, LogoPlacement.MIDDLE_LEFT, LogoPlacement.BOTTOM_LEFT):
+        lx = m_left
+    elif place in (LogoPlacement.TOP_RIGHT, LogoPlacement.MIDDLE_RIGHT, LogoPlacement.BOTTOM_RIGHT):
+        lx = max(m_left, w - m_right - lw)
+    else:
+        lx = round((w - lw) / 2)
+
+    if place in (LogoPlacement.TOP_LEFT, LogoPlacement.TOP_CENTER, LogoPlacement.TOP_RIGHT):
+        ly = m_top
+    elif place in (LogoPlacement.BOTTOM_LEFT, LogoPlacement.BOTTOM_CENTER, LogoPlacement.BOTTOM_RIGHT):
+        ly = max(m_top, h - m_bottom - lh)
+    else:
+        ly = round((h - lh) / 2)
+
+    return ly, lx, lh
+
+
+def _logo(ctx: TemplateContext, top: int, left: int, height: int) -> str:
+    resolved = _resolve_logo(ctx, top, left, height)
+    if resolved is None:
         return ""
+    ly, lx, lh = resolved
     return (
         f'<img src="{escape(ctx.logo_ref, quote=True)}" alt="" '
-        f'style="position:absolute;top:{top}px;left:{left}px;height:{height}px;width:auto" />'
+        f'style="position:absolute;top:{ly}px;left:{lx}px;height:{lh}px;width:auto" />'
     )
 
 
 def _logo_zone(ctx: TemplateContext, top: int, left: int, height: int) -> ZoneRect | None:
-    if not ctx.logo_ref:
+    resolved = _resolve_logo(ctx, top, left, height)
+    if resolved is None:
         return None
-    return ZoneRect(x=left, y=top, w=height * _LOGO_WIDTH_FACTOR, h=height)
+    ly, lx, lh = resolved
+    return ZoneRect(x=lx, y=ly, w=lh * _LOGO_WIDTH_FACTOR, h=lh)
 
 
 def _cta(label: str, bg: str, fg: str, font: str, size: int) -> str:

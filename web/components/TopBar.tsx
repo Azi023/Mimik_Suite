@@ -16,9 +16,13 @@ const MAX_AVATARS = 4;
  */
 interface TopBarProps {
   activeClient: Client;
+  /** Page title in the bar. Defaults to the board. */
+  title?: string;
+  /** Secondary crumb next to the title (omitted when not given). */
+  crumb?: string;
 }
 
-export function TopBar({ activeClient }: TopBarProps): JSX.Element {
+export function TopBar({ activeClient, title = "Board", crumb }: TopBarProps): JSX.Element {
   const visible = team.slice(0, MAX_AVATARS);
   const overflow = team.length - visible.length;
 
@@ -34,8 +38,8 @@ export function TopBar({ activeClient }: TopBarProps): JSX.Element {
 
       <div className="topbar__heading">
         <span className="topbar__glyph" aria-hidden="true" />
-        <h1 className="topbar__title">Board</h1>
-        <span className="topbar__crumb">This week · approvals</span>
+        <h1 className="topbar__title">{title}</h1>
+        {crumb !== undefined && <span className="topbar__crumb">{crumb}</span>}
       </div>
 
       <div className="topbar__spacer" />

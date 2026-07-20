@@ -170,3 +170,55 @@ def test_soft_editorial_overflowing_copy_fails_safe_zone_loud() -> None:
     zone = geo.text_zones[0]
     # The estimate is honest: it extends past the bottom safe boundary.
     assert zone.y + zone.h > fmt.height - fmt.safe_zone.bottom
+
+
+def test_brand_layout_anchors_and_sizes_logo() -> None:
+    """A BrandLayout drives the logo to its anchor at the requested size; the geometry the QA
+    reasons about matches the rendered position."""
+    from mimik_contracts import BrandLayout, LogoPlacement
+
+    layout = BrandLayout(
+        logo_placement=LogoPlacement.BOTTOM_RIGHT,
+        logo_scale=0.2,
+        margins={"top": 5, "right": 5, "bottom": 5, "left": 5},
+    )
+    ctx = _ctx(layout=layout)
+    tmpl = get_template("centered_hero")
+    geom = tmpl.geometry(ctx)
+    assert geom.logo_zone is not None
+
+    w, h = ctx.size()
+    short = min(w, h)
+    lh = round(0.2 * short)
+    margin = round(0.05 * short)
+    # Bottom-right: the logo box hugs the bottom-right inside the 5% margins.
+    assert geom.logo_zone.h == lh
+    assert geom.logo_zone.y == h - margin - lh
+    assert geom.logo_zone.x == w - margin - geom.logo_zone.w
+    # And the rendered HTML places it at the same spot.
+    html = tmpl.render(ctx)
+    assert f"top:{h - margin - lh}px" in html
+
+
+def test_brand_margins_raise_padding_floor() -> None:
+    """Brand margins never drop below the platform safe zone but can demand more room."""
+    from mimik_contracts import BrandLayout
+
+    from creative.render.templates import _edge_pads
+
+    wide = BrandLayout(margins={"top": 20, "right": 20, "bottom": 20, "left": 20})
+    ctx = _ctx(layout=wide)
+    top, right, bottom, left = _edge_pads(ctx, 0.05)
+    w, h = ctx.size()
+    expected = round(0.20 * min(w, h))
+    assert top == expected and left == expected  # 20% dominates the 5% house pad
+
+
+def test_no_layout_keeps_legacy_logo_position() -> None:
+    """Without a BrandLayout the logo stays exactly where the template placed it (no regression)."""
+    ctx = _ctx()  # layout is None
+    tmpl = get_template("centered_hero")
+    geom = tmpl.geometry(ctx)
+    assert geom.logo_zone is not None
+    # Legacy default anchors the logo at the template's own top/left pad, not the canvas edges.
+    assert geom.logo_zone.x > 0 and geom.logo_zone.y > 0
