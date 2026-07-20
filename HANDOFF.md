@@ -4,7 +4,32 @@
 
 ---
 
-## ► LATEST (2026-07-20 evening, main `d8065e9`) — WhatsApp+generating+ChatGPT MERGED; COMPLETENESS ASSESSED
+## ► LATEST (2026-07-20 night, main `55c0eae`) — super_admin gate SHIPPED; IAM designed; WhatsApp+generating+ChatGPT merged
+
+**Since the entry below (all on `main`, 319 Suite / 12 contracts green, ruff clean):**
+- **✅ CRITICAL FIX SHIPPED** — `POST /tenants` is now gated to a new `super_admin` role (was
+  unauthenticated). Supabase emails on `SUPERADMIN_EMAILS` are elevated to super_admin (identity
+  still fully verified; only role raised); first-party super_admin tokens work for ops/CI. All 20
+  test bootstrap call sites updated via a `superadmin_headers()` conftest helper (`pythonpath=tests`);
+  new `test_tenants.py` (anon→401/403, owner→403, super→201). Commit `55c0eae` (+ contracts `9452a7d`).
+  This was **increment 1** of the IAM plan.
+- **IAM / admin-panel DESIGNED + decided** → `docs/IAM_DESIGN.md`. User picked **role × scope now,
+  per-user custom permissions possible later** (don't over-build). Model: roles {super_admin, owner,
+  admin(NEW), ops/designer, client} × scope (all-clients / assigned). Invitations ship first as a
+  **copyable accept link** (no email dep); real invite emails reuse the deferred M365 Graph EMAIL sink.
+  **Remaining IAM increments (NOT built):** B = `require_capability` + capability matrix + user↔clients
+  scope; C = `Invitation` model + create/accept/revoke/resend endpoints. Admin-panel UI = reference+Fable.
+- **Design workflow set** → `docs/DESIGN_REFERENCES.md` (north-star + per-page analog table; Mobbin/Refero;
+  build screens on **Fable** subagents, not Opus). User is gathering references. Start screen: brand-brief or members.
+- **Dummy data — corrected understanding:** the visible fake clients are the **frontend mock-fallback**
+  (`web/lib/data.ts` lines 347/380 fall back to mock when a tenant is EMPTY, plus when `!isApiConfigured`).
+  Removing it needs real **empty states** → **deferred to the frontend build** (ripping it out raw makes
+  empty tenants look broken). DB truth: `mimik`/Glo2Go + 2 owner accounts = REAL; `mimik-smoke`/`other-smoke`
+  = harmless isolated test tenants (leave them).
+
+---
+
+## ► (earlier same session, 2026-07-20 evening, main `d8065e9`) — WhatsApp+generating+ChatGPT MERGED; COMPLETENESS ASSESSED
 
 **All this session's work is merged to `main` and green: 316 Suite / 12 contracts, ruff clean.**
 Three features shipped behind existing seams (each was its own branch, now merged into `main`):
