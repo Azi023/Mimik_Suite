@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.db import repo
 from api.db.session import get_session
 
+from .capabilities import Capability, has_capability
 from .config import get_settings
 from .security import decode_access_token
 from .supabase_auth import SupabaseAuthError, verify_supabase_jwt
@@ -41,6 +42,10 @@ class Principal(BaseModel):
     user_id: str | None = None      # our UserAccount id (Supabase path only)
     client_id: str | None = None    # set only for the bounded client-portal principal
     auth_subject: str | None = None  # Supabase `sub` (Supabase path only)
+    # For internal roles: client_ids this principal is restricted to. Empty = ALL clients in
+    # the tenant (the default, current behavior). Provided as a threaded field only in this
+    # increment — no existing query route filters on it yet.
+    client_scopes: list[str] = []
 
 
 def _looks_like_supabase(token: str) -> bool:
@@ -90,6 +95,7 @@ async def get_principal(
             user_id=account.id,
             client_id=account.client_id,
             auth_subject=subject,
+            client_scopes=account.client_scopes or [],
         )
 
     # First-party bootstrap token.
@@ -116,3 +122,43 @@ def require_role(*roles: str):
         return principal
 
     return _guard
+
+
+def require_capability(*caps: Capability):
+    """Dependency factory (mirrors `require_role`): 403 unless the principal's ROLE grants
+    ALL of `caps`. "Has all" is the chosen semantics — a guard names every capability an
+    endpoint needs and the principal must hold every one. Purely additive: no existing route
+    is switched to it in this increment."""
+    required = tuple(caps)
+
+    async def _guard(principal: Principal = Depends(get_principal)) -> Principal:
+        if not all(has_capability(principal.role, cap) for cap in required):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Requires capabilities {sorted(c.value for c in required)}",
+            )
+        return principal
+
+    return _guard
+
+
+def principal_client_ids(principal: Principal) -> list[str] | None:
+    """The client_ids this principal is restricted to, or None for 'all clients in tenant'.
+
+    - A `client`-role principal is hard-scoped to its single bound client_id.
+    - An internal principal with non-empty client_scopes is limited to those.
+    - An internal principal with empty client_scopes sees ALL clients (returns None)."""
+    if principal.client_id is not None:
+        return [principal.client_id]
+    if principal.client_scopes:
+        return list(principal.client_scopes)
+    return None
+
+
+def is_client_in_scope(principal: Principal, client_id: str) -> bool:
+    """True if `client_id` is visible to `principal`: empty scope = all clients; a non-empty
+    scope restricts; a client-role principal is in-scope only for its own bound client."""
+    allowed = principal_client_ids(principal)
+    if allowed is None:
+        return True
+    return client_id in allowed

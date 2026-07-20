@@ -152,6 +152,9 @@ class UserAccountRow(Base):
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     role: Mapped[str] = mapped_column(String, nullable=False)
     client_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    # For internal roles: client_ids this user is restricted to. Empty list = ALL clients in
+    # the tenant (default, current behavior); non-empty = an assigned subset.
+    client_scopes: Mapped[list] = mapped_column(JSON, default=list)
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

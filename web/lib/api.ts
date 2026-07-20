@@ -430,3 +430,82 @@ export function submitApproval(
 ): Promise<ApprovalResponse> {
   return apiPost<ApprovalResponse>("/approvals", body, sessionToken);
 }
+
+/* ---------------------------------------------------------------------------
+   Members / roles / invitations (the admin panel).
+--------------------------------------------------------------------------- */
+
+/** A provisioned team/client account (GET /admin/accounts). `client_scopes` is empty = all
+ *  clients in the tenant; non-empty restricts an internal user to those client ids. */
+export interface ApiUserAccount {
+  id: string;
+  tenant_id: string;
+  auth_subject: string;
+  email: string | null;
+  role: string;
+  client_id: string | null;
+  client_scopes?: string[];
+  name: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export type ApiInvitationStatus = "pending" | "accepted" | "revoked" | "expired";
+
+/** A pending/consumed invite (GET /invitations). */
+export interface ApiInvitation {
+  id: string;
+  tenant_id: string;
+  email: string;
+  role: string;
+  client_scopes: string[];
+  status: ApiInvitationStatus;
+  invited_by: string | null;
+  expires_at: string | null;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+/** POST /invitations response — the invite row plus the copyable accept link. */
+export interface ApiInvitationCreated {
+  invitation: ApiInvitation;
+  accept_url: string;
+}
+
+/** GET /admin/capabilities — role -> the capabilities that role holds. */
+export type ApiCapabilityMatrix = Record<string, string[]>;
+
+/** GET /admin/accounts — every account in the caller's tenant. */
+export function listAccounts(sessionToken?: string): Promise<ApiUserAccount[]> {
+  return apiGet<ApiUserAccount[]>("/admin/accounts", sessionToken);
+}
+
+/** GET /invitations — the tenant's invitations (any status). */
+export function listInvitations(sessionToken?: string): Promise<ApiInvitation[]> {
+  return apiGet<ApiInvitation[]>("/invitations", sessionToken);
+}
+
+/** GET /admin/capabilities — the role -> capability matrix (for the "what each role can do" panel). */
+export function getCapabilityMatrix(sessionToken?: string): Promise<ApiCapabilityMatrix> {
+  return apiGet<ApiCapabilityMatrix>("/admin/capabilities", sessionToken);
+}
+
+/** POST /invitations — invite by email; returns the copyable accept link. */
+export function createInvitation(
+  body: { email: string; role: string; client_scopes?: string[] },
+  sessionToken?: string,
+): Promise<ApiInvitationCreated> {
+  return apiPost<ApiInvitationCreated>("/invitations", body, sessionToken);
+}
+
+/** POST /invitations/{id}/revoke — revoke a pending invite. */
+export function revokeInvitation(
+  invitationId: string,
+  sessionToken?: string,
+): Promise<ApiInvitation> {
+  return apiPost<ApiInvitation>(
+    `/invitations/${encodeURIComponent(invitationId)}/revoke`,
+    {},
+    sessionToken,
+  );
+}

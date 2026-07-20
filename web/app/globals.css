@@ -1474,3 +1474,357 @@ ul {
   background: var(--surface);
   border-color: var(--ink);
 }
+
+/* ---------------------------------------------------------------------------
+   Members / roles — the admin panel (shadcn "Roles & Permissions" reference).
+   Token-driven; data-dense tables with role pills + status dots.
+--------------------------------------------------------------------------- */
+.members {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-6);
+  max-width: 980px;
+}
+
+.members__title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.members__sub {
+  margin-top: var(--sp-1);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.members__tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--line);
+}
+
+.members-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 10px var(--sp-3);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.members-tab:hover {
+  color: var(--ink-2);
+}
+
+.members-tab--active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.members-tab__count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* --- data table --- */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table thead th {
+  text-align: left;
+  padding: 10px var(--sp-4);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.data-table tbody td {
+  padding: 12px var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  vertical-align: middle;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+  background: var(--surface-3);
+}
+
+.cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cell-strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.cell-muted {
+  color: var(--muted);
+}
+
+.cell-error {
+  color: var(--dot-new);
+  font-weight: 500;
+}
+
+.cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* --- role pills (mono base, subtle per-role tint) --- */
+.role-pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: var(--r-full);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+
+.role-pill--super_admin,
+.role-pill--owner {
+  background: var(--ink);
+  color: var(--surface);
+  border-color: var(--ink);
+}
+
+.role-pill--admin {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  border-color: transparent;
+}
+
+.role-pill--client {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+/* --- capability chips --- */
+.cap-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.cap-chip {
+  padding: 3px 8px;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* --- status dot --- */
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.status-dot::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--faint);
+}
+
+.status-dot--on::before {
+  background: var(--dot-done);
+}
+
+.status-dot--off::before {
+  background: var(--faint);
+}
+
+.status-dot--pending::before {
+  background: var(--dot-progress);
+}
+
+/* --- invite form --- */
+.invites {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.invite-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.invite-form__row {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.input {
+  padding: 9px var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.input:focus {
+  background: var(--surface);
+  border-color: var(--ink);
+}
+
+.invite-form__row .input[type="email"] {
+  flex: 1 1 220px;
+}
+
+.select {
+  cursor: pointer;
+}
+
+.btn-primary {
+  padding: 9px var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btn-primary:hover {
+  opacity: 0.88;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-ghost {
+  padding: 6px var(--sp-3);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  transition: background 0.15s ease;
+}
+
+.btn-ghost:hover {
+  background: var(--surface-2);
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.invite-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.invite-result__note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.invite-result__link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.invite-result__link code {
+  flex: 1;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.invite-result__error {
+  font-size: 13px;
+  color: var(--dot-new);
+  font-weight: 500;
+}
+
+/* --- empty state --- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) var(--sp-6);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+
+.empty-state__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.empty-state__body {
+  font-size: 13px;
+  color: var(--muted);
+}

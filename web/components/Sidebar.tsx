@@ -61,14 +61,9 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
 
         <div className="rail__footer">
           {settings && (
-            <button
-              type="button"
-              className="rail-btn"
-              aria-label={settings.label}
-              title={settings.label}
-            >
+            <Link className="rail-btn" href="/members" aria-label="Members & roles" title="Members & roles">
               <SettingsIcon />
-            </button>
+            </Link>
           )}
           {/* Logout is a POST so a prefetch/link can't sign the user out. */}
           <form action="/api/auth/logout" method="post">

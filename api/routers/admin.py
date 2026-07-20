@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.auth import Principal, require_role
+from api.core.capabilities import capabilities_matrix
 from api.db import repo
 from api.db.mappers import to_user_account
 from api.db.session import get_session
@@ -84,3 +85,12 @@ async def list_accounts(
 ) -> list[UserAccount]:
     rows = await repo.list_user_accounts(session, tenant_id=principal.tenant_id)
     return [to_user_account(r) for r in rows]
+
+
+@router.get("/capabilities")
+async def get_capabilities(
+    principal: Principal = Depends(require_role("owner", "admin", "super_admin")),
+) -> dict[str, list[str]]:
+    """The role -> capabilities matrix, so the admin Roles & Permissions screen can render
+    'what each role can do'. Read-only, static (derived from the code matrix)."""
+    return capabilities_matrix()

@@ -145,6 +145,44 @@ async def test_accept_provisions_account_with_role(client: AsyncClient, supabase
     assert again.status_code == 409
 
 
+async def test_accept_copies_client_scopes_onto_account(
+    client: AsyncClient, supabase_env  # noqa: F811
+) -> None:
+    tid, owner = await _tenant_owner(client)
+    # Invite a designer restricted to two specific clients.
+    created = (
+        await _invite(
+            client, owner, "invitee@example.com", role="designer", client_scopes=["c1", "c2"]
+        )
+    ).json()
+    assert created["invitation"]["client_scopes"] == ["c1", "c2"]
+    token = _token_from_url(created["accept_url"])
+
+    invitee = supabase_env("invitee")
+    resp = await client.post("/invitations/accept", json={"token": token}, headers=_auth(invitee))
+    assert resp.status_code == 201, resp.text
+    # The provisioned account carries the invite's scopes (via the UserAccount contract).
+    assert resp.json()["client_scopes"] == ["c1", "c2"]
+
+    # And the account is listed with those scopes for the admin UI.
+    listed = await client.get("/admin/accounts", headers=_auth(owner))
+    accounts = {a["auth_subject"]: a for a in listed.json()}
+    assert accounts["invitee"]["client_scopes"] == ["c1", "c2"]
+
+
+async def test_accept_default_scope_is_all_clients(
+    client: AsyncClient, supabase_env  # noqa: F811
+) -> None:
+    _tid, owner = await _tenant_owner(client)
+    created = (await _invite(client, owner, "invitee@example.com", role="ops")).json()
+    token = _token_from_url(created["accept_url"])
+    invitee = supabase_env("invitee")
+    resp = await client.post("/invitations/accept", json={"token": token}, headers=_auth(invitee))
+    assert resp.status_code == 201, resp.text
+    # No scopes on the invite -> empty list on the account == ALL clients (current behavior).
+    assert resp.json()["client_scopes"] == []
+
+
 async def test_accept_email_mismatch_forbidden(client: AsyncClient, supabase_env) -> None:  # noqa: F811
     _tid, owner = await _tenant_owner(client)
     created = (await _invite(client, owner, "someone-else@example.com")).json()

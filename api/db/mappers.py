@@ -172,6 +172,7 @@ def to_user_account(row: UserAccountRow) -> UserAccount:
         email=row.email,
         role=row.role,
         client_id=row.client_id,
+        client_scopes=row.client_scopes or [],
         name=row.name,
         active=row.active,
     )

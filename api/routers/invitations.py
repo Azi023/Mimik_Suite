@@ -225,15 +225,14 @@ async def accept_invitation(
     if existing is not None:
         raise HTTPException(status_code=409, detail="This identity already has an account")
 
-    # NOTE: UserAccountRow has no client_scopes column yet (that's IAM increment B), so the
-    # invite's client_scopes are recorded on the Invitation row but not yet copied onto the
-    # provisioned account. Wire them through when the scope column lands.
+    # Copy the invite's client scope onto the provisioned account (empty = all clients).
     account = await repo.create_user_account(
         session,
         tenant_id=row.tenant_id,
         auth_subject=identity.auth_subject,
         email=row.email,
         role=row.role,
+        client_scopes=row.client_scopes or [],
         name=None,
     )
     row.status = InvitationStatus.ACCEPTED.value
