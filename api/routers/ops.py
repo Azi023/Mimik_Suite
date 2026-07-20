@@ -97,7 +97,12 @@ async def board(
     """The Kanban board: every job grouped by status into a stable column order. Each card is
     `{"job": <Job>, "at_risk": bool}`; every column key is present even when empty."""
     now = _now()
-    rows = await repo.list_jobs(session, tenant_id=principal.tenant_id)
+    # A client principal (should it reach this internal view) sees ONLY its own client's jobs —
+    # never the whole tenant's board (bounded portal, data-layer authZ; constraint #2).
+    client_filter = (
+        principal.client_id if principal.role == ActorRole.CLIENT.value else None
+    )
+    rows = await repo.list_jobs(session, tenant_id=principal.tenant_id, client_id=client_filter)
     columns: dict[str, list[dict]] = {status.value: [] for status in _COLUMN_ORDER}
     for row in rows:
         job = to_job(row)
@@ -123,6 +128,9 @@ async def calendar(
     rows = await repo.list_jobs_in_publish_window(
         session, tenant_id=principal.tenant_id, start=start, end=end
     )
+    # Confine a client principal to its own client's jobs (bounded portal; constraint #2).
+    if principal.role == ActorRole.CLIENT.value:
+        rows = [r for r in rows if r.client_id == principal.client_id]
     return [_card(to_job(row), now) for row in rows]
 
 

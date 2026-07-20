@@ -10,7 +10,7 @@ from api.core.auth import Principal, get_principal, require_role
 from api.db import repo
 from api.db.mappers import to_brand
 from api.db.session import get_session
-from mimik_contracts import Brand, BrandTokens, Reference
+from mimik_contracts import ActorRole, Brand, BrandTokens, Reference
 
 router = APIRouter(prefix="/brands", tags=["brands"])
 
@@ -84,5 +84,9 @@ async def get_brand(
 ) -> Brand:
     row = await repo.get_brand(session, tenant_id=principal.tenant_id, brand_id=brand_id)
     if row is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    # A client principal may only read its OWN client's brand — another client's brand id is a 404
+    # (bounded portal, data-layer authZ; constraint #2).
+    if principal.role == ActorRole.CLIENT.value and row.client_id != principal.client_id:
         raise HTTPException(status_code=404, detail="Brand not found")
     return to_brand(row)

@@ -40,6 +40,32 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 
 ---
 
+## F-002 — Same IDOR class on clients / brands / ops board + calendar  ✅ FIXED
+
+- **Where:** `api/routers/clients.py` (`GET /clients`, `GET /clients/{id}`), `api/routers/brands.py`
+  (`GET /brands/{id}`), `api/routers/ops.py` (`GET /ops/board`, `GET /ops/calendar`).
+- **Finding:** the **same missing client-principal confinement** as F-001, systemic across the read
+  routes that weren't tasks/creatives/approvals. A `client`-role principal could:
+  - `GET /clients` → **enumerate every other client in the agency incl. contact PII** (name, email,
+    phone, instagram, notes) — the most sensitive of the set;
+  - `GET /clients/{id}` / `GET /brands/{id}` → read any client / brand in the tenant by id;
+  - `GET /ops/board` / `GET /ops/calendar` → enumerate **all** tenant jobs (cross-client).
+- **Impact:** cross-**client** (within-tenant) disclosure of client PII, brand config, and job pipeline.
+  Cross-tenant was never possible (tenant filter held). Note the frontend route-guard (H-001) does NOT
+  mitigate this — a client could call these API routes directly; the fix is at the data layer per #2.
+- **Fix:** `<pending-commit>` — client principals are now confined on every one of these routes:
+  `list_clients` returns only the own client; `get_client` / `get_brand` 404 on another client's id;
+  `ops.board` passes `client_id=principal.client_id` for clients; `ops.calendar` filters to own jobs.
+- **Re-verify:**
+  ```
+  uv run --no-sync pytest -q tests/test_jobs.py::test_client_principal_isolation_clients_brands_board
+  ```
+  Asserts: `/clients` list = own only, `/clients/{B}` → 404, `/brands/{B}` → 404, board shows only own
+  jobs. Manual: as a client-A account, `GET /clients` should return exactly one row (client A).
+- **Discovered:** 2026-07-21, auditing the F-001 open-items (the leak was a repeated pattern).
+
+---
+
 ## D-001 — Magic-link portal is a shareable capability (no login)  ⚠ BY DESIGN — audit the trade-off
 
 - **Where:** `api/core/magic_link.py`, `POST /approvals/magic`, `POST /portal/session` (read).
@@ -76,12 +102,13 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 ---
 
 ## Open items for a security pass (not yet done)
-- **GET /ops/board** — confirm a `client` principal cannot read the ops board (it's an internal view;
-  check whether it filters by client scope or should 403 for clients). *(Not yet audited — flagged.)*
-- **GET /clients** — confirm client-principal scoping (a client should not enumerate the tenant's other
-  clients). *(Not yet audited — the portal avoids calling it, but the endpoint should be checked.)*
-- **GET /brands/{id}** — a client can pass only its own brand_id in the portal flow, but confirm the
-  endpoint itself confines client principals. *(Not yet audited.)*
+- ~~GET /ops/board, GET /clients, GET /brands/{id} client-principal scoping~~ → **AUDITED + FIXED, F-002.**
+- **Sweep the remaining read routes** for the same pattern: `pillars`, `briefs`, `preferences`, `billing`,
+  `assets`, `invitations`, `admin` — confirm each either 403s clients (require_role) or confines them by
+  client_id. F-001/F-002 proved the confinement was applied inconsistently, so assume nothing. *(Not yet
+  audited — recommend a systematic pass: for every `Depends(get_principal)` GET, ask "what does a client
+  principal see?".)*
 - **Rate-limiting** on `POST /approvals/magic` + `POST /portal/session` — a leaked/guessed token has no
   throttle today. *(Not implemented.)*
+- **Magic-link revocation** — no way to invalidate a shared link before its TTL (D-001). *(Not implemented.)*
 - **2 temp login passwords** flagged for rotation (see HANDOFF).

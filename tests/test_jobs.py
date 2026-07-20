@@ -286,3 +286,55 @@ async def test_me_reports_client_role_and_binding(
     body = me.json()
     assert body["role"] == "client"
     assert body["client_id"] == a_cid, "GET /me leaked or dropped the client binding"
+
+
+async def _new_brand_for(client: AsyncClient, token: str, client_id: str, name: str) -> str:
+    resp = await client.post(
+        "/brands",
+        json={"client_id": client_id, "name": name, "slug": name.lower()},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+async def test_client_principal_isolation_clients_brands_board(
+    client: AsyncClient, supabase_env, tenant_two_clients
+) -> None:
+    """A client principal must not read other clients' records, brands, or jobs (board). Same IDOR
+    class as F-001 — the client-principal confinement extended to clients.py/brands.py/ops.py."""
+    owner, a_cid, b_cid = tenant_two_clients
+    a_brand = await _new_brand_for(client, owner, a_cid, "ABrand")
+    b_brand = await _new_brand_for(client, owner, b_cid, "BBrand")
+    a_job = (
+        await client.post(
+            "/jobs", json={"brand_id": a_brand, "title": "A", "format_key": "ig_post"}, headers=_auth(owner)
+        )
+    ).json()["id"]
+    await client.post(
+        "/jobs", json={"brand_id": b_brand, "title": "B", "format_key": "ig_post"}, headers=_auth(owner)
+    )
+
+    prov = await client.post(
+        "/admin/accounts",
+        json={"auth_subject": "portal-a", "role": "client", "client_id": a_cid},
+        headers=_auth(owner),
+    )
+    assert prov.status_code == 201, prov.text
+    ctoken = supabase_env("portal-a")
+
+    # /clients — list is confined to the own client; another client's id is a 404.
+    listed = await client.get("/clients", headers=_auth(ctoken))
+    assert [c["id"] for c in listed.json()] == [a_cid], "client enumerated other clients!"
+    assert (await client.get(f"/clients/{b_cid}", headers=_auth(ctoken))).status_code == 404
+    assert (await client.get(f"/clients/{a_cid}", headers=_auth(ctoken))).status_code == 200
+
+    # /brands/{id} — another client's brand is a 404; own brand is readable.
+    assert (await client.get(f"/brands/{b_brand}", headers=_auth(ctoken))).status_code == 404
+    assert (await client.get(f"/brands/{a_brand}", headers=_auth(ctoken))).status_code == 200
+
+    # /ops/board — only the own client's jobs appear.
+    board = (await client.get("/ops/board", headers=_auth(ctoken))).json()
+    board_ids = [c["job"]["id"] for col in board["columns"].values() for c in col]
+    assert a_job in board_ids
+    assert all(jid == a_job for jid in board_ids), "client saw another client's jobs on the board!"
