@@ -4,7 +4,39 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `6b97d70`) — FULL PRODUCT LOOP: review + portal + calendar + tasks + IDOR fix
+## ► LATEST (2026-07-21, main `403cbde`) — GAPS CLOSED: magic portal + /me + route-gating + resilience → Track A ~70%
+
+**366 Suite (was 359) / 18 contracts green, ruff clean, web tsc + next lint clean.** Continued the same
+day: closed the portal backend gaps, added the no-login magic flow, hardened routing, and shipped the
+resilience layer. **Track A frontend now ~70%** (was ~40%). Commits `4b8575b` (backend portal+/me+security
+log) · `6c58f59` (magic portal + route-gating) · `403cbde` (resilience). **Still LOCAL — no git remote
+configured** (`git remote -v` empty); add a remote then `git push` (≈11 local commits total).
+
+### What landed
+- **Magic-link no-login portal is COMPLETE.** New `POST /portal/session` (backend READ path — resolves a
+  signed single-job grant to just that job's bundle; token in body, not query; no enumeration). Frontend
+  `/review/[token]` (public, no session) reuses `CreativeReview` in `magicToken` mode → decisions post via
+  `POST /approvals/magic`. Team mints+copies the link from the internal review ("Share with client ↗").
+- **`GET /me`** + **role-based route-gating**: `redirectClientToPortal()` (calls /me) wired into all 9
+  internal pages → a `client`-role session is steered to `/portal`. Defense-in-depth (data already confined).
+- **Resilience layer DONE** (§2): `useAutosave` added; brief editor + kit editor now autosave (debounced,
+  edit-counter trigger) + `useUnsavedGuard`; wizard guards a half-filled intake. Review composer already
+  had `useLocalDraft`.
+- **Security log:** `docs/SECURITY_FINDINGS.md` — F-001 (IDOR, fixed), D-001 (magic-link shareable-capability
+  trade-off, by design), H-001 (route-gating), + an OPEN-ITEMS audit list (⚠ below).
+
+### ⚠ Security open-items for @atheeque to re-verify (in docs/SECURITY_FINDINGS.md)
+Not yet audited (flagged, NOT fixed): **GET /ops/board**, **GET /clients**, **GET /brands/{id}** — confirm
+each confines a `client` principal (do they leak cross-client like /jobs did?). No **rate-limiting** on
+`/approvals/magic` + `/portal/session` (a leaked token has no throttle). 2 temp passwords still to rotate.
+
+### Needs YOUR input (can't do autonomously)
+- **git remote** — none configured; give me the URL (or add it) and I'll push all local commits.
+- **Playwright screenshots** — still not run (needs seeded owner-token data; dev-token path is read-only).
+
+---
+
+## ► (2026-07-21, main `6b97d70`) — FULL PRODUCT LOOP: review + portal + calendar + tasks + IDOR fix
 
 **361 Suite (was 359) / 18 contracts green, ruff clean, web tsc + next lint clean.** Dedicated frontend
 session on **Opus** — shipped all 4 target screens PLUS a security fix that surfaced mid-session. Six

@@ -32,10 +32,20 @@ Per `docs/DESIGN_REFERENCES.md` §"product vs internal command-center", there ar
 | Brand-brief editor + sign-off | `/briefs`, `/briefs/[id]` | briefs +PATCH ✓ |
 | Onboarding wizard | `/onboarding` | clients/brands/pillars/assets ✓ |
 | Brand-kit editor + Layout box | `/brands/[id]/kit` | brands +PATCH, BrandLayout ✓ |
+| **Creative review + approval** | `/jobs/[id]/review` | creatives + approvals ✓ |
+| **Client portal (authenticated)** | `/portal`, `/portal/jobs/[id]` | jobs/creatives/approvals (client-confined) ✓ |
+| **Client portal (no-login magic link)** | `/review/[token]` | `/portal/session` + `/approvals/magic` ✓ |
+| **Content calendar** | `/calendar` | `/ops/board` (publish_date + at-risk) ✓ |
+| **Tasks table** | `/tasks` | tasks + status advance ✓ |
 
-**Rough completion — Track A frontend: ~40%.** Backend ~85% (see `docs/COMPLETENESS_ASSESSMENT.md`).
-The biggest missing product surface is the **creative review + approval loop** (the core "wow") and
-the **client portal** — those are what make the product sellable.
+**Resilience layer (§2) DONE:** `useLocalDraft` + `useAutosave` + `useUnsavedGuard` (`web/lib/hooks.ts`),
+wired into the brief editor, brand-kit editor, onboarding wizard, and the review composer.
+**Security:** IDOR fix on `/jobs` (client-principal confinement) + `GET /me` + role-based route-gating +
+`docs/SECURITY_FINDINGS.md`.
+
+**Rough completion — Track A frontend: ~70%** (was ~40%). Backend ~88%. The sellable core loop
+(review → approve → portal) and the resilience layer are DONE. Remaining tail: board restyle, the
+per-creative canvas editor (§3.5, big), the deliveries/Drive view, and billing/preferences UI.
 
 ---
 
