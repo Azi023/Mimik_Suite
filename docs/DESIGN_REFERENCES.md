@@ -65,6 +65,18 @@ Per operator: design/frontend generation runs on **Fable**, not Opus.
   the real API data facade (`web/lib/data.ts`) — and **kill the mock-fallback + build real empty states**
   as each screen lands; no `any`, explicit return types on exported fns; tenant-scoped calls only.
 
+## Saved reference assets
+
+- `docs/design-refs/17-design-principles.png` — the 17 Key Principles of Design (Zaid). Drives the
+  art-direction rubric; see `docs/BRAND_KIT_ONBOARDING.md` §4.
+- The **UI screenshots** operator shared (shadcn admin, Filestage, Frame.io, modernize) were captured
+  by **URL + description** in the per-screen table above — the raw PNGs were transient (not retained
+  on disk). To archive the actual images, re-drop them and they'll be copied into `docs/design-refs/`.
+
+## Related spec
+- `docs/BRAND_KIT_ONBOARDING.md` — new-client onboarding + brand-kit **Layout box** (logo position,
+  header/footer, margins) + designer controls + the 17 principles (Zaid's requirements).
+
 ## First build target
 **Login page** — smallest, self-contained, crystal-clear reference (Img 19), and it's the current
 ugly screen. Then **Members/Roles** (pairs with the IAM backend). Both on Fable.
