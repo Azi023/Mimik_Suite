@@ -4,7 +4,43 @@
 
 ---
 
-## ► LATEST (2026-07-20 late-night, main `249959c`) — IAM increment B + Members/roles screen (Opus)
+## ► LATEST (2026-07-20 deep-night, main `5670d81`) — FRONTEND session: 3 screens + compositor wiring + roadmap
+
+**359 Suite / 18 contracts green, ruff clean, web tsc+eslint+build clean.** Dedicated frontend session,
+built on **Opus**. Five commits on `main` (Suite) + one on `mimik-contracts`:
+- **P1 brief editor** (`7a20442`): `PATCH /briefs/{id}` (draft-only, 409 frozen, existing BriefSections)
+  + `/briefs` list + `/briefs/[id]` editor (9 sections editable, tokens+refs read-only, sign-off modal
+  → freeze, revise → new version). Server actions, session-gated. +3 tests.
+- **P2 onboarding wizard** (`f5748c2`): `/onboarding` 5-step (Brand→Kit→Pillars→Style ref→Review). Style
+  ref = client-shared **links (source+note) AND image uploads**. Enabler: `POST /brands` now accepts
+  `references` (passthrough, Reference contract already existed). Finish → client→brand→pillars→uploads→
+  **auto-draft brief** → lands on brief editor. `createOnboarding` server action (multipart via apiPostForm).
+  Shared `ChipsInput`. Sidebar "New client"→/onboarding. +2 tests.
+- **P3 brand-kit editor** (`d8ce663` + contracts `2301c70`): **CONTRACT CHANGE** `BrandLayout` on
+  `BrandTokens` (LogoPlacement 9-anchor enum, Margins per-edge, LayoutGuide draggable, logo_scale,
+  header/footer bools, grid_columns+gutter, guides, show_guides) — backward-compatible default. `PATCH
+  /brands/{id}` (tokens replace). `/brands/[id]/kit`: colors/type/logo + **Layout box** (3×3 anchor,
+  size slider, per-edge margins w/ Linked toggle, header/footer, grid, **Adobe-style draggable guides**)
+  + **live artboard** (4:5/1:1/9:16, rulers, safe-zone, bands, grid, logo, guides). Entry from brief
+  tokens section. +3 Suite +4 contracts tests.
+- **TopBar + compositor** (`b03fe81`): per-page TopBar titles (was always "Board"). BrandLayout wired
+  into `creative/render/templates.py` — **logo placement+size + margin-floor** honored by all templates
+  (central helpers `_resolve_logo`/`_edge_pads`); layout=None = no regression. +3 tests. **Still to wire:
+  header/footer bands, column grid, guides, + populate TemplateContext.layout in the render pipeline.**
+- **Roadmap** (`5670d81`): `docs/FRONTEND_ROADMAP.md` — the durable backlog. Two-track framing (product
+  vs command-center), Track-A ~40% frontend, remaining product pages (**creative review/approval = core
+  gap**), **resilience spec** (useLocalDraft/useAutosave/useUnsavedGuard — the operator's autosave /
+  no-data-loss-on-powercut ask), command-center add-ons B1-B12 (Studio Admin refs), hosting + `.env` answer.
+
+**Open / next (see FRONTEND_ROADMAP.md):** (1) resilience hooks + wire the 3 editors; (2) creative
+review+approval (Filestage ref) — the sellable core; (3) client portal; (4) finish compositor
+(header/footer+grid) then per-creative canvas editor. Known: save actions need a real Supabase login
+(dev-token path is read-only); 2 temp passwords to rotate; Meta portfolio for WhatsApp. `.env` confirmed
+**not in git** (only .example tracked) — safe for colleagues to clone.
+
+---
+
+## ► (2026-07-20 late-night, main `249959c`) — IAM increment B + Members/roles screen (Opus)
 
 **348 Suite / 14 contracts green, ruff clean, web builds.** Both "unblocked steps" done + docs:
 - **IAM increment B (role×scope) — backend**: `api/core/capabilities.py` (`Capability` enum + 
