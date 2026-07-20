@@ -36,7 +36,7 @@ own the self-serve tool; we don't fight them there.)
 6. **Test stub on day 1.** Every new module gets a `tests/test_<module>.py`, even if `pass`.
 7. **No paid APIs yet.** Build phase runs on subscriptions / free tiers. Imagery via a swappable adapter so "sub now → API later" is a config change. `codex`/`agy` CLIs are code-only — they cannot generate images.
 8. **Non-destructive.** Briefs and creatives are versioned; edits create new versions; nothing is destroyed. Every action is audited (actor + timestamp).
-9. **Frontend-design rule.** Do NOT style any UI without a concrete visual reference in hand (URL/screenshot/Figma). Scaffold structure only until then.
+9. **Frontend-design rule.** Do NOT style any UI without a concrete visual reference in hand (URL/screenshot/Figma). Scaffold structure only until then. **Design system is now LOCKED** (`docs/DESIGN_REFERENCES.md`): shadcn/ui mono admin ("Studio Admin" north-star) — adopt shadcn/ui in `web/`. **Frontend builds run on FABLE** (Opus writes the spec from references → a Fable-model agent + frontend-design skill builds it), not Opus. Preserve Supabase auth wiring + kill the mock-fallback (real empty states) as each screen lands.
 10. **Dogfood before "product".** Every phase is validated on a real Mimik/Jasmine client before it's called done.
 
 ## Conventions

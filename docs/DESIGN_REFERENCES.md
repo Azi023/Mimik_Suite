@@ -1,57 +1,70 @@
-# Design reference-gathering brief
+# Design system & screen references — LOCKED
 
-> How to collect references for the remaining frontend so the whole product feels like ONE product.
-> Fill the "your pick" column with a URL or a screenshot path, then we build each screen on **Fable**
-> with that reference in hand (locked rule #9: no styling without a concrete reference).
+> Direction decided 2026-07-20 from operator-supplied references. This is no longer "how to gather" —
+> it's the chosen system. Screens are built on **Fable** (see build mechanism at the bottom).
 
-## The one rule that matters
+## North-star: shadcn/ui admin ("Studio Admin")
 
-**Pick ONE north-star first — the whole-product visual identity — then gather per-page references
-only for LAYOUT / FLOW, not for look.** A separate visual reference per page produces a
-stitched-together product. The north-star decides palette, type, density, motion; per-page
-references only answer "how is this screen structured."
+Reference: `next-shadcn-admin-dashboard.vercel.app` (arhamkhnz) — **Next.js + shadcn/ui**. Our `web/`
+is already Next.js, so shadcn/ui is a drop-in component system, not a rewrite.
 
-### Step 1 — choose the north-star (do this before anything else)
-Browse 5–8 products, pick the ONE whose overall feel you want Mimik Suite to have. Candidates by vibe:
-- **Crisp / keyboard-first / dense** → Linear, Height
-- **Calm / content-first / soft** → Notion, Cron/Notion Calendar
-- **Technical / minimal / confident** → Vercel, Resend, Railway
-- **Media-review / dark / cinematic** → Frame.io  *(closest analog to our creative-review job)*
+**Design language:**
+- **Monochrome + minimal.** Near-black ink, white/paper grounds, warm-grey neutrals. Colour is used
+  ONLY as semantic signal (subtle green up / red down), never decoration.
+- **Light AND dark mode** (the refs ship both; the theme toggle is a first-class control).
+- **App shell:** collapsible left **sidebar** (grouped nav) + top **search/command bar** (`⌘K`) +
+  content area of **cards**. Wordmark treatment like `⌘ Studio Admin`.
+- **Data-dense tables** for admin surfaces (roles, users, invoices) with status pills, row actions,
+  filters. Tabular numerals. Generous whitespace, calm hierarchy.
+- **Component library = shadcn/ui.** Adopt it in `web/` — it gives us the tables, dialogs, dropdowns,
+  tabs, forms, toasts, theming for free, all matching the reference.
 
-Your taste anchors from your notes — **impeccable.style** and **uxsculpt.com** — are also fair game.
-Save 2–3 full-page screenshots of the winner. That's the system reference.
+**Softer alternative** (not primary): `modernize-nextjs` (Image 32) — blue, rounded, friendlier. Keep
+as a fallback mood if the mono system feels too austere for the *client-facing* portal.
 
-### Step 2 — per-page LAYOUT references (1–2 each)
-For each remaining screen, look at the *direct analog* products below, capture how they lay the
-screen out (not their colors — the north-star owns color), and drop a URL/screenshot in "your pick".
+## Per-screen reference map
 
-| Screen (missing today) | Best analog products to study | What to capture | Your pick |
-|---|---|---|---|
-| **Onboarding / intake wizard** (new client + URL) | Stripe onboarding, Cal.com setup, Typeform | step progression, one-thing-per-step, URL-in field | |
-| **Brand brief editor + sign-off** | Frontify, Brandpad, Standards.site, Notion doc + PandaDoc sign-off | section layout, editable vs frozen state, the sign-off moment | |
-| **Creative review + approval** | **Frame.io, Filestage, Ziflow, Pastel, Markup.io** | image-first canvas, comment/annotate, approve / request-change buttons | |
-| **Creatives gallery + L1–L5 layers** | Canva/Figma layers panel, Photopea | thumbnail grid + a light "recipe/layers" side panel | |
-| **Content calendar** | **Planoly, Later, Buffer, Sprout Social, Metricool** | month grid, per-post cards, at-risk/late badges | |
-| **Client portal** (bounded self-serve) | **Copilot (copilot.com), SuperOkay, Moxie, Bonsai** | client's cut-down view, "your designs / approve / ask for changes" | |
-| **Settings / members / roles (RBAC)** | Linear settings, Vercel team, WorkOS, Clerk | members table, role dropdowns, invite flow | |
-| **Admin onboarding** (new agency + users) | Stripe dashboard, Vercel new-team | create-org → invite → first client | |
-| **Billing / subscription** | Stripe customer portal, Linear/Vercel billing | plan card, invoices, manage-subscription | |
-| **Ops board** (exists — refine) | Linear board, Trello, Notion board | column density, card anatomy, the generating/pending state | |
+| Screen | Reference (operator-supplied) | Notes / what to copy |
+|---|---|---|
+| **App shell** (sidebar + topbar + theme toggle) | Studio Admin | the container for every screen |
+| **Login / Register** | shadcn split login v1 — "Hello again" (Img 19), v2 (Img 20), register (Img 21) | split screen: brand panel + form + Google button. Replaces `web/app/login` |
+| **Members / Roles & Permissions** | shadcn Roles & Permissions (Img 22) | **= our IAM admin panel.** Roles table (access level · users · permission sets · status), Create role, Permission-sets tab, Access-reviews tab, invite |
+| **Overview dashboards** (per client / per sub-product) | shadcn CRM / Default / Analytics / Finance (Img 16,17,18,31) | KPI cards + charts + activity table |
+| **Creative review + approval** | **Filestage** (Img 33–38) | image-first canvas, **annotate/click-to-comment**, comment threads, **Approve / Request changes / Reject**, email-notify. The Mimik Suite core loop + the client portal |
+| **Video review** (Mimik_engine, later) | **Frame.io** (Img 39–44) | dark cinematic; asset grid w/ roles, share settings w/ permissions, time-coded comments |
+| **Invoice / billing** | shadcn Invoice (Img 23) | create form + live preview + PDF; for Finance/sub-products |
+| **Infrastructure / hosted sites** | shadcn Infrastructure (Img 30) | domain · platform · health · uptime · resources — to surface Mimik's hosted sites |
+| **Content calendar** | shadcn Calendar (in nav) | month grid + at-risk badges (backend worker exists) |
+| **Ops board** (exists) | keep; restyle to shadcn Kanban | card anatomy + the generating/pending state |
 
-## Where to search (fastest → aspirational)
-1. **Mobbin** (mobbin.com) — real product screens searchable by app + flow (onboarding, settings…). **Best for layout/flow.** Start here.
-2. **Refero** (refero.design) — real SaaS screenshots by page type.
-3. **Godly** (godly.website), **SaaSframe**, **Land-book**, **Pageflows** (flow *videos*) — for the north-star hunt.
-4. **Dribbble / Behance** — aspiration only; caution, much of it is non-functional eye-candy. Use for a *mood*, never as a literal layout.
+Gaps with no direct reference (the shadcn system still covers them structurally): the **onboarding /
+intake wizard** and the **brand-brief editor + sign-off**. We'll compose those from shadcn form/stepper
+primitives in the same language — flag if you find a reference you prefer.
 
-## How to hand it to me
-- Save screenshots under `docs/design-refs/<screen>/…` (or just paste URLs into the table above).
-- One line of intent per reference helps a lot: *"this sidebar", "these cards", "this empty state"*.
-- Minimum to start building: **the north-star + one screen's layout reference.** We don't need all
-  10 before we begin — send the north-star + whichever screen you want first (I'd suggest the
-  **brand-brief** screen: backend's done, and it's the clearest "wow").
+## Scope note: product vs internal command-center
 
-## Then the build loop (on Fable)
-For each screen: you send north-star + that screen's reference → I run the **frontend-design skill on a
-Fable subagent** with your reference + our existing tokens → review → iterate. Structure gets
-scaffolded from the real API; styling only ever follows a reference you've given.
+The nav (CRM, Finance, Analytics, Infrastructure, E-commerce…) reads as an **internal command-center for
+all Mimik businesses** (Mimik_Leads, Mimik_Proofkit, Mimik_Sales, Finance, hosted sites). That is a
+*different app* from **Mimik Suite the product** (multi-tenant creative pipeline sold to agencies like
+Jasmin Media). They **share this one design system**, but must not merge: the client-facing product must
+never expose internal-ops surfaces. Decision per surface — same tokens, separate apps/tenants where the
+audience differs. (Revisit before building anything that blurs the two.)
+
+## Build mechanism — Fable agents + skills
+
+Per operator: design/frontend generation runs on **Fable**, not Opus.
+
+- **Division of labour:** Opus (main thread, *can see* the reference images) writes a precise per-screen
+  **spec** — layout, components, states, the exact reference to match, and the data/auth wiring to
+  preserve. A **Fable-model agent** then builds from that spec + shadcn/ui + our existing tokens. This
+  plays to each model's strength (Opus sees + specs; Fable builds the UI).
+- **How:** `Agent(model: "fable", …)` running the **frontend-design** (or **impeccable**) skill, one
+  screen per agent, reviewed interactively. Fan out to parallel subagents only when building several
+  independent screens at once.
+- **Invariants the Fable build MUST preserve:** Supabase auth wiring (`web/lib/session`, `/api/auth/*`);
+  the real API data facade (`web/lib/data.ts`) — and **kill the mock-fallback + build real empty states**
+  as each screen lands; no `any`, explicit return types on exported fns; tenant-scoped calls only.
+
+## First build target
+**Login page** — smallest, self-contained, crystal-clear reference (Img 19), and it's the current
+ugly screen. Then **Members/Roles** (pairs with the IAM backend). Both on Fable.

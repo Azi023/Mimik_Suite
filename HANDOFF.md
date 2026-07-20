@@ -59,11 +59,16 @@ before ANY 2nd agency touches it. Top of the auth backlog.
 settings, billing screens DON'T EXIST; `web/lib/data.ts` mock-fallback leaks demo clients into empty
 tenants — kill for prod). Roadmap Phases A–D in that doc.
 
-**Open decisions (USER):** (1) UI/UX work needs a concrete visual REFERENCE (locked rule #9) before any
-styling — provide a URL/screenshot/Figma. (2) Dummy-data cleanup: **Glo2Go + the 2 owner accounts are
-REAL** — confirm which seeded rows are dummy before deleting. (3) Google/MS social login deferred per
-user; RBAC/tenant hardening first. **Recommended next:** P0 = gate `POST /tenants` + kill mock-fallback
-→ brand-brief UI → client portal (roadmap Phase A/B).
+**Open decisions (USER):** (1) ✅ RESOLVED — UI references received; **design system LOCKED** =
+shadcn/ui mono admin ("Studio Admin"), see `docs/DESIGN_REFERENCES.md` (north-star + per-screen map:
+login→shadcn split login, members/roles→shadcn Roles&Permissions, creative-review/portal→Filestage,
+video→Frame.io). **Frontend builds run on FABLE** (Opus specs from the images → Fable-agent builds w/
+frontend-design skill + shadcn). Adopt shadcn/ui in `web/`. First target: **login**, then **members/roles**.
+⚠ Scope note: those CRM/Finance/Infra nav items = an INTERNAL command-center (Leads/Proofkit/Sales/Finance/
+hosted sites), a DIFFERENT app from Mimik Suite the client-facing product — same design system, don't merge.
+(2) Dummy-data cleanup: **Glo2Go + the 2 owner accounts are REAL**; kill mock-fallback as each real screen
+lands. (3) Google/MS social login deferred. **Recommended next:** IAM increment B/C (backend, unblocked) +
+build the login screen on Fable.
 
 Prior open loops still live: change 2 temp login passwords; Leonardo→API when payment clears; deploy
 parked (`docs/DEPLOY.md`, needs 8GB VPS).
