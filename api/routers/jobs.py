@@ -14,7 +14,7 @@ from api.core.auth import Principal, get_principal
 from api.db import repo
 from api.db.mappers import to_job
 from api.db.session import get_session
-from mimik_contracts import Job
+from mimik_contracts import ActorRole, Job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -83,6 +83,10 @@ async def get_job(
     row = await repo.get_job(session, tenant_id=principal.tenant_id, job_id=job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    # A client principal may only read its own client's job (bounded portal, data-layer authZ).
+    # 404, not 403, so a client cannot even confirm another client's job exists.
+    if principal.role == ActorRole.CLIENT.value and row.client_id != principal.client_id:
+        raise HTTPException(status_code=404, detail="Job not found")
     return to_job(row)
 
 
@@ -92,5 +96,10 @@ async def list_jobs(
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_session),
 ) -> list[Job]:
+    # A client principal is confined to its own client's jobs, whatever the query asks for.
+    if principal.role == ActorRole.CLIENT.value:
+        if not principal.client_id:
+            raise HTTPException(status_code=403, detail="Client principal has no client_id")
+        client_id = principal.client_id
     rows = await repo.list_jobs(session, tenant_id=principal.tenant_id, client_id=client_id)
     return [to_job(r) for r in rows]
