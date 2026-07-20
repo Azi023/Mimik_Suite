@@ -267,3 +267,22 @@ async def test_client_principal_list_filtered_to_own_client(
     listed = await client.get(f"/jobs?client_id={b_cid}", headers=_auth(ctoken))
     assert listed.status_code == 200
     assert [j["id"] for j in listed.json()] == [a_job]
+
+
+async def test_me_reports_client_role_and_binding(
+    client: AsyncClient, supabase_env, tenant_two_clients
+) -> None:
+    owner, a_cid, _b_cid = tenant_two_clients
+    prov = await client.post(
+        "/admin/accounts",
+        json={"auth_subject": "portal-a", "role": "client", "client_id": a_cid},
+        headers=_auth(owner),
+    )
+    assert prov.status_code == 201, prov.text
+    ctoken = supabase_env("portal-a")
+
+    me = await client.get("/me", headers=_auth(ctoken))
+    assert me.status_code == 200, me.text
+    body = me.json()
+    assert body["role"] == "client"
+    assert body["client_id"] == a_cid, "GET /me leaked or dropped the client binding"
