@@ -7,6 +7,7 @@ import {
   FileIcon,
   GridIcon,
   ImageIcon,
+  LogOutIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -58,16 +59,29 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
           ))}
         </nav>
 
-        {settings && (
-          <button
-            type="button"
-            className="rail-btn rail__settings"
-            aria-label={settings.label}
-            title={settings.label}
-          >
-            <SettingsIcon />
-          </button>
-        )}
+        <div className="rail__footer">
+          {settings && (
+            <button
+              type="button"
+              className="rail-btn"
+              aria-label={settings.label}
+              title={settings.label}
+            >
+              <SettingsIcon />
+            </button>
+          )}
+          {/* Logout is a POST so a prefetch/link can't sign the user out. */}
+          <form action="/api/auth/logout" method="post">
+            <button
+              type="submit"
+              className="rail-btn"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOutIcon />
+            </button>
+          </form>
+        </div>
       </aside>
 
       <aside className="subbar" aria-label="Clients">

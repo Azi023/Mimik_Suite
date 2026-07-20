@@ -8,16 +8,23 @@ import { DotsIcon, PlusIcon } from "./icons";
 
 interface BoardProps {
   jobs: Job[];
+  /** Id of the job currently open in the review panel (null = none clicked yet). */
+  selectedJobId: string | null;
+  /** Fired when a card is clicked — selects it into the review panel. */
+  onSelectJob: (job: Job) => void;
 }
 
 /**
  * The approvals board as a kanban: one column per lifecycle status, headed by
  * a status dot + count (reference: red = at risk, orange = in review,
  * green = approved). Cards stagger-fade-up on first paint; counts tick up.
+ * Clicking a card selects it into the review panel.
  */
-export function Board({ jobs }: BoardProps): JSX.Element {
+export function Board({ jobs, selectedJobId, onSelectJob }: BoardProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null);
 
+  // Re-run the entrance + count tick-up whenever the visible set changes (e.g. a
+  // pillar filter), so newly-shown cards animate in and counts re-settle.
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (root === null) return;
@@ -31,7 +38,7 @@ export function Board({ jobs }: BoardProps): JSX.Element {
       cardTween?.kill();
       countTweens.forEach((tween) => tween?.kill());
     };
-  }, []);
+  }, [jobs]);
 
   return (
     <div className="kanban" ref={rootRef}>
@@ -68,14 +75,21 @@ export function Board({ jobs }: BoardProps): JSX.Element {
             <button
               type="button"
               className="kanban-col__add"
-              aria-label={`Add job to ${column.title}`}
+              aria-label={`Add job to ${column.title} (coming soon)`}
+              aria-disabled="true"
+              title="Adding jobs is coming soon"
             >
               <PlusIcon size={14} />
             </button>
 
             <div className="kanban-col__cards">
               {columnJobs.map((job) => (
-                <JobRow key={job.id} job={job} />
+                <JobRow
+                  key={job.id}
+                  job={job}
+                  selected={job.id === selectedJobId}
+                  onSelect={onSelectJob}
+                />
               ))}
             </div>
           </section>

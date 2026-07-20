@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1.7
+#
+# Mimik Suite — API image (FastAPI + creative engine + Playwright/Chromium).
+#
+# ┌─ BUILD CONTEXT ──────────────────────────────────────────────────────────┐
+# │ Build with the PARENT directory as the context. api/pyproject.toml         │
+# │ declares two path deps that live OUTSIDE this repo:                        │
+# │     [tool.uv.sources]                                                      │
+# │     mimik-contracts = { path = "../mimik-contracts", editable = true }     │
+# │     mimik-knowledge = { path = "../mimik-knowledge", editable = true }     │
+# │                                                                            │
+# │ The context root is the parent that contains all three sibling dirs:       │
+# │     workspace/                                                             │
+# │       ├── Mimik_Suite/        (this repo)                                  │
+# │       ├── mimik-contracts/    (path dep)                                   │
+# │       └── mimik-knowledge/    (path dep)                                   │
+# │                                                                            │
+# │ Inside the image we reproduce that same sibling layout under /app so the   │
+# │ "../mimik-contracts" relative paths resolve exactly as on the host:        │
+# │     /app/Mimik_Suite  +  /app/mimik-contracts  +  /app/mimik-knowledge     │
+# │                                                                            │
+# │ Build command (run from the parent of this repo):                          │
+# │     cd ~/workspace                                                         │
+# │     docker build -f Mimik_Suite/Dockerfile.api -t mimik-suite-api .        │
+# │                                                                            │
+# │ See docs/DEPLOY.md for the full flow.                                      │
+# └────────────────────────────────────────────────────────────────────────────┘
+
+# The official Playwright Python image ships Chromium + all its system libs
+# pre-installed and version-matched to the bundled Playwright. Pin the tag to
+# the Playwright version in pyproject.toml (>=1.61.0). This is the single
+# biggest reason the API image is heavy (~1.5GB) — see the DEPLOY.md RAM caveat.
+FROM mcr.microsoft.com/playwright/python:v1.61.0-noble AS base
+
+# uv: fast, lockfile-faithful installer. Copy the static binary from the
+# official distroless image (no curl|sh).
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /usr/local/bin/
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# ── Sibling path deps ────────────────────────────────────────────────────────
+# Placed as true siblings of the repo under /app so "../mimik-contracts" from
+# /app/Mimik_Suite resolves to /app/mimik-contracts — no pyproject edits needed.
+COPY mimik-contracts/ /app/mimik-contracts/
+COPY mimik-knowledge/ /app/mimik-knowledge/
+
+# ── Dependency layer (cached until the lockfile changes) ─────────────────────
+WORKDIR /app/Mimik_Suite
+COPY Mimik_Suite/pyproject.toml Mimik_Suite/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+
+# ── App source ───────────────────────────────────────────────────────────────
+COPY Mimik_Suite/ /app/Mimik_Suite/
+
+# Install the project itself now that api/ and creative/ are present.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# Put the venv on PATH so `alembic` / `uvicorn` resolve without `uv run`.
+ENV PATH="/app/Mimik_Suite/.venv/bin:${PATH}"
+
+RUN chmod +x /app/Mimik_Suite/docker/api-entrypoint.sh
+
+EXPOSE 8000
+
+# Migrations then uvicorn. See docker/api-entrypoint.sh.
+ENTRYPOINT ["/app/Mimik_Suite/docker/api-entrypoint.sh"]

@@ -1,0 +1,21 @@
+# .dockerignore for the web image (context = ./web).
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Secrets — NEXT_PUBLIC_* are passed as build args, never via a committed .env.
+.env
+.env.*
+!.env.example
+
+# VCS / editor / OS
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+
+# Design scratch / docs not needed in the build
+DESIGN_NOTES.md
+design/

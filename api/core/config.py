@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     billing_success_url: str = "https://mimikcreations.com/unlimited/welcome"
     billing_cancel_url: str = "https://mimikcreations.com/unlimited"
 
+    # Archive backend — Google Drive via USER OAuth (ARCHIVE_BACKEND=google_drive_oauth). This is
+    # the working prod path: files are owned by the user and use the user's Drive quota, so it
+    # can upload into ordinary My-Drive folders (a service account can't — it has no quota).
+    # Obtain the refresh token ONCE via `scripts/drive_oauth.py`. Secrets — provide via env only.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_refresh_token: str = ""
+
 
 _settings: Settings | None = None
 

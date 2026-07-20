@@ -199,3 +199,31 @@ Chronological audit trail of decisions. Newest at bottom.
   contrast.py's three function-scoped SoftEditorial imports consolidated (no cycle exists).
 - Gate: 278 Suite + 12 contracts + 8 knowledge green; ruff clean; npm build+lint clean.
   ALL review findings resolved — the tree is commit-ready.
+
+## 2026-07-20 — Session 4, iteration 9 (Drive OAuth + FE interactivity)
+
+- Diagnosed Drive SA dead-end: Google returns 403 "Service Accounts do not have storage
+  quota" on file upload to a My-Drive folder (SA can read + create empty folders, not upload).
+  Fix = user OAuth (files owned by user, uses their 5TB). Free Gmail can't use Shared Drives.
+- Drive OAuth backend: refactored google_drive.py to _DriveArchiveBase (shared folder/upload/
+  token-cache) + GoogleDriveArchive (SA/JWT) + GoogleDriveOAuthArchive (refresh-token grant,
+  name "google_drive_oauth"). get_archive_backend() selects all three. config + .env.example
+  updated. scripts/drive_oauth.py = one-time loopback OAuth consent → prints refresh token.
+  8 new OAuth tests (grant shape, archive, caching, selection, unconfigured). 286 green, ruff clean.
+- FE interactivity (iteration 8 agent): BoardView client boundary — pillar tabs filter, card→
+  review-panel selection, Approve/Request-change wired to real ids, honest-disabled +buttons.
+- FE sidebar wired to real /clients (earlier this session).
+- Deploy: DROPPED for now (operator decision — run on Mac). Artifacts (Dockerfiles, compose,
+  docs/DEPLOY.md, Coolify+Supabase guide) created + parked for later VPS upgrade. Committed? NO.
+- Decisions: browser automation (Leonardo/ChatGPT) will run on the MAC not the VPS — home
+  residential IP + headful + persistent profile + human pacing + dedicated account + patchright
+  (headless is MORE detectable). Deferred to after Drive. Leonardo web sub != API access.
+- Security note: deploy agent's `docker compose config` expanded .env → real keys hit its local
+  transcript; advised operator to consider rotating OpenAI/OpenRouter/Supabase-service-role/Gemini.
+
+## Human gates open
+- Drive: create OAuth client (Desktop) in Google Cloud console + publish consent screen
+  (Production, else 7-day token expiry) → set GOOGLE_OAUTH_CLIENT_ID/SECRET + DRIVE_ROOT_FOLDER_ID
+  in .env → run `uv run --no-sync python scripts/drive_oauth.py` → paste refresh token +
+  ARCHIVE_BACKEND=google_drive_oauth. Then the approve→archive writes to their real Drive.
+- Rotate the 4 keys (optional, precaution).

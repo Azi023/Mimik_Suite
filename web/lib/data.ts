@@ -5,9 +5,15 @@
  * live from the FastAPI backend when it is configured AND reachable, and from the mocks
  * otherwise — the board never renders blank/broken because the API is down.
  *
- * Live path gate (see `isApiConfigured` in lib/api.ts): both `NEXT_PUBLIC_API_URL` and
- * `NEXT_PUBLIC_DEV_TOKEN` must be set. Any fetch/parse failure inside the live path also
- * drops to the mock set (with a server-side console.warn so the fallback is observable).
+ * Live path gate (see `isApiConfigured` in lib/api.ts): `NEXT_PUBLIC_API_URL` must be set
+ * AND a bearer must be resolvable — either the per-user Supabase session token threaded in
+ * from the server component (`lib/session.getSessionToken`) or the DEV-ONLY dev token. Any
+ * fetch/parse failure inside the live path also drops to the mock set (with a server-side
+ * console.warn so the fallback is observable).
+ *
+ * The `sessionToken` argument is the real per-user Supabase bearer. When present it flows
+ * through every API call so fetches run as the authenticated user (tenant-scoped by the
+ * backend); when absent, the dev-token fallback applies.
  */
 
 import {
@@ -225,13 +231,13 @@ function mockBoardData(): BoardData {
  * Falls back to the mock review doc when no creative exists yet (or the call fails) —
  * the panel is a preview surface, not a data-critical one.
  */
-async function resolveReviewDoc(jobs: Job[]): Promise<CreativeDoc> {
+async function resolveReviewDoc(jobs: Job[], sessionToken?: string): Promise<CreativeDoc> {
   const candidate = jobs.find((job) => job.status === "in_review") ?? jobs[0];
   if (candidate === undefined) {
     return mockReviewDoc;
   }
   try {
-    const docs = await listCreatives(candidate.id);
+    const docs = await listCreatives(candidate.id, sessionToken);
     const latest = docs[docs.length - 1];
     return latest !== undefined ? toReviewDoc(latest) : mockReviewDoc;
   } catch {
@@ -327,12 +333,15 @@ function mockSidebarData(): SidebarData {
  * configured + reachable, mock set otherwise — identical shapes either way, so
  * the chrome renders the same and never blanks out when the API is down.
  */
-export async function getSidebarData(): Promise<SidebarData> {
-  if (!isApiConfigured()) {
+export async function getSidebarData(sessionToken?: string): Promise<SidebarData> {
+  if (!isApiConfigured(sessionToken)) {
     return mockSidebarData();
   }
   try {
-    const [clients, board] = await Promise.all([listClients(), fetchBoard()]);
+    const [clients, board] = await Promise.all([
+      listClients(sessionToken),
+      fetchBoard(sessionToken),
+    ]);
     // An empty tenant (no clients yet) still gets the full demo sidebar rather
     // than a lone empty group — the chrome must never look broken.
     if (clients.length === 0) {
@@ -355,18 +364,21 @@ export async function getSidebarData(): Promise<SidebarData> {
  * The board page's single data entrypoint. Live API when configured + reachable,
  * mock set otherwise — identical shapes either way, so the board renders the same.
  */
-export async function getBoardData(): Promise<BoardData> {
-  if (!isApiConfigured()) {
+export async function getBoardData(sessionToken?: string): Promise<BoardData> {
+  if (!isApiConfigured(sessionToken)) {
     return mockBoardData();
   }
   try {
-    const [board, apiPillars] = await Promise.all([fetchBoard(), listPillars()]);
+    const [board, apiPillars] = await Promise.all([
+      fetchBoard(sessionToken),
+      listPillars(undefined, sessionToken),
+    ]);
     const pillarNameById = new Map(apiPillars.map((pillar) => [pillar.id, pillar.name]));
     const jobs = flattenBoard(board, pillarNameById);
     // An empty tenant (no pillars yet) still gets the full demo chip row rather than
     // a lone "+ Custom" — the board must never look broken.
     const pillars = apiPillars.length > 0 ? toPillarChips(apiPillars) : mockPillars;
-    const reviewDoc = await resolveReviewDoc(jobs);
+    const reviewDoc = await resolveReviewDoc(jobs, sessionToken);
     return { pillars, jobs, reviewDoc };
   } catch (error) {
     console.warn(

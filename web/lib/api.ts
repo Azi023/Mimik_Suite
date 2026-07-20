@@ -10,9 +10,12 @@
  * - `NEXT_PUBLIC_DEV_TOKEN` — a first-party HS256 bootstrap bearer token minted by
  *   `POST /tenants` (see api/core/auth.py). This is a DEV-ONLY convenience: a
  *   `NEXT_PUBLIC_*` value is inlined into the client bundle, so it must never carry a
- *   production credential. Real user auth is the Supabase-issued path (the API already
- *   accepts it, discriminated by `iss`) and lands with the auth phase — at which point
- *   this env var goes away in favor of a per-user session token.
+ *   production credential.
+ *
+ * Bearer precedence (see `resolveBearer`): a per-request Supabase session token
+ * (threaded server-side from `lib/session.getSessionToken`) is used when present;
+ * the dev bootstrap token is the fallback ONLY. Real user auth is the Supabase path
+ * — the backend already accepts it, discriminated by `iss` (api/core/auth.py).
  */
 
 /* ---------------------------------------------------------------------------
@@ -302,13 +305,28 @@ function getDevToken(): string | undefined {
 }
 
 /**
- * True when BOTH `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_DEV_TOKEN` are set —
- * the gate `lib/data.ts` uses before attempting live fetches. Without both,
- * the app renders from mocks and never touches the network.
+ * The bearer to send on API calls, in precedence order:
+ *   1. the caller-supplied Supabase session token (real per-user auth), when present.
+ *   2. the DEV-ONLY `NEXT_PUBLIC_DEV_TOKEN` bootstrap token, as a fallback.
+ * Returns `undefined` when neither exists — the request goes out unauthenticated
+ * (the mock-fallback path in `lib/data.ts` then takes over on the resulting error).
  */
-export function isApiConfigured(): boolean {
+function resolveBearer(sessionToken?: string): string | undefined {
+  if (sessionToken !== undefined && sessionToken !== "") {
+    return sessionToken;
+  }
+  return getDevToken();
+}
+
+/**
+ * True when `NEXT_PUBLIC_API_URL` is set AND some bearer is resolvable — either the
+ * caller-supplied Supabase session token or the dev bootstrap token. This is the gate
+ * `lib/data.ts` uses before attempting live fetches; without it the app renders from
+ * mocks and never touches the network.
+ */
+export function isApiConfigured(sessionToken?: string): boolean {
   const url = process.env.NEXT_PUBLIC_API_URL;
-  return url !== undefined && url !== "" && getDevToken() !== undefined;
+  return url !== undefined && url !== "" && resolveBearer(sessionToken) !== undefined;
 }
 
 /** Raised for non-2xx responses so callers can distinguish API errors from network errors. */
@@ -322,9 +340,9 @@ export class ApiError extends Error {
   }
 }
 
-async function apiGet<T>(path: string): Promise<T> {
+async function apiGet<T>(path: string, sessionToken?: string): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
-  const token = getDevToken();
+  const token = resolveBearer(sessionToken);
   if (token !== undefined) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -340,12 +358,12 @@ async function apiGet<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function apiPost<T>(path: string, body: unknown): Promise<T> {
+async function apiPost<T>(path: string, body: unknown, sessionToken?: string): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
   };
-  const token = getDevToken();
+  const token = resolveBearer(sessionToken);
   if (token !== undefined) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -363,36 +381,42 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * Every endpoint below accepts an optional `sessionToken` — the per-user Supabase
+ * bearer, threaded server-side from `lib/session.getSessionToken`. When omitted, the
+ * request falls back to the DEV-ONLY `NEXT_PUBLIC_DEV_TOKEN` (see `resolveBearer`).
+ */
+
 /** GET /clients — the caller-tenant's clients. */
-export function listClients(): Promise<ApiClient[]> {
-  return apiGet<ApiClient[]>("/clients");
+export function listClients(sessionToken?: string): Promise<ApiClient[]> {
+  return apiGet<ApiClient[]>("/clients", sessionToken);
 }
 
 /** GET /brands/{id}. */
-export function getBrand(brandId: string): Promise<ApiBrand> {
-  return apiGet<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`);
+export function getBrand(brandId: string, sessionToken?: string): Promise<ApiBrand> {
+  return apiGet<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, sessionToken);
 }
 
 /** GET /jobs — optionally filtered to one client. */
-export function listJobs(clientId?: string): Promise<ApiJob[]> {
+export function listJobs(clientId?: string, sessionToken?: string): Promise<ApiJob[]> {
   const query = clientId !== undefined ? `?client_id=${encodeURIComponent(clientId)}` : "";
-  return apiGet<ApiJob[]>(`/jobs${query}`);
+  return apiGet<ApiJob[]>(`/jobs${query}`, sessionToken);
 }
 
 /** GET /pillars — optionally filtered to one client. */
-export function listPillars(clientId?: string): Promise<ApiContentPillar[]> {
+export function listPillars(clientId?: string, sessionToken?: string): Promise<ApiContentPillar[]> {
   const query = clientId !== undefined ? `?client_id=${encodeURIComponent(clientId)}` : "";
-  return apiGet<ApiContentPillar[]>(`/pillars${query}`);
+  return apiGet<ApiContentPillar[]>(`/pillars${query}`, sessionToken);
 }
 
 /** GET /jobs/{id}/creatives — a job's creative versions, oldest first. */
-export function listCreatives(jobId: string): Promise<ApiCreativeDoc[]> {
-  return apiGet<ApiCreativeDoc[]>(`/jobs/${encodeURIComponent(jobId)}/creatives`);
+export function listCreatives(jobId: string, sessionToken?: string): Promise<ApiCreativeDoc[]> {
+  return apiGet<ApiCreativeDoc[]>(`/jobs/${encodeURIComponent(jobId)}/creatives`, sessionToken);
 }
 
 /** GET /ops/board — jobs grouped by status with computed at-risk flags. */
-export function fetchBoard(): Promise<ApiBoardResponse> {
-  return apiGet<ApiBoardResponse>("/ops/board");
+export function fetchBoard(sessionToken?: string): Promise<ApiBoardResponse> {
+  return apiGet<ApiBoardResponse>("/ops/board", sessionToken);
 }
 
 /**
@@ -400,6 +424,9 @@ export function fetchBoard(): Promise<ApiBoardResponse> {
  * `targets` are only valid with `action: "request_change"` (the API 422s otherwise).
  * Throws `ApiError` on non-2xx; network/timeout failures reject with the fetch error.
  */
-export function submitApproval(body: ApprovalSubmission): Promise<ApprovalResponse> {
-  return apiPost<ApprovalResponse>("/approvals", body);
+export function submitApproval(
+  body: ApprovalSubmission,
+  sessionToken?: string,
+): Promise<ApprovalResponse> {
+  return apiPost<ApprovalResponse>("/approvals", body, sessionToken);
 }

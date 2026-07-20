@@ -72,6 +72,61 @@ contracts, approvals.targets column (migration `79fa3959d12f`), targets ride bot
 points → audit trail + "- [zone/layer] instruction" ops-task lines + zone-tagged preference signals;
 draft_copy(revision_note=…) fenced re-draft seam. **275 Suite + 12 contracts green, ruff clean.**
 
+## 2026-07-20 (iteration 10) — G3 DONE (Drive verified) · FE auth built · committing
+
+**G3 CLOSED — verified live:** a real creative uploaded to Drive via OAuth →
+`Mimik Clients/Glo2Go-Aesthetics/2026-07/oauth-verify/polynucleotides-oauth-test.png`
+(file id `1AMLG9WBDYtO2XiNyfgxHtjXzOFYxWa53`). `scripts/drive_oauth.py` now loads `.env`; operator
+did the OAuth consent; refresh token in `.env` (gitignored). `ARCHIVE_BACKEND=google_drive_oauth` live.
+
+**FE auth BUILT:** Supabase email/password login (`web/app/login`, `/api/auth/login|logout`,
+`web/lib/session.ts`) — httpOnly-cookie sessions + refresh, board redirects to `/login` when
+unauthenticated (dev-token fallback when APP_ENV=dev). No new npm deps (GoTrue via fetch). Lint+tsc
+clean. **Remaining operator gate to log in end-to-end:** create a Supabase user THEN provision a
+`UserAccount` (POST /admin/accounts with auth_subject=<supabase sub>, tenant_id, role) — else API 403s.
+
+**Leonardo automation — DECISION PENDING (operator):** browser-automating the MAIN account can't be
+made ban-proof (ToS + adversarial detection). Recommended: (A) Leonardo **API** (~$9/mo, compliant,
+zero ban risk — right for a product) or (B) a **dedicated burner account** for the stealth harness.
+Do NOT automate the main account. No build until operator picks.
+
+**286 tests green, ruff clean.** Committing iteration 9+10 now (Drive OAuth, FE interactivity/sidebar/
+auth, parked deploy artifacts).
+
+---
+
+## 2026-07-20 (iteration 9) — DRIVE OAUTH BACKEND BUILT · FE interactive + sidebar wired · deploy parked
+
+**State:** **286 tests green**, ruff clean. Committed at `8a3f5c1` (contracts `f3c63ea`, knowledge
+`d4010b4`); iteration-9 work (Drive OAuth, FE interactivity/sidebar) is **uncommitted** on top.
+
+**Drive — SA is a dead end, OAuth is the fix (BUILT):** Google 403 "Service Accounts do not have
+storage quota" on My-Drive upload (SA can read + make empty folders, not upload files). Free Gmail
+can't use Shared Drives. So: refactored `creative/archive/google_drive.py` → `_DriveArchiveBase`
+(shared folder/upload/token-cache) + `GoogleDriveArchive` (SA) + **`GoogleDriveOAuthArchive`**
+(`google_drive_oauth`, refresh-token grant → files owned by the user → their 5TB). `scripts/drive_oauth.py`
+= one-time loopback consent that prints the refresh token. 8 new tests. **OPEN human gate:** operator
+creates an OAuth Desktop client in Google Cloud console (project `gen-lang-client-0936115045`),
+PUBLISHES the consent screen (Production — Testing expires the token in 7 days), sets
+`GOOGLE_OAUTH_CLIENT_ID/SECRET` + `DRIVE_ROOT_FOLDER_ID=1LFO3hLEBNkgzvRDQR4HsG2Dtk9MmJ5mV` in `.env`,
+runs `scripts/drive_oauth.py`, pastes the refresh token + `ARCHIVE_BACKEND=google_drive_oauth`.
+
+**FE:** now INTERACTIVE — `BoardView` client boundary: pillar tabs filter, card→review-panel select,
+Approve/Request-change wired to real ids, honest-disabled +buttons; sidebar + top chip wired to real
+`/clients` (mock fallback holds). Local view: restart `web` with `NEXT_PUBLIC_API_URL` +
+`NEXT_PUBLIC_DEV_TOKEN` for real data (devtoken in session scratchpad).
+
+**Deploy: PARKED** (operator: run on Mac for now). Dockerfiles + `docker-compose.prod.yml` +
+`docs/DEPLOY.md` (Coolify + Supabase-Postgres + GHCR) created + parked for a future VPS upgrade
+(current 4GB box: ~1.8GB free, runs Coolify + 2 apps — needs 8GB for the Chromium-bearing API image).
+
+**Next (operator decisions):** Drive OAuth gate above → then **Mac browser-automation harness** for
+Leonardo (home IP + headful + persistent profile + human pacing + patchright + dedicated account;
+headless is MORE detectable). Leonardo web sub ≠ API access. Optional: rotate the 4 keys that hit the
+deploy agent's local transcript. Commit iteration-9 when ready.
+
+---
+
 **Iterations 7–8:** FE revision-pin UI landed (ReviewPanel composer: zone chips, 10-pin cap, offline
 mode; verified via headless screenshot). Full pre-commit REVIEW GATE run on the it.2–7 delta — all
 findings fixed: SoftEditorial geometry clamp (QA false-pass) → superset honesty + regression;

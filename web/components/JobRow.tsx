@@ -1,21 +1,42 @@
-import type { JSX } from "react";
+import type { JSX, KeyboardEvent } from "react";
 import { FORMAT_TONE, PILLAR_TONE, type Job } from "@/lib/mock";
 import { CheckIcon, ClipIcon, ClockIcon, CommentIcon } from "./icons";
 
 interface JobRowProps {
   job: Job;
+  /** Whether this card is the one open in the review panel (drives the selected ring). */
+  selected: boolean;
+  /** Fired on click / Enter / Space — selects this job into the review panel. */
+  onSelect: (job: Job) => void;
 }
 
 /**
  * A kanban card: colored format/pillar tags, title, circular-checkbox
  * checklist, SLA line, and a footer with the avatar stack + comment /
- * attachment counts — mirroring the reference card anatomy.
+ * attachment counts — mirroring the reference card anatomy. The whole card is
+ * a button (role + keyboard) that selects the job into the review panel.
  */
-export function JobRow({ job }: JobRowProps): JSX.Element {
+export function JobRow({ job, selected, onSelect }: JobRowProps): JSX.Element {
   const pillarTone = PILLAR_TONE[job.pillar] ?? "gray";
 
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>): void {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(job);
+    }
+  }
+
   return (
-    <article className="job-card" data-animate="card">
+    <article
+      className={`job-card${selected ? " job-card--selected" : ""}`}
+      data-animate="card"
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={`Review ${job.title}`}
+      onClick={(): void => onSelect(job)}
+      onKeyDown={handleKeyDown}
+    >
       <div className="job-card__tags">
         <span className={`tag tag--${FORMAT_TONE[job.format]}`}>{job.format}</span>
         <span className={`tag tag--${pillarTone}`}>{job.pillar}</span>

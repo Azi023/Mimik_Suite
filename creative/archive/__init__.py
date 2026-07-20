@@ -1,8 +1,9 @@
 """Archive backend registry + selector.
 
 `get_archive_backend()` resolves the configured backend from `ARCHIVE_BACKEND` (default
-`local`). The local backend needs no credentials; the Google Drive backend is selected only
-when `ARCHIVE_BACKEND=google_drive` AND a service account is configured (else it fails loud).
+`local`). The local backend needs no credentials. `google_drive` (service account, JWT-bearer)
+and `google_drive_oauth` (user OAuth refresh-token grant) each fail loud if unconfigured. Prefer
+`google_drive_oauth` for ordinary My-Drive folders — a service account has no storage quota.
 """
 
 from __future__ import annotations
@@ -34,4 +35,11 @@ def get_archive_backend() -> ArchiveBackend:
         from .google_drive import GoogleDriveArchive  # deferred: needs a service account
 
         return GoogleDriveArchive.from_env()
-    raise ArchiveError(f"unknown ARCHIVE_BACKEND: {name!r} (expected 'local' or 'google_drive')")
+    if name == "google_drive_oauth":
+        from .google_drive import GoogleDriveOAuthArchive  # deferred: needs OAuth creds
+
+        return GoogleDriveOAuthArchive.from_env()
+    raise ArchiveError(
+        f"unknown ARCHIVE_BACKEND: {name!r} "
+        "(expected 'local', 'google_drive', or 'google_drive_oauth')"
+    )

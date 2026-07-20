@@ -1,0 +1,56 @@
+# .dockerignore for the API image.
+#
+# NOTE ON CONTEXT: the API image is built from the PARENT directory (so the
+# mimik-contracts / mimik-knowledge siblings are visible). Docker reads the
+# .dockerignore at the CONTEXT ROOT, not next to the Dockerfile. Copy this file
+# to the parent as `.dockerignore` before building, OR (simpler) let the build
+# proceed — the COPY steps are path-scoped so stray files elsewhere in the
+# parent are ignored anyway. Patterns below are written to match from the
+# parent context (hence the Mimik_Suite/ , mimik-contracts/ prefixes) AND, when
+# this file sits at the repo root for a repo-context build, the bare forms.
+# See docs/DEPLOY.md.
+
+# ── Python / venv ─────────────────────────────────────────────────────────────
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+
+# ── Node (in case the web tree sits under the same context) ───────────────────
+**/node_modules/
+**/.next/
+**/next-env.d.ts
+**/*.tsbuildinfo
+
+# ── Secrets — never ship these into an image layer ────────────────────────────
+**/.env
+**/.env.*
+!**/.env.example
+**/*.key
+**/*.pem
+**/*.p12
+**/credentials*
+**/secure repo/
+**/secure_repo/
+
+# ── Runtime / generated data ──────────────────────────────────────────────────
+**/var/
+**/_archive/
+**/dist/
+**/build/
+**/*.egg-info/
+
+# ── VCS / editor / OS cruft ───────────────────────────────────────────────────
+**/.git/
+**/.gitignore
+**/.github/
+**/.DS_Store
+**/.idea/
+**/.vscode/
+
+# ── Docs / tests not needed at runtime (keep migrations!) ─────────────────────
+**/docs/
+**/tests/

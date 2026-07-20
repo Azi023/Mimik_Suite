@@ -225,8 +225,17 @@ ul {
   box-sizing: content-box;
 }
 
-.rail__settings {
+/* Pinned bottom cluster: settings + sign-out, stacked. */
+.rail__footer {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.rail__footer form {
+  display: flex;
 }
 
 /* ---------------------------------------------------------------------------
@@ -631,6 +640,16 @@ ul {
   box-shadow: none;
 }
 
+/* Inline "coming soon" hint the "+ Custom" chip reveals — honest affordance
+   instead of a dead click, styled as quiet secondary text. */
+.pillar-chips__hint {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* ---------------------------------------------------------------------------
    Kanban
 --------------------------------------------------------------------------- */
@@ -709,6 +728,13 @@ ul {
   box-shadow: var(--shadow-card);
 }
 
+/* Honest-disabled affordance for stubbed add actions (column "+", "+ Custom"):
+   a clear not-allowed cursor rather than a silent dead click. */
+.kanban-col__add[aria-disabled="true"],
+.pillar-chip[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 .kanban-col__cards {
   display: flex;
   flex-direction: column;
@@ -740,6 +766,27 @@ ul {
   .job-card:hover {
     transform: translateY(-2px) scale(1.01);
     box-shadow: var(--shadow-lift);
+  }
+}
+
+/* Whole card is clickable — cursor + reliable selected affordance. The selected
+   ring/lift uses existing accent + shadow tokens (no new colors), and holds
+   under reduced motion since it isn't a transition. */
+.job-card {
+  cursor: pointer;
+}
+
+.job-card--selected {
+  box-shadow: var(--shadow-lift), inset 0 0 0 1.5px var(--accent);
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .job-card--selected {
+    transform: translateY(-2px);
+  }
+
+  .job-card--selected:hover {
+    transform: translateY(-2px) scale(1.01);
   }
 }
 
@@ -1263,4 +1310,118 @@ ul {
   .review-panel {
     margin: 0 var(--sp-4) var(--sp-7);
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Auth (login) — a single centered card on the dashboard canvas.
+   Tokens only: no new colors, radii, or shadows.
+--------------------------------------------------------------------------- */
+
+.auth {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  background: var(--canvas);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-7);
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lift);
+}
+
+.auth-card__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.auth-card__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.auth-card__title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.auth-card__subtitle {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.auth-card__error {
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--dot-new);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.auth-field__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.auth-field__input {
+  padding: 10px var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.auth-field__input::placeholder {
+  color: var(--faint);
+}
+
+.auth-field__input:focus {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.auth-card__submit {
+  margin-top: var(--sp-1);
+  padding: 11px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.15s ease;
+}
+
+.auth-card__submit:hover {
+  background: var(--accent-hover);
 }

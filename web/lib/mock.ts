@@ -285,6 +285,29 @@ export const reviewDoc: CreativeDoc = {
   note: "Editing Layer 4 · headline & CTA",
 };
 
+/**
+ * Derive a display-only CreativeDoc for a job the review panel hasn't fetched a
+ * real creative for (e.g. clicking any card other than the server-resolved one).
+ *
+ * It carries NO `jobId`/`creativeDocId`, so the panel keeps the honest offline
+ * note on submit rather than posting a guessed id. The `reviewDoc` a job's real
+ * creative maps to (via `lib/data.ts`) is preferred whenever it is available.
+ */
+export function jobToReviewDoc(job: Job): CreativeDoc {
+  return {
+    id: `preview-${job.id}`,
+    thumbnailLabel: job.title.toUpperCase().slice(0, 24),
+    layers: [
+      { id: `${job.id}-l1`, label: "L1", active: false },
+      { id: `${job.id}-l2`, label: "L2", active: false },
+      { id: `${job.id}-l3`, label: "L3", active: false },
+      { id: `${job.id}-l4`, label: "L4", active: true },
+      { id: `${job.id}-l5`, label: "L5", active: false },
+    ],
+    note: `${job.pillar} · ${job.format} — Editing Layer 4`,
+  };
+}
+
 /* ---------------------------------------------------------------------------
    Navigation — icon rail (glyphs resolved in Sidebar) + client list groups.
 --------------------------------------------------------------------------- */
