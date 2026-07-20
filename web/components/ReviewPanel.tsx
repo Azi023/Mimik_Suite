@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, type JSX } from "react";
+import Link from "next/link";
 import {
   ApiError,
   type ApiRevisionZone,
@@ -186,6 +187,12 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
       >
         <span className="review-panel__thumb-label">{doc.thumbnailLabel}</span>
       </div>
+
+      {doc.jobId !== undefined && (
+        <Link href={`/jobs/${doc.jobId}/review`} className="review-panel__fullreview">
+          Open full review ↗
+        </Link>
+      )}
 
       <div className="review-panel__section">
         <h3 className="review-panel__label">Layers</h3>

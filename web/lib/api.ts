@@ -313,6 +313,23 @@ export interface ApprovalResponse {
   task?: ApiTask;
 }
 
+/** mimik_contracts.workflow.Delivery — one archived-to-Drive record on a job's audit trail. */
+export interface ApiDelivery {
+  id: string;
+  created_at: string;
+  tenant_id: string;
+  job_id: string;
+  creative_doc_id: string;
+  drive_path: string;
+  delivered_at: string | null;
+}
+
+/** GET /jobs/{id}/approvals — the job's full audit trail: every action + every delivery. */
+export interface JobAuditTrail {
+  approvals: ApiApproval[];
+  deliveries: ApiDelivery[];
+}
+
 /** One card on GET /ops/board — the serialized Job plus the computed at-risk flag. */
 export interface ApiBoardCard {
   job: ApiJob;
@@ -491,6 +508,11 @@ export function listJobs(clientId?: string, sessionToken?: string): Promise<ApiJ
   return apiGet<ApiJob[]>(`/jobs${query}`, sessionToken);
 }
 
+/** GET /jobs/{id} — one job (404s cross-tenant, so a foreign id yields a real not-found). */
+export function getJob(jobId: string, sessionToken?: string): Promise<ApiJob> {
+  return apiGet<ApiJob>(`/jobs/${encodeURIComponent(jobId)}`, sessionToken);
+}
+
 /** GET /pillars — optionally filtered to one client. */
 export function listPillars(clientId?: string, sessionToken?: string): Promise<ApiContentPillar[]> {
   const query = clientId !== undefined ? `?client_id=${encodeURIComponent(clientId)}` : "";
@@ -517,6 +539,11 @@ export function submitApproval(
   sessionToken?: string,
 ): Promise<ApprovalResponse> {
   return apiPost<ApprovalResponse>("/approvals", body, sessionToken);
+}
+
+/** GET /jobs/{id}/approvals — the append-only audit trail (comment threads + decisions + deliveries). */
+export function getJobAuditTrail(jobId: string, sessionToken?: string): Promise<JobAuditTrail> {
+  return apiGet<JobAuditTrail>(`/jobs/${encodeURIComponent(jobId)}/approvals`, sessionToken);
 }
 
 /* ---------------------------------------------------------------------------
