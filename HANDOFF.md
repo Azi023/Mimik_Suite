@@ -4,7 +4,37 @@
 
 ---
 
-## ► LATEST (2026-07-20 late, main `fc2cf04`) — IAM invitations SHIPPED + new shadcn login (both on Opus)
+## ► LATEST (2026-07-20 late-night, main `249959c`) — IAM increment B + Members/roles screen (Opus)
+
+**348 Suite / 14 contracts green, ruff clean, web builds.** Both "unblocked steps" done + docs:
+- **IAM increment B (role×scope) — backend**: `api/core/capabilities.py` (`Capability` enum + 
+  `ROLE_CAPABILITIES` matrix + `has_capability`), `require_capability()` dep (has-ALL semantics),
+  `client_scopes` threaded onto Principal + `UserAccountRow` (migration `27bc3b786ef3`) + copied from
+  the invite at accept time, `GET /admin/capabilities`. New role `ActorRole.ADMIN`. Helpers
+  `is_client_in_scope`/`principal_client_ids` exist but are **NOT wired into query routes yet**
+  (empty scope = all = current behavior; wiring them in = the next behavior-changing step). +16 tests.
+- **Members/roles screen — frontend** (`web/app/members/`, `components/MembersView.tsx`): 3 tabs —
+  Members table, Roles&permissions (capability matrix), Invitations (invite form → copyable accept-link
+  + revoke). Built on Opus vs the shadcn Roles&Permissions ref, existing token system, **light+dark**,
+  **real empty states (no mock fallback)**. Mutations via **Next.js server actions** (`actions.ts`) that
+  read the httpOnly session cookie server-side — stricter than the board's client fetch, the right
+  pattern for the admin panel. Sidebar settings glyph now links to `/members`.
+- **Docs**: `docs/BRAND_KIT_ONBOARDING.md` (Zaid's spec — onboarding flow, brand-kit **Layout box**:
+  logo position / header-footer / margins, typography+image selection, editable text, the 17 design
+  principles → art-direction rubric; grounded EXISTS-vs-NEW vs the current model). `docs/design-refs/
+  17-design-principles.png` saved. `docs/DESIGN_REFERENCES.md` updated (UI screenshots captured by
+  URL+desc; raw PNGs were transient — re-drop to archive).
+
+**Frontend now: login✓ + members✓** (2 real screens beyond the board). Design build loop = **Opus**
+(user: Fable weekly credits low). Next FE targets per `docs/DESIGN_REFERENCES.md`: brand-brief editor
+(clearest client "wow"), then onboarding wizard + brand-kit Layout box (Zaid) — user wants a dedicated
+**frontend-only session** for these. Open: full tailwind+shadcn adoption still deferred (we match the
+look with tokens); wire scope-filtering into query routes (increment B follow-up); change 2 temp login
+passwords; Meta fresh portfolio for WhatsApp.
+
+---
+
+## ► (2026-07-20 late, main `fc2cf04`) — IAM invitations SHIPPED + new shadcn login (both on Opus)
 
 **332 Suite / 13 contracts green, ruff clean, web builds.** Two tracks this run (Opus, not Fable —
 Fable weekly credits were low):
