@@ -72,6 +72,22 @@ contracts, approvals.targets column (migration `79fa3959d12f`), targets ride bot
 points → audit trail + "- [zone/layer] instruction" ops-task lines + zone-tagged preference signals;
 draft_copy(revision_note=…) fenced re-draft seam. **275 Suite + 12 contracts green, ruff clean.**
 
+## 2026-07-20 (iteration 13) — hardened driver (patchright) + human pacing · NEXT: WhatsApp (new session)
+
+Anti-detection strengthened per operator: **patchright** (hardened Playwright fork; hides the CDP
+`Runtime.enable` leak Cloudflare fingerprints) now drives the harness via `_async_playwright` (vanilla
+fallback). Human pacing widened (pauses 0.8–2.6s, typing 70–190ms/char) + new `human_cooldown` (8–22s)
+for between-generation spacing — volume/cadence over time is what trips bans, so the caller caps volume.
+CDP-attach + patchright smoke-tested against the real Chrome (both tabs seen, window preserved).
+**ChatGPT confirmed drivable** via the same pattern (logged in, composer + 'Create an image' present).
+Leonardo model IS selectable (URL `?model=…`; Phoenix worked). Strong-prompt burner generation delivered
+a premium G2G serum hero. **Plan: ~2 days of realistic BURNER volume before the main subscription account;
+API is the zero-risk endgame.** Product note: generation is human-paced (not instant) → surface a
+'generating/pending' state (JobStatus.GENERATING exists). **Next session = WhatsApp adapter — see
+`docs/NEXT_SESSION.md` for the paste-in prompt.** All committed + green (295 Suite / 12 contracts).
+
+---
+
 ## 2026-07-20 (iteration 11) — Supabase owners provisioned · Leonardo harness LIVE on burner
 
 **Auth end-to-end WORKS:** provisioned Supabase owners atheequeniyas23@gmail.com +

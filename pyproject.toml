@@ -16,6 +16,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7",
     "python-multipart>=0.0.9",
     "playwright>=1.61.0",
+    "patchright>=1.61.2",
 ]
 
 [dependency-groups]

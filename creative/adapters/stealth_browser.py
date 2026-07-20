@@ -6,11 +6,12 @@ subscription image backends need (Leonardo, and any future web-app backend): dro
 real installed Chrome channel when present. Human-pacing helpers add jittered pauses/typing
 so the automation reads less like a bot.
 
-For STRONGER evasion, swap Playwright for `patchright` — a drop-in Playwright replacement that
-patches deeper automation fingerprints (CDP `Runtime.enable` leaks, etc.). It is deliberately
-NOT added here: it would be an unprompted dependency, and the launcher args below are the
-vanilla-Playwright hardening that ships with what we already have. Upgrade path when needed:
-`import patchright.async_api as playwright` in place of `playwright.async_api` — same API.
+Detection hardening (`_async_playwright`): we drive through **patchright** — a hardened
+Playwright fork that suppresses the automation leaks vanilla Playwright emits *even in attach
+mode*, notably the CDP `Runtime.enable` call anti-bot walls (Cloudflare Turnstile) fingerprint.
+Falls back to vanilla Playwright if patchright is absent. Combined with attach-to-real-Chrome
+(never launching a bot browser) + widened human pacing below, the automation reads as a
+logged-in human using the web app — which is the whole point.
 """
 
 from __future__ import annotations
@@ -28,6 +29,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
 _IGNORE_DEFAULT_ARGS = ["--enable-automation"]
 _VIEWPORT = {"width": 1440, "height": 900}
+
+
+def _async_playwright():
+    """Prefer `patchright` — a hardened Playwright fork that suppresses the automation leaks
+    vanilla Playwright emits even in attach mode (notably the CDP `Runtime.enable` call that
+    anti-bot walls like Cloudflare fingerprint). Falls back to vanilla Playwright if patchright
+    is not installed. Same async API either way."""
+    try:
+        from patchright.async_api import async_playwright  # hardened
+    except ImportError:  # pragma: no cover - patchright is a declared dep, fallback is a safety net
+        from playwright.async_api import async_playwright
+    return async_playwright()
 
 
 @dataclass
@@ -66,9 +79,7 @@ async def launch_stealth_context(profile_dir: str, *, headless: bool = False) ->
     often than bundled Chromium); falls back to bundled Chromium if Chrome is unavailable.
     Returns a `StealthSession`; the caller is responsible for `await session.aclose()`.
     """
-    from playwright.async_api import async_playwright
-
-    playwright = await async_playwright().start()
+    playwright = await _async_playwright().start()
     last_error: Exception | None = None
     for channel in ("chrome", None):
         try:
@@ -98,9 +109,7 @@ async def connect_cdp_session(cdp_url: str) -> StealthSession:
     context (the logged-in one) and marks the session non-owning so aclose leaves it open.
     Raises RuntimeError if nothing is listening (caller can fall back to a launch).
     """
-    from playwright.async_api import async_playwright
-
-    playwright = await async_playwright().start()
+    playwright = await _async_playwright().start()
     try:
         browser = await playwright.chromium.connect_over_cdp(cdp_url)
     except Exception as exc:  # noqa: BLE001 - no debug Chrome running
@@ -117,8 +126,9 @@ async def connect_cdp_session(cdp_url: str) -> StealthSession:
 # swapped (lo, hi) can't silently invert the delay.
 
 
-async def human_pause(lo: float = 0.4, hi: float = 1.6) -> None:
-    """Sleep a random human-ish beat in [lo, hi] seconds."""
+async def human_pause(lo: float = 0.8, hi: float = 2.6) -> None:
+    """Sleep a random human-ish beat in [lo, hi] seconds. Widened defaults: a real person
+    doesn't act on sub-second machine cadence."""
     if lo < 0 or hi < lo:
         raise ValueError(f"human_pause bounds invalid: lo={lo}, hi={hi}")
     import asyncio
@@ -127,12 +137,23 @@ async def human_pause(lo: float = 0.4, hi: float = 1.6) -> None:
 
 
 async def human_type(locator: "Locator", text: str) -> None:
-    """Type `text` into `locator` one character at a time with ~40-140ms per-char jitter."""
-    delay_ms = random.uniform(40, 140)
+    """Type `text` one character at a time with ~70-190ms per-char jitter (unhurried typing)."""
+    delay_ms = random.uniform(70, 190)
     await locator.press_sequentially(text, delay=delay_ms)
 
 
 async def human_click(locator: "Locator") -> None:
-    """A tiny pre-pause, then a click — avoids the instant machine-click signature."""
-    await human_pause(0.15, 0.5)
+    """A short pre-pause, then a click — avoids the instant machine-click signature."""
+    await human_pause(0.3, 0.9)
     await locator.click()
+
+
+async def human_cooldown(lo: float = 8.0, hi: float = 22.0) -> None:
+    """A longer between-actions cooldown (e.g. between generations). Volume + cadence is what
+    trips bans over time, so callers should space repeated generations with this, not fire in
+    bursts. The real volume cap belongs to the caller (per-session / per-client limits)."""
+    if lo < 0 or hi < lo:
+        raise ValueError(f"human_cooldown bounds invalid: lo={lo}, hi={hi}")
+    import asyncio
+
+    await asyncio.sleep(random.uniform(lo, hi))
