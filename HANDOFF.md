@@ -4,7 +4,48 @@
 
 ---
 
-## ► LATEST (2026-07-20, commit `4f5f290`) — read this + `docs/NEXT_SESSION.md`
+## ► LATEST (2026-07-20 evening, main `d8065e9`) — WhatsApp+generating+ChatGPT MERGED; COMPLETENESS ASSESSED
+
+**All this session's work is merged to `main` and green: 316 Suite / 12 contracts, ruff clean.**
+Three features shipped behind existing seams (each was its own branch, now merged into `main`):
+
+- **WhatsApp adapter** (`api/services/whatsapp.py`) behind `NotificationChannel.WHATSAPP` — Meta Cloud
+  sink + null default; **INERT** (`WHATSAPP_PROVIDER=none`, nothing sends). Adapter mechanically PROVEN
+  (a real Meta `401` = payload/endpoint/auth all correct). `dispatch_pending` now routes per channel,
+  reuses one httpx client, resolves sinks up front (bad provider fails before mutating rows). Token
+  header-only/never-logged; body/magic-link never logged; phone masked. **Live activation BLOCKED** on
+  Meta account-health: `Mimik Creations` portfolio + `Mimik flow` app are BOTH enforcement-restricted
+  ("prohibited from advertising / claiming apps"); needs a FRESH clean business portfolio (user hit a
+  24h name-hold). Runbook `docs/WHATSAPP_SETUP.md`; smoke `scripts/whatsapp_smoke.py`.
+- **Generating/pending-delivery state** — `Job.generation_started_at` (contracts) stamped on entering
+  GENERATING, cleared on exit / when first creative lands. Board card carries it so the FE can show
+  "generating since X" instead of implying instant. Migration `8281453f4476`.
+- **ChatGPT image adapter** (`creative/adapters/chatgpt_browser.py`) — IMPLEMENTED (was a P2 stub).
+  Mirrors Leonardo: CDP-attach + patchright, tab-safe `_pick_page`, step helpers w/ actionable errors,
+  image-only directive around the prompt, grabs newest `oaiusercontent` image. Selectors best-guess —
+  tune on 1st live run via `scripts/chatgpt_generate.py`. Burner-account risk accepted by user.
+
+**⚠ CRITICAL SECURITY FINDING (NOT yet fixed):** `POST /tenants` (`api/routers/tenants.py`) is
+UNAUTHENTICATED — anyone reachable can create a tenant + mint an `owner` token. Gate to super-admin
+before ANY 2nd agency touches it. Top of the auth backlog.
+
+**Completeness assessment done** → `docs/COMPLETENESS_ASSESSMENT.md` (backend ~85%, **frontend ~10%**:
+`web/` has ONLY the Kanban board + login — onboarding, brand-brief UI, client portal, calendar,
+settings, billing screens DON'T EXIST; `web/lib/data.ts` mock-fallback leaks demo clients into empty
+tenants — kill for prod). Roadmap Phases A–D in that doc.
+
+**Open decisions (USER):** (1) UI/UX work needs a concrete visual REFERENCE (locked rule #9) before any
+styling — provide a URL/screenshot/Figma. (2) Dummy-data cleanup: **Glo2Go + the 2 owner accounts are
+REAL** — confirm which seeded rows are dummy before deleting. (3) Google/MS social login deferred per
+user; RBAC/tenant hardening first. **Recommended next:** P0 = gate `POST /tenants` + kill mock-fallback
+→ brand-brief UI → client portal (roadmap Phase A/B).
+
+Prior open loops still live: change 2 temp login passwords; Leonardo→API when payment clears; deploy
+parked (`docs/DEPLOY.md`, needs 8GB VPS).
+
+---
+
+## 2026-07-20 (morning), commit `4f5f290` — G1–G3 + FE + auth + Leonardo stealth harness (prev LATEST)
 
 **Everything is built, committed, and green** (295 Suite / 12 contracts, ruff clean). Done this
 run: G1–G3 (Drive archive verified live via user-OAuth), full FE (interactive board + sidebar +
@@ -12,8 +53,6 @@ run: G1–G3 (Drive archive verified live via user-OAuth), full FE (interactive 
 engine, and the **Leonardo stealth harness** (attach-to-real-Chrome via CDP + **patchright** + human
 pacing — proven live on a burner). ChatGPT confirmed drivable via the same pattern.
 
-**Next session = WhatsApp adapter** — paste-in prompt + the deferred R&D shortlist are in
-`docs/NEXT_SESSION.md`. Full detail for THIS run is in the "iteration 13 / 11" entries below.
 Open loops: change the 2 temp login passwords; ~2 days of burner volume before the main Leonardo
 account; migrate Leonardo → API when payment clears; deploy is parked (`docs/DEPLOY.md`).
 
