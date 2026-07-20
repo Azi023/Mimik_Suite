@@ -4,7 +4,43 @@
 
 ---
 
-## ► LATEST (2026-07-20 deep-night, main `5670d81`) — FRONTEND session: 3 screens + compositor wiring + roadmap
+## ► LATEST (2026-07-21, main `82a1703`) — CREATIVE REVIEW + APPROVAL LOOP (the sellable core)
+
+**web tsc + next lint clean. Backend/contracts untouched → 359 Suite / 18 contracts still green by
+construction.** Dedicated frontend session on **Opus** (budget-paced — stopped at a committed checkpoint
+after the one high-value screen; portal/calendar/tasks deferred). One additive commit on `main`:
+
+- **`/jobs/[id]/review`** (`82a1703`) — image-first creative review (ref: Filestage), reachable from the
+  board's slide-in review panel ("Open full review ↗" on `ReviewPanel`).
+  - **Canvas** composed *client-side* from the CreativeDoc manifest + brand tokens (aspect per format,
+    brand-ground / image-layer background, copy block, logo anchor). **Honest proxy** — there is NO
+    server-rendered PNG endpoint; rendering is Playwright-at-archive-time only, and `artifact_ref` is null
+    until a paid image backend (constraint #7). This is the real gap the canvas works around.
+  - **Click-to-pin** change requests → zone auto-suggested by region, editable via chips → queued pins
+    submit as one `request_change` with pin-pointed `RevisionTarget`s (cap 10 / 500 chars). NOTE: pin x/y
+    are UI-only context — the contract carries no coordinates, so persisted comments can't restore pins.
+  - **Decision bar:** Approve / Request changes (pinned) / Reject (reason taxonomy). **Contract reality:
+    `ApprovalAction` has no `reject`** — reject = `request_change` + `reason_tag` (categorical), request-
+    changes = `request_change` + `targets[]`. Mapped to existing contract; NO contract change made.
+  - **Activity thread** from the append-only audit trail (`GET /jobs/{id}/approvals`) — approvals +
+    deliveries, chronological. **Comment box** → `action=comment`.
+  - Mutations via a **server action** reading the httpOnly Supabase cookie (`submitReviewAction`);
+    `revalidatePath` + `router.refresh` reloads the thread. Session-gated, light+dark, real empty states.
+  - **Resilience (§2):** new reusable **`useLocalDraft` + `useUnsavedGuard`** (`web/lib/hooks.ts`) — pins +
+    comment mirrored to localStorage + guarded on unload so a dropped connection / power-cut never loses a
+    reviewer's notes. Reuse these on the portal + remaining editors.
+  - `api.ts`: `getJob`, `getJobAuditTrail`, `ApiDelivery`/`JobAuditTrail` types.
+
+**Open / next:** (1) **Playwright light/dark screenshots of the review screen — NOT yet done** (deferred for
+budget; the one human-gate step still owed before this screen is "verified" per the build rules). (2) **Client
+portal** — reuses `CreativeReview` + the hooks; low-privilege (constraint #3); confirm the magic-link session
+mechanism first (`api/routers/approvals.py` has `POST /jobs/{id}/magic-link` + `POST /approvals/magic` — a
+signed, job-scoped, expiring grant; no login). (3) Content calendar. (4) Tasks table. Known caveat unchanged:
+save actions need a real Supabase login (dev-token path is read-only), so screenshots need seeded owner-token data.
+
+---
+
+## ► (2026-07-20 deep-night, main `5670d81`) — FRONTEND session: 3 screens + compositor wiring + roadmap
 
 **359 Suite / 18 contracts green, ruff clean, web tsc+eslint+build clean.** Dedicated frontend session,
 built on **Opus**. Five commits on `main` (Suite) + one on `mimik-contracts`:
