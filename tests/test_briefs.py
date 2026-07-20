@@ -80,6 +80,70 @@ async def test_signoff_freezes_brief(client: AsyncClient) -> None:
     assert again.status_code == 409
 
 
+async def test_update_draft_sections_persists(client: AsyncClient) -> None:
+    token = await _new_tenant(client, "Mimik", "mimik")
+    _, bid = await _new_brand(client, token)
+    brief_id = (
+        await client.post("/briefs", json={"brand_id": bid}, headers=_auth(token))
+    ).json()["id"]
+
+    # Fill the human-authored sections (6-9) plus refine §1.
+    sections = {
+        "snapshot": "ACME builds artisanal widgets for makers.",
+        "voice_tone": "Warm, precise, a little playful.",
+        "imagery_style": "Bright product photography on paper grounds.",
+        "guardrails_dos": ["Use the wordmark", "Keep 5% margins"],
+        "guardrails_donts": ["No stock gradients"],
+        "deliverable_formats": ["ig_post", "poster_a"],
+    }
+    patched = await client.patch(
+        f"/briefs/{brief_id}", json=sections, headers=_auth(token)
+    )
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["sections"]["snapshot"] == sections["snapshot"]
+    assert body["sections"]["guardrails_dos"] == ["Use the wordmark", "Keep 5% margins"]
+    assert body["sections"]["deliverable_formats"] == ["ig_post", "poster_a"]
+
+    # Persisted, not just echoed.
+    fetched = await client.get(f"/briefs/{brief_id}", headers=_auth(token))
+    assert fetched.json()["sections"]["imagery_style"] == sections["imagery_style"]
+
+
+async def test_update_frozen_brief_rejected(client: AsyncClient) -> None:
+    token = await _new_tenant(client, "Mimik", "mimik")
+    _, bid = await _new_brand(client, token)
+    brief_id = (
+        await client.post("/briefs", json={"brand_id": bid}, headers=_auth(token))
+    ).json()["id"]
+    await client.post(
+        f"/briefs/{brief_id}/signoff",
+        json={"signed_off_by": "designer@mimik"},
+        headers=_auth(token),
+    )
+
+    # A frozen brief is locked — edits must go through /revise, never in-place.
+    resp = await client.patch(
+        f"/briefs/{brief_id}", json={"snapshot": "sneaky edit"}, headers=_auth(token)
+    )
+    assert resp.status_code == 409
+
+
+async def test_update_brief_idor_across_tenants(client: AsyncClient) -> None:
+    token_a = await _new_tenant(client, "Agency A", "a")
+    token_b = await _new_tenant(client, "Agency B", "b")
+    _, a_bid = await _new_brand(client, token_a)
+    a_brief_id = (
+        await client.post("/briefs", json={"brand_id": a_bid}, headers=_auth(token_a))
+    ).json()["id"]
+
+    # Tenant B cannot edit tenant A's draft -> 404 (tenant-scoped at the data layer).
+    leaked = await client.patch(
+        f"/briefs/{a_brief_id}", json={"snapshot": "hijack"}, headers=_auth(token_b)
+    )
+    assert leaked.status_code == 404, "IDOR: tenant B edited tenant A's brief!"
+
+
 async def test_idor_brief_isolation_across_tenants(client: AsyncClient) -> None:
     token_a = await _new_tenant(client, "Agency A", "a")
     token_b = await _new_tenant(client, "Agency B", "b")

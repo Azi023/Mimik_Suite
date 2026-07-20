@@ -42,21 +42,34 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
         </Link>
 
         <nav className="rail__nav" aria-label="Sections">
-          {railItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`rail-btn${item.active ? " rail-btn--active" : ""}`}
-              aria-current={item.active ? "page" : undefined}
-              aria-label={item.label}
-              title={item.label}
-            >
-              <NavGlyph id={item.id} />
-              {item.badge !== undefined && item.badge > 0 && (
-                <span className="rail-btn__badge">{item.badge}</span>
-              )}
-            </button>
-          ))}
+          {railItems.map((item) =>
+            // Brand Briefs is a real route; the rest are not wired yet (plain buttons).
+            item.id === "brand-briefs" ? (
+              <Link
+                key={item.id}
+                className="rail-btn"
+                href="/briefs"
+                aria-label={item.label}
+                title={item.label}
+              >
+                <NavGlyph id={item.id} />
+              </Link>
+            ) : (
+              <button
+                key={item.id}
+                type="button"
+                className={`rail-btn${item.active ? " rail-btn--active" : ""}`}
+                aria-current={item.active ? "page" : undefined}
+                aria-label={item.label}
+                title={item.label}
+              >
+                <NavGlyph id={item.id} />
+                {item.badge !== undefined && item.badge > 0 && (
+                  <span className="rail-btn__badge">{item.badge}</span>
+                )}
+              </button>
+            ),
+          )}
         </nav>
 
         <div className="rail__footer">

@@ -111,6 +111,28 @@ async def signoff_brief(
     return to_brief(row)
 
 
+@router.patch("/{brief_id}", response_model=Brief)
+async def update_brief(
+    brief_id: str,
+    body: BriefSections,
+    principal: Principal = Depends(require_role("owner", "admin", "ops", "designer", "team")),
+    session: AsyncSession = Depends(get_session),
+) -> Brief:
+    """Save edits to a DRAFT brief's sections (full-replace of the 9 sections). This is how §6-9
+    (the human-filled sections) get filled and §1-5 refined before sign-off. Non-destructive:
+    a FROZEN brief is locked — editing it is a new version via /revise, never an in-place change,
+    so an edit on a frozen brief is rejected (409)."""
+    row = await repo.get_brief(session, tenant_id=principal.tenant_id, brief_id=brief_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Brief not found")
+    if row.status == BriefStatus.FROZEN.value:
+        raise HTTPException(status_code=409, detail="Brief is frozen — revise to edit.")
+
+    row.sections = body.model_dump(mode="json")
+    await session.commit()
+    return to_brief(row)
+
+
 @router.post("/{brief_id}/revise", response_model=Brief, status_code=201)
 async def revise_brief(
     brief_id: str,

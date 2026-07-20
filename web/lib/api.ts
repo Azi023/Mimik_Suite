@@ -381,6 +381,29 @@ async function apiPost<T>(path: string, body: unknown, sessionToken?: string): P
   return (await response.json()) as T;
 }
 
+async function apiPatch<T>(path: string, body: unknown, sessionToken?: string): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  const token = resolveBearer(sessionToken);
+  if (token !== undefined) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, `PATCH ${path} -> ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 /**
  * Every endpoint below accepts an optional `sessionToken` — the per-user Supabase
  * bearer, threaded server-side from `lib/session.getSessionToken`. When omitted, the
@@ -429,6 +452,78 @@ export function submitApproval(
   sessionToken?: string,
 ): Promise<ApprovalResponse> {
   return apiPost<ApprovalResponse>("/approvals", body, sessionToken);
+}
+
+/* ---------------------------------------------------------------------------
+   Briefs — the versioned, sign-off-able brand-brief document.
+--------------------------------------------------------------------------- */
+
+/** mimik_contracts.enums.BriefStatus. In practice signoff jumps draft->frozen directly. */
+export type ApiBriefStatus = "draft" | "in_review" | "signed_off" | "frozen";
+
+/** mimik_contracts.brief.BriefSections — the 9 designer sections (1-5 auto-draft, 6-9 human). */
+export interface ApiBriefSections {
+  snapshot: string | null;
+  logo_notes: string | null;
+  tokens: ApiBrandTokens;
+  voice_tone: string | null;
+  imagery_style: string | null;
+  guardrails_dos: string[];
+  guardrails_donts: string[];
+  references: ApiReference[];
+  deliverable_formats: string[];
+}
+
+/** mimik_contracts.brief.Brief — versioned; FROZEN = signed-off + locked (edits become new versions). */
+export interface ApiBrief {
+  id: string;
+  created_at: string;
+  tenant_id: string;
+  client_id: string;
+  brand_id: string;
+  version: number;
+  status: ApiBriefStatus;
+  sections: ApiBriefSections;
+  signed_off_by: string | null;
+  frozen_at: string | null;
+}
+
+/** GET /briefs — the tenant's briefs, optionally filtered to one client. */
+export function listBriefs(clientId?: string, sessionToken?: string): Promise<ApiBrief[]> {
+  const query = clientId !== undefined ? `?client_id=${encodeURIComponent(clientId)}` : "";
+  return apiGet<ApiBrief[]>(`/briefs${query}`, sessionToken);
+}
+
+/** GET /briefs/{id}. */
+export function getBrief(briefId: string, sessionToken?: string): Promise<ApiBrief> {
+  return apiGet<ApiBrief>(`/briefs/${encodeURIComponent(briefId)}`, sessionToken);
+}
+
+/** PATCH /briefs/{id} — full-replace the 9 sections of a DRAFT brief (409 if frozen). */
+export function updateBriefSections(
+  briefId: string,
+  sections: ApiBriefSections,
+  sessionToken?: string,
+): Promise<ApiBrief> {
+  return apiPatch<ApiBrief>(`/briefs/${encodeURIComponent(briefId)}`, sections, sessionToken);
+}
+
+/** POST /briefs/{id}/signoff — freeze the brief; locks it (a later change becomes a new version). */
+export function signoffBrief(
+  briefId: string,
+  signedOffBy: string,
+  sessionToken?: string,
+): Promise<ApiBrief> {
+  return apiPost<ApiBrief>(
+    `/briefs/${encodeURIComponent(briefId)}/signoff`,
+    { signed_off_by: signedOffBy },
+    sessionToken,
+  );
+}
+
+/** POST /briefs/{id}/revise — mint version N+1 as a fresh draft seeded from this brief's sections. */
+export function reviseBrief(briefId: string, sessionToken?: string): Promise<ApiBrief> {
+  return apiPost<ApiBrief>(`/briefs/${encodeURIComponent(briefId)}/revise`, {}, sessionToken);
 }
 
 /* ---------------------------------------------------------------------------
