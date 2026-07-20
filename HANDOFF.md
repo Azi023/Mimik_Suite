@@ -4,42 +4,47 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `1d06afa`) — REVIEW LOOP + CALENDAR + TASKS (3 product screens)
+## ► LATEST (2026-07-21, main `6b97d70`) — FULL PRODUCT LOOP: review + portal + calendar + tasks + IDOR fix
 
-**web tsc + next lint clean. Backend/contracts untouched → 359 Suite / 18 contracts still green by
-construction.** Dedicated frontend session on **Opus**. Three product screens shipped across two
-additive commits (`82a1703` review, `1d06afa` calendar+tasks). **Client portal BLOCKED on a backend
-IDOR gap — see ⚠ below; NOT built (won't ship a leaky portal).** Commits are LOCAL — **no git remote is
-configured** (`git remote -v` empty), so nothing was pushed; add a remote then `git push`.
+**361 Suite (was 359) / 18 contracts green, ruff clean, web tsc + next lint clean.** Dedicated frontend
+session on **Opus** — shipped all 4 target screens PLUS a security fix that surfaced mid-session. Six
+commits on `main`. **Commits are LOCAL — no git remote is configured** (`git remote -v` empty); add a
+remote then `git push`.
 
-### ⚠ SECURITY BLOCKER — client portal needs a backend authZ fix first (IDOR, constraint #2)
-`GET /jobs/{id}` (`api/routers/jobs.py:83`) and `GET /jobs` (`:95`) filter by **tenant only** — they do
-NOT confine a `client` principal to its own `client_id`, unlike `tasks.py`/`creatives.py` which do. A
-client-role portal session would see EVERY client's jobs in the tenant (titles/schedules/metadata).
-Creative *content* is safe (`/creatives` is confined, 404s cross-client), but this is still an IDOR-shaped
-leak. **Fix (backend, ~10 lines + tests, operator-gated):** in `get_job` + `list_jobs`, add the same
-`if principal.role == ActorRole.CLIENT.value: client_id = principal.client_id` confinement tasks.py uses;
-add a negative test (client A cannot read client B's job). **Second gap:** the magic-link mechanism
-(`api/core/magic_link.py`, `POST /approvals/magic`) is **write-only** — there is no magic-link-authenticated
-READ endpoint, so the frictionless no-login WhatsApp portal ALSO needs a new low-privilege read route
-(return job+creatives+brand from a verified grant). Until one of these lands, the portal cannot be built
-safely. Frontend is ready to reuse `CreativeReview` + the hooks the moment the read path is authorized.
+Commits: `82a1703` review · `1d06afa` calendar+tasks · `a924a00` IDOR fix · `6b97d70` portal
+(+ HANDOFF docs commits `a3f90e1`, `10c0f86`).
 
-### Shipped this session
-- **/calendar** (`1d06afa`) — month grid (Mon-first) of jobs by publish_date + at-risk badges, from
-  GET /ops/board. Month nav + Today; opens on the soonest job; job → creative review. Read-only.
-- **/tasks** (`1d06afa`) — filterable (status+type) + paginated tasks table over GET /tasks (client
-  principals auto-confined by the backend). Status advance open→in_progress→done via server action →
-  POST /tasks/{id}/status (team-gated; client 403s inline). NOTE: Task has no `priority` field → filtered
-  by type. Rail nav now routes board→/, calendar→/calendar, briefs→/briefs, + a Tasks entry.
-- **/jobs/[id]/review** (below) — the sellable core review + approval loop.
+### 🔒 Security fix landed mid-session (constraint #2)
+`GET /jobs/{id}` + `GET /jobs` (`api/routers/jobs.py`) filtered by **tenant only** — a `client`-role
+principal could read/enumerate EVERY client's jobs in its tenant (metadata leak; creative content was
+already safe via the confined `/creatives`). **Fixed** (`a924a00`): both now confine a client principal to
+its own `client_id`, mirroring tasks.py/creatives.py (404 not 403). +2 negative tests via the Supabase
+harness (client A → 404 on client B's job; listing filtered). This UNBLOCKED the portal.
+
+### Still open on the portal (follow-ups, not blocking what shipped)
+- **Magic-link no-login flow:** `api/core/magic_link.py` + `POST /approvals/magic` are **write-only** —
+  there is no magic-link-authenticated READ endpoint. The portal we shipped uses an AUTHENTICATED
+  client-role Supabase session. The frictionless WhatsApp magic-link portal still needs a new
+  low-privilege read route (return job+creatives+brand from a verified grant). Operator-gated.
+- **Role-based route-gating:** a client session could still LOAD internal routes (`/`, `/ops`) — the DATA
+  is protected server-side, but the chrome isn't steered. Add a redirect (client role → /portal).
+
+### Shipped this session (all session-gated, light+dark, real empty states, token system)
+- **/portal + /portal/jobs/[id]** (`6b97d70`) — bounded client portal (constraint #3): PortalShell (no
+  internal nav), index lists ONLY the client's own jobs, review reuses the SAME `CreativeReview` +
+  hooks. Client acts as itself; foreign id 404s.
+- **/calendar** (`1d06afa`) — month grid (Mon-first) of jobs by publish_date + at-risk badges from
+  GET /ops/board. Month nav + Today; opens on the soonest job; job → review. Read-only.
+- **/tasks** (`1d06afa`) — filterable (status+type) + paginated table over GET /tasks. Status advance
+  open→in_progress→done via server action → POST /tasks/{id}/status (team-gated; client 403s inline).
+  NOTE: Task has no `priority` field → filtered by type. Rail nav now routes board/calendar/briefs/tasks.
+- **/jobs/[id]/review** (`82a1703`) — the sellable core review + approval loop (below).
 
 ---
 
 ### /jobs/[id]/review — creative review + approval (the sellable core)
 
-Dedicated frontend session on **Opus**. Reachable from the board's slide-in review panel ("Open full
-review ↗" on `ReviewPanel`). One additive commit on `main`:
+Reachable from the board's slide-in review panel ("Open full review ↗" on `ReviewPanel`).
 
 - **`/jobs/[id]/review`** (`82a1703`) — image-first creative review (ref: Filestage), reachable from the
   board's slide-in review panel ("Open full review ↗" on `ReviewPanel`).
@@ -62,11 +67,12 @@ review ↗" on `ReviewPanel`). One additive commit on `main`:
     reviewer's notes. Reuse these on the portal + remaining editors.
   - `api.ts`: `getJob`, `getJobAuditTrail`, `ApiDelivery`/`JobAuditTrail` types.
 
-**Open / next:** (1) **Backend authZ fix + magic-link read endpoint → THEN the client portal** (see ⚠ above —
-this is the gating item). (2) **Playwright light/dark screenshots of all 3 new screens — NOT yet done**
-(deferred for budget; the human-gate step still owed before "verified" per the build rules; needs seeded
-owner-token data since the dev-token path is read-only). (3) **Push** — add a git remote first. Known caveat
-unchanged: save/mutation actions need a real Supabase login (dev-token path is read-only).
+**Open / next:** (1) **Push** — no git remote configured; add one then `git push` (6 local commits).
+(2) **Playwright light/dark screenshots of the 4 new screens — NOT yet done** (deferred for budget; the
+human-gate step still owed before "verified" per the build rules; needs seeded owner-token data since the
+dev-token path is read-only). (3) **Magic-link no-login portal** — needs a backend read endpoint (see
+follow-ups above). (4) **Role-based route-gating** (client role → /portal). Known caveat unchanged:
+save/mutation actions need a real Supabase login (dev-token path is read-only).
 
 ---
 
