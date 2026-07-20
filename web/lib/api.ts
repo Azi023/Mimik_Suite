@@ -381,6 +381,30 @@ async function apiPost<T>(path: string, body: unknown, sessionToken?: string): P
   return (await response.json()) as T;
 }
 
+/** Longer ceiling for multipart uploads (reference images) than the 3s read timeout. */
+const UPLOAD_TIMEOUT_MS = 20000;
+
+async function apiPostForm<T>(path: string, form: FormData, sessionToken?: string): Promise<T> {
+  // No explicit Content-Type — fetch sets the multipart boundary itself.
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = resolveBearer(sessionToken);
+  if (token !== undefined) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "POST",
+    headers,
+    body: form,
+    cache: "no-store",
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, `POST ${path} -> ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 async function apiPatch<T>(path: string, body: unknown, sessionToken?: string): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -524,6 +548,111 @@ export function signoffBrief(
 /** POST /briefs/{id}/revise — mint version N+1 as a fresh draft seeded from this brief's sections. */
 export function reviseBrief(briefId: string, sessionToken?: string): Promise<ApiBrief> {
   return apiPost<ApiBrief>(`/briefs/${encodeURIComponent(briefId)}/revise`, {}, sessionToken);
+}
+
+/* ---------------------------------------------------------------------------
+   Onboarding — create client / brand / pillars, presets, reference uploads.
+--------------------------------------------------------------------------- */
+
+/** mimik_contracts.pillars.PillarPreset — a starter content pillar (static template). */
+export interface ApiPillarPreset {
+  key: string;
+  name: string;
+  description: string;
+}
+
+/** GET /pillars/presets — the static starter pillars (no auth/tenant needed, but token is fine). */
+export function listPillarPresets(sessionToken?: string): Promise<ApiPillarPreset[]> {
+  return apiGet<ApiPillarPreset[]>("/pillars/presets", sessionToken);
+}
+
+export interface CreateClientBody {
+  name: string;
+  contact_email?: string | null;
+  phone?: string | null;
+  industry?: string | null;
+  website_url?: string | null;
+  instagram?: string | null;
+  notes?: string | null;
+}
+
+/** POST /clients — create a client in the caller's tenant. */
+export function createClient(body: CreateClientBody, sessionToken?: string): Promise<ApiClient> {
+  return apiPost<ApiClient>("/clients", body, sessionToken);
+}
+
+/** A client-shared reference at onboarding (fit_score is assigned later by ingest). */
+export interface ReferenceInput {
+  url: string;
+  source?: string | null;
+  note?: string | null;
+}
+
+export interface CreateBrandBody {
+  client_id: string;
+  name: string;
+  slug: string;
+  niche?: string | null;
+  services?: string[];
+  target_audience?: string | null;
+  brand_voice?: string | null;
+  tone_keywords?: string[];
+  dos?: string[];
+  donts?: string[];
+  handles?: Record<string, string>;
+  imagery_style?: string | null;
+  tokens?: ApiBrandTokens;
+  references?: ReferenceInput[];
+}
+
+/** POST /brands — create a brand (with tokens + client-shared references) in one call. */
+export function createBrand(body: CreateBrandBody, sessionToken?: string): Promise<ApiBrand> {
+  return apiPost<ApiBrand>("/brands", body, sessionToken);
+}
+
+export interface CreatePillarBody {
+  client_id: string;
+  /** Adopt a preset by key OR define a custom pillar by name (exactly one). */
+  preset_key?: string;
+  name?: string;
+  description?: string | null;
+}
+
+/** POST /pillars — adopt a preset or define a custom content pillar. */
+export function createPillar(
+  body: CreatePillarBody,
+  sessionToken?: string,
+): Promise<ApiContentPillar> {
+  return apiPost<ApiContentPillar>("/pillars", body, sessionToken);
+}
+
+/** POST /briefs — mint a draft brief for a brand (the onboarding auto-draft). */
+export function createBrief(brandId: string, sessionToken?: string): Promise<ApiBrief> {
+  return apiPost<ApiBrief>("/briefs", { brand_id: brandId }, sessionToken);
+}
+
+/** A registered brand-library asset (subset of mimik_contracts.BrandAsset). */
+export interface ApiBrandAsset {
+  id: string;
+  brand_id: string;
+  kind: string;
+  filename: string;
+}
+
+/** POST /brands/{id}/assets — upload a client-shared reference image as a reference_creative asset. */
+export function uploadReferenceAsset(
+  brandId: string,
+  file: File,
+  sessionToken?: string,
+): Promise<ApiBrandAsset> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("kind", "reference_creative");
+  return apiPostForm<ApiBrandAsset>(
+    `/brands/${encodeURIComponent(brandId)}/assets`,
+    form,
+    sessionToken,
+  );
 }
 
 /* ---------------------------------------------------------------------------

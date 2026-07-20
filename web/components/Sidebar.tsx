@@ -140,10 +140,10 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
           ))}
         </div>
 
-        <button type="button" className="subbar__new">
+        <Link href="/onboarding" className="subbar__new">
           <PlusIcon size={14} />
           New client
-        </button>
+        </Link>
       </aside>
     </div>
   );

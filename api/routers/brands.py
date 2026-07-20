@@ -10,7 +10,7 @@ from api.core.auth import Principal, get_principal
 from api.db import repo
 from api.db.mappers import to_brand
 from api.db.session import get_session
-from mimik_contracts import Brand, BrandTokens
+from mimik_contracts import Brand, BrandTokens, Reference
 
 router = APIRouter(prefix="/brands", tags=["brands"])
 
@@ -31,6 +31,10 @@ class CreateBrand(BaseModel):
     # Design tokens at creation (colors/typography/logo) — validated by the contract, so a
     # payload can't smuggle an unsafe logo ref past the asset-ref validator.
     tokens: BrandTokens = Field(default_factory=BrandTokens)
+    # Vetted aesthetic references the client shares at onboarding (Pinterest / existing designs /
+    # social posts / websites, with an optional note). fit_score stays None until a later ingest
+    # pass scores them; these are the human-curated seeds of the mood board.
+    references: list[Reference] = Field(default_factory=list)
 
 
 @router.post("", response_model=Brand, status_code=201)
@@ -47,6 +51,7 @@ async def create_brand(
         raise HTTPException(status_code=404, detail="Client not found")
     fields = body.model_dump()
     fields["tokens"] = body.tokens.model_dump(mode="json")
+    fields["references"] = [r.model_dump(mode="json") for r in body.references]
     row = await repo.create_brand(session, tenant_id=principal.tenant_id, **fields)
     await session.commit()
     return to_brand(row)
