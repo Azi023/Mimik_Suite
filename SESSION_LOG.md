@@ -244,3 +244,15 @@ Chronological audit trail of decisions. Newest at bottom.
   get_by_placeholder(/prompt/i); Generate button role/name (.first visible+enabled); RESULT =
   img[src*='/generations/'] (NOT the broad cdn.leonardo — that matched the static UI gradient).
 - 295 Suite + 12 contracts green, ruff clean. Migrate to Leonardo API later = adapter swap.
+
+## 2026-07-20 — Session 4, iteration 12 (Leonardo strong-prompt + open_tool fix)
+
+- Adapter _open_tool now skips the home-goto when already on /generate (preserves the
+  operator-selected model instead of resetting to Auto). Tests green.
+- Ran a strong detailed prompt on the burner → premium G2G serum hero (Auto→Lucid Origin).
+  Big quality jump from prompt strength alone.
+- Model-selection via the UI dropdown is fiddly (the selector caught a features popup) — deferred
+  as a next-session harness enhancement (select model/style/quality reliably).
+- OpenAI/ChatGPT is logged into the SAME debug Chrome (chatgpt.com tab) — ready for a future
+  ChatGPT-image adapter using the same CDP-attach pattern; _pick_page already isolates tabs.
+- WhatsApp adapter (WAHA/OpenWA): DEFERRED to a NEW session per operator.

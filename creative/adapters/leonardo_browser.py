@@ -116,6 +116,10 @@ class LeonardoBrowserAdapter(ImageAdapter):
     # ---------- steps (each raises a clear, actionable error naming the failed step) ----------
 
     async def _open_tool(self, page: "Page") -> None:
+        # If we're already on the generation page (attached to a tab the operator set up with a
+        # chosen model/style), DON'T navigate — a goto back to home resets the model to Auto.
+        if "app.leonardo.ai/generate" in (page.url or ""):
+            return
         try:
             await page.goto(LEONARDO_URL, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
         except Exception as exc:  # noqa: BLE001 - re-raise with a step-named message
