@@ -1317,66 +1317,130 @@ ul {
    Tokens only: no new colors, radii, or shadows.
 --------------------------------------------------------------------------- */
 
+/* Split-screen sign-in: a dark brand panel (theme-invariant) beside the form.
+   Reference: shadcn "Studio Admin" login. On narrow screens the brand panel
+   drops and the form takes the full width. */
 .auth {
   min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 5fr 6fr;
+}
+
+.auth-brand {
+  background: var(--auth-brand-bg);
+  color: var(--auth-brand-ink);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--sp-6);
-  background: var(--canvas);
+  padding: var(--sp-8);
 }
 
-.auth-card {
-  width: 100%;
-  max-width: 380px;
+.auth-brand__inner {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
-  padding: var(--sp-7);
-  background: var(--surface);
-  border: 1px solid var(--card-border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lift);
-}
-
-.auth-card__brand {
-  display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  text-align: center;
+  gap: var(--sp-4);
+  max-width: 320px;
 }
 
-.auth-card__logo {
+.auth-brand__mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 56px;
+  height: 56px;
   border-radius: var(--r-md);
-  background: var(--accent);
-  color: var(--accent-ink);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--auth-brand-ink);
   font-weight: 700;
-  font-size: 18px;
-  flex-shrink: 0;
+  font-size: 26px;
 }
 
-.auth-card__title {
-  font-size: 17px;
-  font-weight: 700;
+.auth-brand__headline {
+  /* Explicit ink: the panel is dark in BOTH themes, so this must not inherit the global
+     (theme-dependent) heading color, which is dark-on-dark in light mode. */
+  color: var(--auth-brand-ink);
+  font-size: clamp(30px, 3.4vw, 42px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.auth-brand__tagline {
+  font-size: 15px;
+  color: var(--auth-brand-muted);
+  line-height: 1.5;
+}
+
+.auth-panel {
+  background: var(--canvas);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-7);
+}
+
+.auth-form {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.auth-form__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  text-align: center;
+}
+
+.auth-form__title {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
-.auth-card__subtitle {
-  font-size: 13px;
+.auth-form__sub {
+  font-size: 14px;
   color: var(--muted);
 }
 
-.auth-card__error {
+.auth-form__error {
   padding: var(--sp-3);
   border-radius: var(--r-sm);
   background: var(--accent-soft);
   color: var(--dot-new);
   font-size: 13px;
   font-weight: 500;
+  text-align: center;
+}
+
+.auth-form__submit {
+  margin-top: var(--sp-1);
+  padding: 12px;
+  border-radius: var(--r-sm);
+  background: var(--auth-brand-bg);
+  color: var(--auth-brand-ink);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.auth-form__submit:hover {
+  background: var(--auth-brand-hover);
+}
+
+@media (max-width: 720px) {
+  .auth {
+    grid-template-columns: 1fr;
+  }
+  .auth-brand {
+    display: none;
+  }
 }
 
 .auth-field {
@@ -1408,20 +1472,5 @@ ul {
 
 .auth-field__input:focus {
   background: var(--surface);
-  border-color: var(--accent);
-}
-
-.auth-card__submit {
-  margin-top: var(--sp-1);
-  padding: 11px;
-  border-radius: var(--r-sm);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 600;
-  font-size: 14px;
-  transition: background 0.15s ease;
-}
-
-.auth-card__submit:hover {
-  background: var(--accent-hover);
+  border-color: var(--ink);
 }

@@ -29,6 +29,12 @@
   --accent-soft: #eaf2fe;   /* active-nav tint */
   --accent-ink: #ffffff;
 
+  /* ---- auth brand panel + mono primary (theme-INVARIANT: always dark, both themes) ---- */
+  --auth-brand-bg: #101114;   /* near-black brand panel + primary button ground */
+  --auth-brand-ink: #f4f5f7;  /* text on the brand panel / primary button */
+  --auth-brand-muted: #9a9fa8;/* secondary text on the dark panel */
+  --auth-brand-hover: #24262c;/* primary button hover */
+
   /* ---- tag palette (saturated pastel fills, white text) ---- */
   --tag-blue: #4e9cf5;
   --tag-green: #58c25b;

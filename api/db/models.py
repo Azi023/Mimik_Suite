@@ -157,6 +157,28 @@ class UserAccountRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class InvitationRow(Base):
+    """A pending/consumed offer to join a tenant with a role + client scope. The accept-link
+    is a signed capability (api.core.invite_token); this row is the tenant-scoped state +
+    audit spine. Tenant isolation is enforced in the query layer (see api/db/repo.py)."""
+
+    __tablename__ = "invitations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tenants.id"), index=True, nullable=False
+    )
+    email: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    # client_ids an internal user is limited to; empty list = all clients in the tenant.
+    client_scopes: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    invited_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class CreativeDocRow(Base):
     """The stored creative: the 5-layer manifest (copy + template + layer recipes) as JSON."""
 

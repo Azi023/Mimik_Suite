@@ -18,6 +18,7 @@ from mimik_contracts import (
     CreativeDoc,
     CreativeManifest,
     Delivery,
+    Invitation,
     Job,
     Notification,
     PreferenceSignal,
@@ -36,6 +37,7 @@ from .models import (
     ContentPillarRow,
     CreativeDocRow,
     DeliveryRow,
+    InvitationRow,
     JobRow,
     NotificationRow,
     PreferenceSignalRow,
@@ -172,6 +174,21 @@ def to_user_account(row: UserAccountRow) -> UserAccount:
         client_id=row.client_id,
         name=row.name,
         active=row.active,
+    )
+
+
+def to_invitation(row: InvitationRow) -> Invitation:
+    return Invitation(
+        id=row.id,
+        created_at=_utc(row.created_at),
+        tenant_id=row.tenant_id,
+        email=row.email,
+        role=row.role,
+        client_scopes=row.client_scopes or [],
+        status=row.status,
+        invited_by=row.invited_by,
+        expires_at=_utc(row.expires_at),
+        accepted_at=_utc(row.accepted_at),
     )
 
 

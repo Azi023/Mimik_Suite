@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -21,6 +21,7 @@ from .models import (
     ContentPillarRow,
     CreativeDocRow,
     DeliveryRow,
+    InvitationRow,
     JobRow,
     NotificationRow,
     PreferenceSignalRow,
@@ -236,6 +237,46 @@ async def list_user_accounts(session: AsyncSession, *, tenant_id: str) -> list[U
         .order_by(UserAccountRow.created_at)
     )
     return list((await session.execute(stmt)).scalars())
+
+
+# --- Invitation (tenant-scoped; the invite lifecycle + audit spine) ---
+async def create_invitation(session: AsyncSession, *, tenant_id: str, **fields) -> InvitationRow:
+    row = InvitationRow(tenant_id=tenant_id, **fields)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_invitation(
+    session: AsyncSession, *, tenant_id: str, invitation_id: str
+) -> InvitationRow | None:
+    stmt = select(InvitationRow).where(
+        InvitationRow.id == invitation_id, InvitationRow.tenant_id == tenant_id
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def list_invitations(session: AsyncSession, *, tenant_id: str) -> list[InvitationRow]:
+    stmt = (
+        select(InvitationRow)
+        .where(InvitationRow.tenant_id == tenant_id)
+        .order_by(InvitationRow.created_at)
+    )
+    return list((await session.execute(stmt)).scalars())
+
+
+async def get_invitation_by_email(
+    session: AsyncSession, *, tenant_id: str, email: str, status: str | None = None
+) -> InvitationRow | None:
+    """Dedup lookup within a tenant (email compared case-insensitively). Optionally restrict
+    to a status (e.g. PENDING) so a new invite doesn't collide with a terminal one."""
+    stmt = select(InvitationRow).where(
+        InvitationRow.tenant_id == tenant_id,
+        func.lower(InvitationRow.email) == email.lower(),
+    )
+    if status is not None:
+        stmt = stmt.where(InvitationRow.status == status)
+    return (await session.execute(stmt)).scalars().first()
 
 
 # --- CreativeDoc ---

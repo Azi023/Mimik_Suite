@@ -14,6 +14,7 @@ from api.routers import (
     clients,
     creatives,
     intake,
+    invitations,
     jobs,
     ops,
     pillars,
@@ -43,6 +44,7 @@ app.include_router(ops.router)
 app.include_router(tasks.router)
 app.include_router(preferences.router)
 app.include_router(billing.router)
+app.include_router(invitations.router)
 
 
 @app.get("/health", tags=["meta"])

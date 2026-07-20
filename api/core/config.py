@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # JWTs. `supabase_url` drives the derived JWKS endpoint for asymmetric (ES256/RS256)
     # keys — the modern default. `supabase_jwt_secret` is the legacy HS256 shared secret,
     # used only if a project still signs symmetrically.
+    # Where the web app serves the invite-accept screen. The accept-link handed to an admin is
+    # f"{app_base_url}/invite/accept?token=...". Config-only; override per environment via env.
+    app_base_url: str = "http://localhost:3000"
+
     supabase_url: str = ""
     supabase_jwt_secret: str = ""
     # Overridable for tests; empty -> derived from supabase_url.
