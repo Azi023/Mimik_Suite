@@ -57,6 +57,18 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str = ""
     google_oauth_refresh_token: str = ""
 
+    # WhatsApp outbound (NotificationChannel.WHATSAPP). Swappable like the image backends:
+    # `whatsapp_provider` picks the sink. "none" (default) = inert, no network, no account —
+    # a WHATSAPP notification is recorded but left PENDING until a provider is wired.
+    # "meta_cloud" = official WhatsApp Business Platform (Cloud API); needs the fields below.
+    # The access token is a secret — provide via env only, never commit it.
+    whatsapp_provider: str = "none"  # none | meta_cloud
+    whatsapp_phone_number_id: str = ""  # the WABA sender's phone-number ID (not the number)
+    whatsapp_access_token: str = ""  # SECRET — Meta permanent/system-user token
+    whatsapp_template_name: str = "creative_ready"  # a pre-approved Utility template
+    whatsapp_template_lang: str = "en"
+    whatsapp_api_base: str = "https://graph.facebook.com/v21.0"  # overridable for tests
+
 
 _settings: Settings | None = None
 
