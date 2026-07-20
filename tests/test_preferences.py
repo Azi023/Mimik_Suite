@@ -9,6 +9,7 @@ team code path. The router is included here idempotently so main.py stays untouc
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -30,7 +31,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _new_tenant(client: AsyncClient, name: str, slug: str) -> str:
-    resp = await client.post("/tenants", json={"name": name, "slug": slug})
+    resp = await client.post("/tenants", json={"name": name, "slug": slug}, headers=superadmin_headers())
     assert resp.status_code == 201, resp.text
     return resp.json()["access_token"]
 

@@ -8,6 +8,7 @@ a tmp local root.
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ def _auth(token: str) -> dict[str, str]:
 async def _setup_job_with_creative(client: AsyncClient) -> tuple[str, str, str, str]:
     """Bootstrap tenant → client → brand → job → creative. Returns (owner_token, client_id,
     job_id, creative_doc_id)."""
-    owner = (await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"})).json()[
+    owner = (await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"}, headers=superadmin_headers())).json()[
         "access_token"
     ]
     client_id = (
@@ -151,7 +152,7 @@ async def test_latest_creative_used_when_id_omitted(client: AsyncClient) -> None
 
 async def test_approval_on_foreign_job_is_404(client: AsyncClient) -> None:
     _owner_a, _cid_a, job_a, creative_a = await _setup_job_with_creative(client)
-    owner_b = (await client.post("/tenants", json={"name": "B", "slug": "b"})).json()[
+    owner_b = (await client.post("/tenants", json={"name": "B", "slug": "b"}, headers=superadmin_headers())).json()[
         "access_token"
     ]
     # Tenant B cannot approve tenant A's job even with the real ids.

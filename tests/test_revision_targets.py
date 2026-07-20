@@ -4,6 +4,7 @@ targeted copy re-draft — while staying client-bounded and fenced (untrusted te
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 from httpx import AsyncClient
 
 from creative.copy.l0 import draft_copy
@@ -15,7 +16,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _job_with_creative(client: AsyncClient) -> tuple[str, str, str]:
-    owner = (await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"})).json()[
+    owner = (await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"}, headers=superadmin_headers())).json()[
         "access_token"
     ]
     client_id = (

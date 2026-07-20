@@ -15,6 +15,7 @@ touched. The archive renderer is stubbed so approval runs browser-free.
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 import pytest
 from httpx import AsyncClient
 
@@ -40,7 +41,7 @@ def _stub_render_and_local_archive(monkeypatch, tmp_path):
 
 
 async def _new_tenant(client: AsyncClient) -> str:
-    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"})
+    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"}, headers=superadmin_headers())
     assert resp.status_code == 201, resp.text
     return resp.json()["access_token"]
 

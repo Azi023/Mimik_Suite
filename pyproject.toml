@@ -42,6 +42,7 @@ packages = ["api", "creative"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["tests"]  # lets test modules import shared helpers from conftest (superadmin_headers)
 
 [tool.ruff]
 line-length = 100

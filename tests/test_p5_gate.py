@@ -14,6 +14,7 @@ that gates access. NO network, NO real Stripe keys.
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 import hashlib
 import hmac
 import json
@@ -61,7 +62,7 @@ def _signed_webhook(body: dict, *, ts: int | None = None):
 
 async def test_p5_claim_to_paid_access_gate(client: AsyncClient, billing_env) -> None:
     # A storefront tenant to claim through.
-    tenant = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik-store"})
+    tenant = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik-store"}, headers=superadmin_headers())
     owner = tenant.json()["access_token"]
 
     # 1) P5.1: a public claim creates a prospect client + starts a draft brief.

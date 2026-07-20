@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.core.auth import Principal, require_role
 from api.core.security import create_access_token
 from api.db import repo
 from api.db.mappers import to_tenant
@@ -31,7 +32,11 @@ class TenantCreated(BaseModel):
 
 
 @router.post("", response_model=TenantCreated, status_code=201)
-async def create_tenant(body: CreateTenant, session: AsyncSession = Depends(get_session)) -> TenantCreated:
+async def create_tenant(
+    body: CreateTenant,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_role("super_admin")),
+) -> TenantCreated:
     row = await repo.create_tenant(session, name=body.name, slug=body.slug)
     await session.commit()
     # The founding principal of a tenant is its owner (can provision accounts via /admin).

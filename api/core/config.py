@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     # Overridable for tests; empty -> derived from supabase_url.
     supabase_jwks_url: str = ""
 
+    # Comma-separated Supabase emails elevated to super_admin (platform operators). Secret-free,
+    # env-provided: identity still comes from a verified Supabase token; this only lifts the role.
+    superadmin_emails: str = ""
+
+    @property
+    def superadmin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.superadmin_emails.split(",") if e.strip()}
+
     @property
     def resolved_jwks_url(self) -> str:
         if self.supabase_jwks_url:

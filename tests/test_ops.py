@@ -7,6 +7,7 @@ asserted the same way it is everywhere else — a foreign tenant's job is a 404,
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,7 +37,7 @@ def _auth(token: str) -> dict[str, str]:
 async def _bootstrap(client: AsyncClient, *, slug: str = "mimik") -> tuple[str, str, str]:
     """Bootstrap tenant → client → brand. Returns (owner_token, client_id, brand_id)."""
     owner = (
-        await client.post("/tenants", json={"name": slug, "slug": slug})
+        await client.post("/tenants", json={"name": slug, "slug": slug}, headers=superadmin_headers())
     ).json()["access_token"]
     client_id = (
         await client.post("/clients", json={"name": "RCD Central"}, headers=_auth(owner))
@@ -292,7 +293,7 @@ async def test_transition_on_foreign_tenant_job_is_404(client: AsyncClient) -> N
     owner_a, _client_id, brand_id = await _bootstrap(client, slug="a")
     job_a = await _make_job(client, owner_a, brand_id)
     owner_b = (
-        await client.post("/tenants", json={"name": "B", "slug": "b"})
+        await client.post("/tenants", json={"name": "B", "slug": "b"}, headers=superadmin_headers())
     ).json()["access_token"]
     # Tenant B cannot move tenant A's job even with the real id.
     resp = await client.post(

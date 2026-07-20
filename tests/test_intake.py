@@ -3,6 +3,7 @@ outbound fetch); the authenticated cold-bootstrap does the SSRF-guarded extracti
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 import pytest
 from httpx import AsyncClient
 
@@ -15,7 +16,7 @@ def _auth(token: str) -> dict[str, str]:
 
 async def _storefront(client: AsyncClient) -> tuple[str, str]:
     """Create a storefront tenant; return (slug, owner_token)."""
-    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik-store"})
+    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik-store"}, headers=superadmin_headers())
     return "mimik-store", resp.json()["access_token"]
 
 

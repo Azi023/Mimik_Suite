@@ -9,6 +9,7 @@ never portal surface).
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 import json
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _new_tenant(client: AsyncClient, name: str, slug: str) -> tuple[str, str]:
-    resp = await client.post("/tenants", json={"name": name, "slug": slug})
+    resp = await client.post("/tenants", json={"name": name, "slug": slug}, headers=superadmin_headers())
     assert resp.status_code == 201, resp.text
     data = resp.json()
     return data["tenant"]["id"], data["access_token"]

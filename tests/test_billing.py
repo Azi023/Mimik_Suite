@@ -4,6 +4,7 @@ built locally with the test webhook secret. Nothing here ever requires real Stri
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 import hashlib
 import hmac
 import json
@@ -110,7 +111,7 @@ def supabase_env(monkeypatch: pytest.MonkeyPatch):
 
 
 async def _bootstrap_tenant(client: AsyncClient) -> tuple[str, str]:
-    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"})
+    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"}, headers=superadmin_headers())
     assert resp.status_code == 201, resp.text
     data = resp.json()
     return data["tenant"]["id"], data["access_token"]

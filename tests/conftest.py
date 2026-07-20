@@ -9,9 +9,17 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import api.db.models  # noqa: F401  (register tables on Base.metadata)
+from api.core.security import create_access_token
 from api.db.base import Base
 from api.db.session import get_session
 from api.main import app
+
+
+def superadmin_headers() -> dict[str, str]:
+    """Auth header carrying a first-party super_admin token — the role now required to create a
+    tenant (POST /tenants is gated). tenant_id is a non-scoping placeholder; only the role gates."""
+    token = create_access_token(tenant_id="platform", role="super_admin")
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest_asyncio.fixture

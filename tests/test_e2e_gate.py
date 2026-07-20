@@ -8,6 +8,7 @@ that the manifest re-renders deterministically at archive time.
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,7 @@ async def test_intake_to_autoarchive_end_to_end(
     monkeypatch.setenv("ARCHIVE_LOCAL_ROOT", str(archive_root))
 
     # --- intake ---
-    owner = (await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"})).json()[
+    owner = (await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"}, headers=superadmin_headers())).json()[
         "access_token"
     ]
     client_id = (

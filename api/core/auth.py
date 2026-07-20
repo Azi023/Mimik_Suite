@@ -78,9 +78,15 @@ async def get_principal(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="No active account for this identity"
             )
+        # Platform-operator elevation: a verified identity whose email is on the configured
+        # super_admin allowlist is lifted to the cross-tenant role. Identity is still fully
+        # verified via Supabase and mapped through UserAccount — only the role is raised.
+        role = account.role
+        if account.email and account.email.lower() in get_settings().superadmin_email_set:
+            role = "super_admin"
         return Principal(
             tenant_id=account.tenant_id,
-            role=account.role,
+            role=role,
             user_id=account.id,
             client_id=account.client_id,
             auth_subject=subject,

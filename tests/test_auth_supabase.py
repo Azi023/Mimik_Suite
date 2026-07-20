@@ -7,6 +7,7 @@ with zero network. The first-party bootstrap path stays green (the isolation sui
 
 from __future__ import annotations
 
+from conftest import superadmin_headers
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -74,7 +75,7 @@ def _auth(token: str) -> dict[str, str]:
 
 async def _bootstrap_tenant(client: AsyncClient) -> tuple[str, str]:
     """Create a tenant; return (tenant_id, owner first-party token)."""
-    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"})
+    resp = await client.post("/tenants", json={"name": "Mimik", "slug": "mimik"}, headers=superadmin_headers())
     assert resp.status_code == 201, resp.text
     data = resp.json()
     return data["tenant"]["id"], data["access_token"]
@@ -173,7 +174,7 @@ async def test_client_account_cross_tenant_client_id_rejected(client: AsyncClien
     made = await client.post("/clients", json={"name": "A client"}, headers=_auth(owner_a))
     a_client = made.json()["id"]
 
-    resp_b = await client.post("/tenants", json={"name": "B", "slug": "b"})
+    resp_b = await client.post("/tenants", json={"name": "B", "slug": "b"}, headers=superadmin_headers())
     owner_b = resp_b.json()["access_token"]
     # Owner B cannot bind a client account to tenant A's client.
     resp = await _provision(client, owner_b, auth_subject="c-1", role="client", client_id=a_client)
