@@ -4,7 +4,34 @@
 
 ---
 
-## ► LATEST (2026-07-20 night, main `55c0eae`) — super_admin gate SHIPPED; IAM designed; WhatsApp+generating+ChatGPT merged
+## ► LATEST (2026-07-20 late, main `fc2cf04`) — IAM invitations SHIPPED + new shadcn login (both on Opus)
+
+**332 Suite / 13 contracts green, ruff clean, web builds.** Two tracks this run (Opus, not Fable —
+Fable weekly credits were low):
+- **IAM increment C — invitations backend** (`api/routers/invitations.py`, `api/core/invite_token.py`,
+  `InvitationRow` + migration `cb072f89d251`, `Invitation`/`InvitationStatus` contracts): invite by
+  email → **copyable signed accept-link** (no email dep) → Supabase-verified accept provisions a
+  UserAccount. Gated super_admin/owner/admin; no super_admin escalation via invite; tenant-scoped at
+  data layer; accept re-checks status/expiry/email/existing-account vs the DB row. 13 tests.
+  Review-fixed: concurrent double-accept → 409 (IntegrityError guard); single-source INVITE_TTL_HOURS.
+  **Still NOT built:** IAM increment B (`require_capability` + capability matrix + user↔client scope
+  column — invite stores `client_scopes` but the accept can't copy them onto the account yet); the
+  admin-panel **UI** (the shadcn Roles&Permissions screen).
+- **New login** (`web/app/login/page.tsx` + globals.css): shadcn "Studio Admin" **split-screen** (dark
+  brand panel + form, mono primary button), light+dark, built on the existing token system (added
+  `--auth-brand-*` theme-invariant tokens). **Server-side Supabase POST preserved** (httpOnly cookies,
+  works JS-off). NOTE: `web/` is NOT tailwind/shadcn — it's a custom token-CSS system; we MATCH the
+  shadcn look with tokens rather than migrate. A full tailwind+shadcn adoption is still an open
+  decision (would touch every existing component; deferred).
+
+**Design system LOCKED** (`docs/DESIGN_REFERENCES.md`): shadcn mono admin north-star + per-screen refs
+(login✓, members/roles→shadcn Roles&Permissions, creative-review/portal→Filestage, video→Frame.io).
+Build loop was going to be Fable but **user says use Opus** (Opus sees the ref images + Fable credits
+limited). Next FE targets: **members/roles screen** (pairs w/ the invitations backend), then brand-brief.
+
+---
+
+## ► (2026-07-20 night, main `55c0eae`) — super_admin gate SHIPPED; IAM designed; WhatsApp+generating+ChatGPT merged
 
 **Since the entry below (all on `main`, 319 Suite / 12 contracts green, ruff clean):**
 - **✅ CRITICAL FIX SHIPPED** — `POST /tenants` is now gated to a new `super_admin` role (was
