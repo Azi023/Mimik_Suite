@@ -3755,3 +3755,65 @@ ul {
   .cal__event-title { display: none; }
   .cal__event { justify-content: center; }
 }
+
+/* ===========================================================================
+   Client portal — bounded, low-privilege review surface (no internal nav).
+=========================================================================== */
+.portal {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--sp-5) var(--sp-6) var(--sp-8);
+  min-height: 100vh;
+}
+.portal__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+.portal__brand { display: flex; align-items: center; gap: var(--sp-3); }
+.portal__logo {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  background: var(--auth-brand-bg);
+  color: var(--auth-brand-ink);
+  font-weight: 700;
+}
+.portal__wordmark { font-size: 14px; font-weight: 700; color: var(--ink); }
+.portal__bar-right { display: flex; align-items: center; gap: var(--sp-4); }
+.portal__back { font-size: 13px; font-weight: 600; color: var(--accent); text-decoration: none; }
+.portal__back:hover { text-decoration: underline; }
+.portal__title { font-size: 22px; font-weight: 700; color: var(--ink); margin: var(--sp-6) 0 var(--sp-5); }
+.portal__content { display: block; }
+
+.portal-list { display: flex; flex-direction: column; gap: var(--sp-3); list-style: none; }
+.portal-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+  padding: var(--sp-4) var(--sp-5);
+  text-decoration: none;
+}
+.portal-card:hover { box-shadow: var(--shadow-lift); }
+.portal-card__title { font-size: 15px; font-weight: 600; color: var(--ink); flex: 1 1 auto; }
+.portal-card__meta { font-size: 12px; color: var(--muted); }
+.portal-card__status {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  padding: 4px 12px;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+.portal-card__status--awaiting { background: var(--accent-soft); color: var(--accent); }
