@@ -16,6 +16,6 @@ next-env.d.ts
 .idea/
 .vscode/
 
-# Design scratch / docs not needed in the build
+# Design docs not needed in the build. NOTE: design/tokens.css IS needed — globals.css
+# imports it (@import "../design/tokens.css"), so design/ must NOT be excluded.
 DESIGN_NOTES.md
-design/
