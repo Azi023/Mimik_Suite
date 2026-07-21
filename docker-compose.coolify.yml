@@ -17,6 +17,10 @@ services:
     image: ghcr.io/azi023/mimik-suite-api:latest
     pull_policy: always   # always fetch the newest :latest on redeploy (avoid stale-cache)
     restart: unless-stopped
+    # Bind to LOCALHOST only — the host nginx (this VPS's real reverse proxy) proxies the
+    # public domain to it; not exposed to the internet directly.
+    ports:
+      - "127.0.0.1:8000:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
     depends_on:
@@ -35,6 +39,8 @@ services:
     image: ghcr.io/azi023/mimik-suite-web:latest
     pull_policy: always
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: production
     depends_on:
