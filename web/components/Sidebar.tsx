@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import Link from "next/link";
-import { navItems, workspaceName, type NavItem, type SidebarGroup } from "@/lib/mock";
+import { navItems, workspaceName, type NavItem, type SidebarGroup } from "@/lib/view-models";
 import {
   CalendarIcon,
   ChevronDownIcon,
@@ -18,13 +18,11 @@ import {
 /**
  * Two-tier left navigation, per the reference:
  *  1. a slim icon rail (logo bubble, section glyphs, settings pinned bottom)
- *  2. a secondary sidebar (search, "Favorites" / "All clients" groups with
- *     colored geometric markers; the active client gets a soft card highlight
- *     and a count badge).
+ *  2. a secondary sidebar (search + API-backed client rows with colored geometric
+ *     markers; the active client gets a soft card highlight and a count badge).
  * Hidden on mobile (the TopBar renders a hamburger there).
  *
- * The client groups are threaded in from the server component (live API when
- * configured + reachable, mock set otherwise — see `lib/data.getSidebarData`).
+ * Client groups are threaded in from the server component's API-backed data facade.
  */
 interface SidebarProps {
   groups: SidebarGroup[];
@@ -40,6 +38,7 @@ const NAV_ROUTES: Partial<Record<NavItem["id"], string>> = {
 export function Sidebar({ groups }: SidebarProps): JSX.Element {
   const railItems = navItems.filter((item) => item.id !== "settings");
   const settings = navItems.find((item) => item.id === "settings");
+  const hasClients = groups.some((group) => group.projects.length > 0);
 
   return (
     <div className="side">
@@ -72,9 +71,6 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
                 title={item.label}
               >
                 <NavGlyph id={item.id} />
-                {item.badge !== undefined && item.badge > 0 && (
-                  <span className="rail-btn__badge">{item.badge}</span>
-                )}
               </button>
             );
           })}
@@ -120,41 +116,48 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
         </div>
 
         <div className="subbar__scroll">
-          {groups.map((group) => (
-            <section key={group.id} className="subbar-group">
-              <h2 className="subbar-group__label">
-                <ChevronDownIcon size={12} />
-                {group.label}
-              </h2>
-              <ul className="subbar-group__list">
-                {group.projects.map((project) => (
-                  <li key={`${group.id}-${project.id}`}>
-                    <button
-                      type="button"
-                      className={`project-row${project.active ? " project-row--active" : ""}`}
-                      aria-current={project.active ? "true" : undefined}
-                    >
-                      <span
-                        className={`project-row__shape shape--${project.tone}`}
-                        aria-hidden="true"
+          {hasClients ? (
+            groups.map((group) => (
+              <section key={group.id} className="subbar-group">
+                <h2 className="subbar-group__label">
+                  <ChevronDownIcon size={12} />
+                  {group.label}
+                </h2>
+                <ul className="subbar-group__list">
+                  {group.projects.map((project) => (
+                    <li key={`${group.id}-${project.id}`}>
+                      <button
+                        type="button"
+                        className={`project-row${project.active ? " project-row--active" : ""}`}
+                        aria-current={project.active ? "true" : undefined}
                       >
-                        <ShapeIcon shape={project.shape} />
-                      </span>
-                      <span className="project-row__name">{project.name}</span>
-                      {project.count > 0 && (
                         <span
-                          className="project-row__count"
-                          aria-label={`${project.count} open jobs`}
+                          className={`project-row__shape shape--${project.tone}`}
+                          aria-hidden="true"
                         >
-                          {project.count}
+                          <ShapeIcon shape={project.shape} />
                         </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
+                        <span className="project-row__name">{project.name}</span>
+                        {project.count > 0 && (
+                          <span
+                            className="project-row__count"
+                            aria-label={`${project.count} open jobs`}
+                          >
+                            {project.count}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))
+          ) : (
+            <div className="empty-state">
+              <p className="empty-state__title">No clients yet</p>
+              <p className="empty-state__body">Add a client to start building their workspace.</p>
+            </div>
+          )}
         </div>
 
         <Link href="/onboarding" className="subbar__new">

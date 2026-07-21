@@ -1,5 +1,5 @@
 import type { JSX, KeyboardEvent } from "react";
-import { FORMAT_TONE, PILLAR_TONE, type Job } from "@/lib/mock";
+import { FORMAT_TONE, PILLAR_TONE, type Job } from "@/lib/view-models";
 import { CheckIcon, ClipIcon, ClockIcon, CommentIcon } from "./icons";
 
 interface JobRowProps {
@@ -90,19 +90,22 @@ export function JobRow({ job, selected, onSelect }: JobRowProps): JSX.Element {
           ))}
         </div>
 
-        <div className="job-card__counts">
-          <span className="meta-count" aria-label={`${job.comments} comments`}>
-            <CommentIcon />
-            {job.comments}
-          </span>
-          <span
-            className="meta-count"
-            aria-label={`${job.attachments} attachments`}
-          >
-            <ClipIcon />
-            {job.attachments}
-          </span>
-        </div>
+        {(job.comments !== null || job.attachments !== null) && (
+          <div className="job-card__counts">
+            {job.comments !== null && (
+              <span className="meta-count" aria-label={`${job.comments} comments`}>
+                <CommentIcon />
+                {job.comments}
+              </span>
+            )}
+            {job.attachments !== null && (
+              <span className="meta-count" aria-label={`${job.attachments} attachments`}>
+                <ClipIcon />
+                {job.attachments}
+              </span>
+            )}
+          </div>
+        )}
       </footer>
     </article>
   );

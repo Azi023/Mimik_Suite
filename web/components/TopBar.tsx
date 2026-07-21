@@ -1,21 +1,17 @@
 import type { JSX } from "react";
-import { team, type Client } from "@/lib/mock";
+import type { Client } from "@/lib/view-models";
 import { ThemeToggle } from "./ThemeToggle";
 import { ChevronDownIcon, PlusIcon } from "./icons";
 
-/** How many team avatars render before collapsing into a "+n" chip. */
-const MAX_AVATARS = 4;
-
 /**
- * Top bar: page title, team avatar stack with add button, the client-switcher
+ * Top bar: page title, invite control, the client-switcher
  * chip, and the theme toggle. On mobile a hamburger stands in for the
  * collapsed sidebar.
  *
- * The active client chip reflects the first real client threaded in from the
- * server component (live API when configured + reachable, mock set otherwise).
+ * The active client chip reflects the first client returned by the API.
  */
 interface TopBarProps {
-  activeClient: Client;
+  activeClient: Client | null;
   /** Page title in the bar. Defaults to the board. */
   title?: string;
   /** Secondary crumb next to the title (omitted when not given). */
@@ -23,9 +19,6 @@ interface TopBarProps {
 }
 
 export function TopBar({ activeClient, title = "Board", crumb }: TopBarProps): JSX.Element {
-  const visible = team.slice(0, MAX_AVATARS);
-  const overflow = team.length - visible.length;
-
   return (
     <header className="topbar">
       <button
@@ -44,32 +37,25 @@ export function TopBar({ activeClient, title = "Board", crumb }: TopBarProps): J
 
       <div className="topbar__spacer" />
 
-      <div className="avatar-stack" aria-label={`Team: ${team.map((m) => m.name).join(", ")}`}>
-        {visible.map((member) => (
-          <span
-            key={member.id}
-            className={`avatar avatar--${member.tone}`}
-            title={member.name}
-          >
-            {member.initials}
-          </span>
-        ))}
-        {overflow > 0 && <span className="avatar avatar--more">+{overflow}</span>}
-      </div>
-
       <button type="button" className="icon-btn" aria-label="Invite teammate">
         <PlusIcon />
       </button>
 
-      <button type="button" className="client-chip">
-        <span className="client-chip__dot" aria-hidden="true" />
-        <span>
-          {activeClient.name} · {activeClient.vertical}
-        </span>
-        <span className="client-chip__caret" aria-hidden="true">
-          <ChevronDownIcon size={12} />
-        </span>
-      </button>
+      {activeClient === null ? (
+        <button type="button" className="client-chip" disabled>
+          <span>No clients yet</span>
+        </button>
+      ) : (
+        <button type="button" className="client-chip">
+          <span className="client-chip__dot" aria-hidden="true" />
+          <span>
+            {activeClient.name} · {activeClient.vertical}
+          </span>
+          <span className="client-chip__caret" aria-hidden="true">
+            <ChevronDownIcon size={12} />
+          </span>
+        </button>
+      )}
 
       <ThemeToggle />
     </header>

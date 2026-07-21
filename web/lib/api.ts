@@ -368,8 +368,8 @@ function getDevToken(): string | undefined {
  * The bearer to send on API calls, in precedence order:
  *   1. the caller-supplied Supabase session token (real per-user auth), when present.
  *   2. the DEV-ONLY `NEXT_PUBLIC_DEV_TOKEN` bootstrap token, as a fallback.
- * Returns `undefined` when neither exists — the request goes out unauthenticated
- * (the mock-fallback path in `lib/data.ts` then takes over on the resulting error).
+ * Returns `undefined` when neither exists — the request goes out unauthenticated and
+ * callers handle the resulting error without substituting records.
  */
 function resolveBearer(sessionToken?: string): string | undefined {
   if (sessionToken !== undefined && sessionToken !== "") {
@@ -381,8 +381,8 @@ function resolveBearer(sessionToken?: string): string | undefined {
 /**
  * True when `NEXT_PUBLIC_API_URL` is set AND some bearer is resolvable — either the
  * caller-supplied Supabase session token or the dev bootstrap token. This is the gate
- * `lib/data.ts` uses before attempting live fetches; without it the app renders from
- * mocks and never touches the network.
+ * `lib/data.ts` uses before attempting live fetches; without it the data facade returns
+ * empty view data and never touches the network.
  */
 export function isApiConfigured(sessionToken?: string): boolean {
   const url = process.env.NEXT_PUBLIC_API_URL;

@@ -1,19 +1,9 @@
 /**
  * Data facade for the board view.
  *
- * Exposes the SAME view shapes `lib/mock.ts` defines (Job, Pillar, CreativeDoc), sourced
- * live from the FastAPI backend when it is configured AND reachable, and from the mocks
- * otherwise — the board never renders blank/broken because the API is down.
- *
- * Live path gate (see `isApiConfigured` in lib/api.ts): `NEXT_PUBLIC_API_URL` must be set
- * AND a bearer must be resolvable — either the per-user Supabase session token threaded in
- * from the server component (`lib/session.getSessionToken`) or the DEV-ONLY dev token. Any
- * fetch/parse failure inside the live path also drops to the mock set (with a server-side
- * console.warn so the fallback is observable).
- *
- * The `sessionToken` argument is the real per-user Supabase bearer. When present it flows
- * through every API call so fetches run as the authenticated user (tenant-scoped by the
- * backend); when absent, the dev-token fallback applies.
+ * API responses are mapped into frontend view models. Empty responses, missing API
+ * configuration, and request failures all return empty view data so the UI can render
+ * truthful empty states.
  */
 
 import {
@@ -43,24 +33,19 @@ import {
   type SidebarGroup,
   type SidebarProject,
   type TagTone,
-  activeClient as mockActiveClient,
-  jobs as mockJobs,
-  pillars as mockPillars,
-  reviewDoc as mockReviewDoc,
-  sidebarGroups as mockSidebarGroups,
-} from "./mock";
+} from "./view-models";
 
-/** Everything the board page renders, in the mock's view shapes. */
+/** Everything the board page renders. */
 export interface BoardData {
   pillars: Pillar[];
   jobs: Job[];
-  reviewDoc: CreativeDoc;
+  reviewDoc: CreativeDoc | null;
 }
 
-/** Everything the sidebar + top-bar client chip render, in the mock's view shapes. */
+/** Everything the sidebar + top-bar client chip render. */
 export interface SidebarData {
   groups: SidebarGroup[];
-  activeClient: Client;
+  activeClient: Client | null;
 }
 
 /* ---------------------------------------------------------------------------
@@ -69,8 +54,7 @@ export interface SidebarData {
 
 /**
  * Collapse the API's 8-state job lifecycle into the board's three columns,
- * keeping the mock semantics: red = needs attention (SLA breached or blocked),
- * orange = moving through review, green = done.
+ * using red for attention, orange for work in review, and green for completed work.
  */
 function toBoardStatus(status: ApiJobStatus, atRisk: boolean): JobStatus {
   if (status === "approved" || status === "delivered" || status === "archived") {
@@ -100,7 +84,7 @@ function formatDay(iso: string): string {
 }
 
 /**
- * Compose the card's SLA line with the mock's semantics: approved cards show the
+ * Compose the card's SLA line: approved cards show the
  * publish date; everything else shows the approve-by deadline (publish_date minus
  * the approval lead buffer — mirrors Job.approve_by in mimik-contracts).
  */
@@ -158,11 +142,11 @@ function toJob(card: ApiBoardCard, pillarNameById: ReadonlyMap<string, string>):
     format: toFormat(card.job.format_key),
     status,
     sla: toSla(card.job, status),
-    // Task/checklist, comment, and attachment feeds are later API phases — render empty for now.
+    // Task/checklist, comment, and attachment feeds are not present in this response.
     checklist: [],
     assignees: toAssignees(card.job.assignee),
-    comments: 0,
-    attachments: 0,
+    comments: null,
+    attachments: null,
     atRisk: card.at_risk,
     generating: card.job.status === "generating",
   };
@@ -180,6 +164,9 @@ function flattenBoard(
 
 /** Map API pillars into filter chips: first chip active, "+ Custom" affordance appended. */
 function toPillarChips(apiPillars: ApiContentPillar[]): Pillar[] {
+  if (apiPillars.length === 0) {
+    return [];
+  }
   const chips: Pillar[] = apiPillars.map((pillar, index) => ({
     id: pillar.id,
     label: pillar.name,
@@ -195,7 +182,7 @@ const LAYER_ORDER = ["L1_base", "L2_concept", "L3_scaffold", "L4_message", "L5_f
 function toReviewDoc(doc: ApiCreativeDoc): CreativeDoc {
   const kinds = new Set(doc.manifest.layers.map((layer) => layer.kind));
   // Show the full L1..L5 strip; the active layer is L4 (message) when present, else the
-  // last layer the manifest actually has — mirrors the mock's "editing L4" semantics.
+  // last layer the manifest actually has.
   const lastPresent = [...LAYER_ORDER].reverse().find((kind) => kinds.has(kind));
   const activeKind = kinds.has("L4_message") ? "L4_message" : lastPresent;
   const layers: Layer[] = LAYER_ORDER.map((kind, index) => ({
@@ -207,8 +194,6 @@ function toReviewDoc(doc: ApiCreativeDoc): CreativeDoc {
   const headline = doc.manifest.copy_block?.headline;
   return {
     id: doc.id,
-    // Real API ids — the review panel needs both to POST /approvals. Mock docs leave
-    // them undefined, so the panel degrades to the inline offline note on submit.
     jobId: doc.job_id,
     creativeDocId: doc.id,
     thumbnailLabel: headline !== undefined ? headline.toUpperCase().slice(0, 24) : "PREVIEW",
@@ -224,26 +209,26 @@ function toReviewDoc(doc: ApiCreativeDoc): CreativeDoc {
    Facade.
 --------------------------------------------------------------------------- */
 
-function mockBoardData(): BoardData {
-  return { pillars: mockPillars, jobs: mockJobs, reviewDoc: mockReviewDoc };
+function emptyBoardData(): BoardData {
+  return { pillars: [], jobs: [], reviewDoc: null };
 }
 
 /**
  * Best-effort: the latest creative of the first in-review job, for the review panel.
- * Falls back to the mock review doc when no creative exists yet (or the call fails) —
- * the panel is a preview surface, not a data-critical one.
+ * Missing creatives and request failures remain empty rather than inventing a preview.
  */
-async function resolveReviewDoc(jobs: Job[], sessionToken?: string): Promise<CreativeDoc> {
+async function resolveReviewDoc(jobs: Job[], sessionToken?: string): Promise<CreativeDoc | null> {
   const candidate = jobs.find((job) => job.status === "in_review") ?? jobs[0];
   if (candidate === undefined) {
-    return mockReviewDoc;
+    return null;
   }
   try {
     const docs = await listCreatives(candidate.id, sessionToken);
     const latest = docs[docs.length - 1];
-    return latest !== undefined ? toReviewDoc(latest) : mockReviewDoc;
-  } catch {
-    return mockReviewDoc;
+    return latest !== undefined ? toReviewDoc(latest) : null;
+  } catch (error) {
+    console.warn(`[mimik-web] Creative request failed; rendering an empty review (${String(error)})`);
+    return null;
   }
 }
 
@@ -251,10 +236,10 @@ async function resolveReviewDoc(jobs: Job[], sessionToken?: string): Promise<Cre
    Sidebar + top-bar client chip — API -> view-shape mapping.
 --------------------------------------------------------------------------- */
 
-/** Marker tones cycled for real client rows (same palette the mock rows draw from). */
+/** Marker tones cycled for real client rows. */
 const CLIENT_TONES: readonly TagTone[] = ["blue", "pink", "purple", "green", "orange"];
 
-/** Geometric shapes cycled for real client rows (mirrors the mock's marker variety). */
+/** Geometric shapes cycled for real client rows. */
 const CLIENT_SHAPES: readonly ProjectShape[] = ["circle", "diamond", "square", "triangle"];
 
 /** Stable, deterministic index from a client id (same id -> same tone/shape every render). */
@@ -305,11 +290,7 @@ function toActiveClient(client: ApiClient): Client {
 /**
  * Build the sidebar groups from the real client list.
  *
- * The `mimik-contracts` Client model has NO "favorite" flag, so we can't source a
- * real favorites set. Choice: the first client (the one the chip + board reflect)
- * is pinned to "Favorites" as the working client; every client — including that
- * one — is listed under "All clients". This keeps both groups populated and the
- * grouping structure the sidebar already renders, without inventing a flag.
+ * The API has no favorite flag, so only the truthful all-clients group is rendered.
  */
 function toSidebarGroups(
   clients: ApiClient[],
@@ -319,35 +300,25 @@ function toSidebarGroups(
   const all = clients.map((client) =>
     toSidebarProject(client, counts.get(client.id) ?? 0, client.id === activeId),
   );
-  const favorites = all.slice(0, 1);
-  return [
-    { id: "favorites", label: "Favorites", projects: favorites },
-    { id: "all-clients", label: "All clients", projects: all },
-  ];
+  return [{ id: "all-clients", label: "All clients", projects: all }];
 }
 
-function mockSidebarData(): SidebarData {
-  return { groups: mockSidebarGroups, activeClient: mockActiveClient };
+function emptySidebarData(): SidebarData {
+  return { groups: [], activeClient: null };
 }
 
-/**
- * The sidebar + top-bar client chip's single data entrypoint. Live API when
- * configured + reachable, mock set otherwise — identical shapes either way, so
- * the chrome renders the same and never blanks out when the API is down.
- */
+/** The sidebar + top-bar client chip's API-backed data entrypoint. */
 export async function getSidebarData(sessionToken?: string): Promise<SidebarData> {
   if (!isApiConfigured(sessionToken)) {
-    return mockSidebarData();
+    return emptySidebarData();
   }
   try {
     const [clients, board] = await Promise.all([
       listClients(sessionToken),
       fetchBoard(sessionToken),
     ]);
-    // An empty tenant (no clients yet) still gets the full demo sidebar rather
-    // than a lone empty group — the chrome must never look broken.
     if (clients.length === 0) {
-      return mockSidebarData();
+      return emptySidebarData();
     }
     const counts = jobCountsByClient(board);
     return {
@@ -356,19 +327,16 @@ export async function getSidebarData(sessionToken?: string): Promise<SidebarData
     };
   } catch (error) {
     console.warn(
-      `[mimik-web] API unreachable or returned an error — rendering mock sidebar (${String(error)})`,
+      `[mimik-web] API unreachable or returned an error; rendering an empty sidebar (${String(error)})`,
     );
-    return mockSidebarData();
+    return emptySidebarData();
   }
 }
 
-/**
- * The board page's single data entrypoint. Live API when configured + reachable,
- * mock set otherwise — identical shapes either way, so the board renders the same.
- */
+/** The board page's API-backed data entrypoint. */
 export async function getBoardData(sessionToken?: string): Promise<BoardData> {
   if (!isApiConfigured(sessionToken)) {
-    return mockBoardData();
+    return emptyBoardData();
   }
   try {
     const [board, apiPillars] = await Promise.all([
@@ -377,15 +345,13 @@ export async function getBoardData(sessionToken?: string): Promise<BoardData> {
     ]);
     const pillarNameById = new Map(apiPillars.map((pillar) => [pillar.id, pillar.name]));
     const jobs = flattenBoard(board, pillarNameById);
-    // An empty tenant (no pillars yet) still gets the full demo chip row rather than
-    // a lone "+ Custom" — the board must never look broken.
-    const pillars = apiPillars.length > 0 ? toPillarChips(apiPillars) : mockPillars;
+    const pillars = toPillarChips(apiPillars);
     const reviewDoc = await resolveReviewDoc(jobs, sessionToken);
     return { pillars, jobs, reviewDoc };
   } catch (error) {
     console.warn(
-      `[mimik-web] API unreachable or returned an error — rendering mock board (${String(error)})`,
+      `[mimik-web] API unreachable or returned an error; rendering an empty board (${String(error)})`,
     );
-    return mockBoardData();
+    return emptyBoardData();
   }
 }

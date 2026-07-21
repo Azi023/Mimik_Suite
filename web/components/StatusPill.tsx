@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { JobStatus } from "@/lib/mock";
+import type { JobStatus } from "@/lib/view-models";
 
 interface StatusPillProps {
   status: JobStatus;

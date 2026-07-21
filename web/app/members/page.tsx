@@ -30,7 +30,7 @@ function devFallbackAllowed(): boolean {
  * Members & roles — the admin panel (shadcn "Roles & Permissions" reference). Lists the tenant's
  * accounts, the role→capability matrix, and pending invitations; invites/revokes run through the
  * server actions in `./actions` (per-user token, server-side). Reads render server-side with the
- * real bearer. Unlike the board there is NO mock fallback — an empty tenant gets a real empty state.
+ * real bearer. An empty tenant gets a real empty state.
  */
 export default async function MembersPage(): Promise<JSX.Element> {
   const sessionToken = await getSessionToken();

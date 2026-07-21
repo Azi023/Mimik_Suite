@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type JSX } from "react";
-import { type CreativeDoc, type Job, jobToReviewDoc, type Pillar } from "@/lib/mock";
+import type { CreativeDoc, Job, Pillar } from "@/lib/view-models";
 import { Board } from "./Board";
 import { ALL_PILLARS, PillarChips } from "./PillarChips";
 import { ReviewPanel } from "./ReviewPanel";
@@ -10,12 +10,10 @@ interface BoardViewProps {
   pillars: Pillar[];
   jobs: Job[];
   /**
-   * The server-resolved creative for the default-selected job — the only doc that
-   * carries real API ids (jobId / creativeDocId), so its Approve / Request-change
-   * actually hit the backend. Clicking any other card falls back to a display-only
-   * preview doc (honest offline note on submit).
+   * The server-resolved creative for the default-selected job. Null means the API
+   * returned no creative or the request failed.
    */
-  reviewDoc: CreativeDoc;
+  reviewDoc: CreativeDoc | null;
 }
 
 /**
@@ -30,8 +28,7 @@ export function BoardView({ pillars, jobs, reviewDoc }: BoardViewProps): JSX.Ele
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   // Pillars filter by the label shown on the card: jobs carry a denormalized pillar
-  // *label* (`Job.pillar`), while chips carry an id + label. Match on label so this
-  // works whether ids come from the API (`data.ts` toPillarChips) or the mock set.
+  // label (`Job.pillar`), while chips carry an id + label.
   const activePillarLabel = useMemo<string | null>(() => {
     if (activePillarId === ALL_PILLARS) return null;
     return pillars.find((pillar) => pillar.id === activePillarId)?.label ?? null;
@@ -42,15 +39,12 @@ export function BoardView({ pillars, jobs, reviewDoc }: BoardViewProps): JSX.Ele
     return jobs.filter((job) => job.pillar === activePillarLabel);
   }, [jobs, activePillarLabel]);
 
-  // Which doc the panel shows. Default (nothing clicked): the server doc with real
-  // ids. When a card is clicked: reuse the server doc if it backs that same job
-  // (keeps the real ids → live submits), else a display-only preview of the job.
-  const activeDoc = useMemo<CreativeDoc>(() => {
+  // Never synthesize a creative for a selected job. If the server-resolved creative
+  // does not belong to it, the review area renders its real empty state.
+  const activeDoc = useMemo<CreativeDoc | null>(() => {
     if (selectedJobId === null) return reviewDoc;
-    if (reviewDoc.jobId === selectedJobId) return reviewDoc;
-    const job = jobs.find((candidate) => candidate.id === selectedJobId);
-    return job !== undefined ? jobToReviewDoc(job) : reviewDoc;
-  }, [selectedJobId, reviewDoc, jobs]);
+    return reviewDoc?.jobId === selectedJobId ? reviewDoc : null;
+  }, [selectedJobId, reviewDoc]);
 
   function handleSelectJob(job: Job): void {
     setSelectedJobId(job.id);
@@ -59,28 +53,49 @@ export function BoardView({ pillars, jobs, reviewDoc }: BoardViewProps): JSX.Ele
   return (
     <div className="board-view">
       <div className="board-view__main">
-        <section className="board-view__filters" aria-label="Content pillars">
-          <h2 className="visually-hidden">Content pillars</h2>
-          <PillarChips
-            pillars={pillars}
-            activePillarId={activePillarId}
-            onSelect={setActivePillarId}
-          />
-        </section>
+        {pillars.length > 0 && (
+          <section className="board-view__filters" aria-label="Content pillars">
+            <h2 className="visually-hidden">Content pillars</h2>
+            <PillarChips
+              pillars={pillars}
+              activePillarId={activePillarId}
+              onSelect={setActivePillarId}
+            />
+          </section>
+        )}
 
         <section aria-label="This week's approvals">
           <h2 className="visually-hidden">This week · approvals</h2>
-          <Board
-            jobs={visibleJobs}
-            selectedJobId={selectedJobId}
-            onSelectJob={handleSelectJob}
-          />
+          {jobs.length === 0 ? (
+            <div className="empty-state">
+              <p className="empty-state__title">No jobs yet</p>
+              <p className="empty-state__body">Jobs will appear here when they are created.</p>
+            </div>
+          ) : (
+            <Board
+              jobs={visibleJobs}
+              selectedJobId={selectedJobId}
+              onSelectJob={handleSelectJob}
+            />
+          )}
         </section>
       </div>
 
-      {/* Keying on the doc identity remounts the panel when the selection changes,
-          so its internal submit / pin-composer state resets cleanly per creative. */}
-      <ReviewPanel key={activeDoc.creativeDocId ?? activeDoc.id} doc={activeDoc} />
+      {activeDoc !== null ? (
+        <ReviewPanel key={activeDoc.creativeDocId} doc={activeDoc} />
+      ) : (
+        <aside className="review-panel" aria-label="Creative review">
+          <header className="review-panel__head">
+            <h2 className="review-panel__title">Creative review</h2>
+          </header>
+          <div className="empty-state">
+            <p className="empty-state__title">No creative to review yet</p>
+            <p className="empty-state__body">
+              A creative will appear here when one is ready for review.
+            </p>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

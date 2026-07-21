@@ -10,7 +10,7 @@ import {
   isApiConfigured,
   submitApproval,
 } from "@/lib/api";
-import type { CreativeDoc } from "@/lib/mock";
+import type { CreativeDoc } from "@/lib/view-models";
 import { slideInPanel, staggerFadeUp } from "@/lib/motion";
 import { LayerStrip } from "./LayerStrip";
 import { StatusPill } from "./StatusPill";
@@ -62,8 +62,8 @@ const MAX_INSTRUCTION_CHARS = 500;
  *
  * "Request change" reveals a compact pin composer: pick a zone, say what should
  * change, queue up to 10 pins, send them as one `request_change` approval with
- * pin-pointed RevisionTargets. Without API ids/config (mock mode) the composer
- * still works — submits show a quiet inline offline note and keep the pins.
+ * pin-pointed RevisionTargets. If API configuration disappears after render,
+ * submits show a quiet inline offline note and keep the pins.
  */
 export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
@@ -117,9 +117,7 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
   }
 
   async function submit(action: ApprovalActionKind, targets?: ApprovalTarget[]): Promise<void> {
-    // Mock docs carry no API ids; without ids + configured API there is nothing to
-    // post to — degrade to the inline offline note, never crash the board.
-    if (doc.jobId === undefined || doc.creativeDocId === undefined || !isApiConfigured()) {
+    if (!isApiConfigured()) {
       setState("offline");
       return;
     }

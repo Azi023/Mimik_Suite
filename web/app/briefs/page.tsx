@@ -21,8 +21,8 @@ function devFallbackAllowed(): boolean {
 
 /**
  * Brand briefs — the tenant's list of versioned brief documents. Like the members panel this is
- * behind the Supabase session gate and has NO mock fallback: an empty tenant gets a real empty
- * state. Client names are resolved from `/clients` so each brief reads by brand, not by raw id.
+ * behind the Supabase session gate: an empty tenant gets a real empty state. Client names are
+ * resolved from `/clients` so each brief reads by brand, not by raw id.
  */
 export default async function BriefsPage(): Promise<JSX.Element> {
   const sessionToken = await getSessionToken();

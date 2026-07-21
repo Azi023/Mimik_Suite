@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { Layer } from "@/lib/mock";
+import type { Layer } from "@/lib/view-models";
 
 interface LayerStripProps {
   layers: Layer[];

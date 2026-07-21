@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type JSX } from "react";
-import type { Pillar } from "@/lib/mock";
+import type { Pillar } from "@/lib/view-models";
 
 interface PillarChipsProps {
   pillars: Pillar[];

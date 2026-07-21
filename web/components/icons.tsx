@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { ProjectShape } from "@/lib/mock";
+import type { ProjectShape } from "@/lib/view-models";
 
 /**
  * Hand-rolled 1.7px-stroke glyph set matching the reference's line-icon style.

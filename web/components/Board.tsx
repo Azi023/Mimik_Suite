@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, type JSX } from "react";
-import { boardColumns, type Job } from "@/lib/mock";
+import { boardColumns, type Job } from "@/lib/view-models";
 import { animateCount, staggerFadeUp } from "@/lib/motion";
 import { JobRow } from "./JobRow";
 import { DotsIcon, PlusIcon } from "./icons";

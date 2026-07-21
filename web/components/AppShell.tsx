@@ -5,7 +5,7 @@ import { TopBar } from "./TopBar";
 
 interface AppShellProps {
   children: ReactNode;
-  /** Sidebar client groups + active-client chip (live API or mock — see lib/data). */
+  /** API-backed sidebar client groups + active-client chip. */
   sidebar: SidebarData;
   /** Top-bar page title (defaults to the board). */
   title?: string;

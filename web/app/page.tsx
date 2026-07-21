@@ -33,9 +33,8 @@ function devFallbackAllowed(): boolean {
  * which triggers the dev-token fallback inside `lib/data`) is threaded into the data
  * layer so API fetches carry the REAL user's bearer.
  *
- * Data comes from the `lib/data.ts` facade: live API when configured + reachable, mock
- * set otherwise. The server component fetches; `BoardView` (client) adds selection +
- * filtering on top. */
+ * Data comes from the `lib/data.ts` facade. Empty responses and request failures stay
+ * empty. The server component fetches; `BoardView` adds selection and filtering. */
 export default async function BoardPage(): Promise<JSX.Element> {
   const sessionToken = await getSessionToken();
   if (sessionToken === null && !devFallbackAllowed()) {
