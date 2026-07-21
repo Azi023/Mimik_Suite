@@ -524,6 +524,33 @@ export function listCreatives(jobId: string, sessionToken?: string): Promise<Api
   return apiGet<ApiCreativeDoc[]>(`/jobs/${encodeURIComponent(jobId)}/creatives`, sessionToken);
 }
 
+/** POST /jobs/{id}/creatives body — mint a new creative version (the copy edit → new version path). */
+export interface CreateCreativeBody {
+  template_key: string;
+  copy_block: {
+    headline: string;
+    subhead: string | null;
+    cta: string | null;
+    language: string;
+    status: "draft" | "approved" | "edited";
+  };
+  /** Cached image ref to reuse; null → placeholder brand ground. */
+  image_artifact: string | null;
+}
+
+/** POST /jobs/{id}/creatives — mint a new CreativeDoc version (team-gated at the API). */
+export function createCreativeVersion(
+  jobId: string,
+  body: CreateCreativeBody,
+  sessionToken?: string,
+): Promise<ApiCreativeDoc> {
+  return apiPost<ApiCreativeDoc>(
+    `/jobs/${encodeURIComponent(jobId)}/creatives`,
+    body,
+    sessionToken,
+  );
+}
+
 /** GET /ops/board — jobs grouped by status with computed at-risk flags. */
 export function fetchBoard(sessionToken?: string): Promise<ApiBoardResponse> {
   return apiGet<ApiBoardResponse>("/ops/board", sessionToken);

@@ -17,7 +17,7 @@ import {
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
 import { redirectClientToPortal } from "@/lib/guard";
-import { mintMagicLinkAction } from "./actions";
+import { editCopyAction, mintMagicLinkAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -109,6 +109,7 @@ export default async function CreativeReviewPage({
         approvals={audit.approvals}
         deliveries={audit.deliveries}
         mintLink={mintMagicLinkAction.bind(null, job.id)}
+        editCopyAction={editCopyAction.bind(null, job.id)}
       />
     </AppShell>
   );

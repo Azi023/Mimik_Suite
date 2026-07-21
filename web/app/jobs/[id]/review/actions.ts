@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import {
   ApiError,
   type ApprovalSubmission,
+  type CreateCreativeBody,
+  createCreativeVersion,
   mintMagicLink,
   submitApproval,
 } from "@/lib/api";
@@ -60,6 +62,34 @@ export interface MintLinkResult {
   /** The magic-link token, on success — the caller builds the shareable /review/{token} URL. */
   token?: string;
   error?: string;
+}
+
+export async function editCopyAction(
+  jobId: string,
+  body: CreateCreativeBody,
+): Promise<ReviewActionResult> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return { ok: false, error: "Your session has expired — sign in again." };
+  }
+  if (body.copy_block.headline.trim() === "") {
+    return { ok: false, error: "The headline can't be empty." };
+  }
+  try {
+    await createCreativeVersion(jobId, body, token);
+    revalidatePath(`/jobs/${jobId}/review`);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 403) {
+        return { ok: false, error: "You don't have permission to edit this creative." };
+      }
+      if (error.status === 404) {
+        return { ok: false, error: "This job no longer exists." };
+      }
+    }
+    return { ok: false, error: "Could not save the new version. Try again." };
+  }
 }
 
 /** Mint a shareable, no-login client review link for a job (72h). Team-gated at the API. */

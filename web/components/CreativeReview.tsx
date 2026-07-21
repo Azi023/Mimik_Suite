@@ -12,6 +12,7 @@ import {
   type ApiRevisionZone,
   type ApprovalActionKind,
   type ApprovalTarget,
+  type CreateCreativeBody,
 } from "@/lib/api";
 import { useLocalDraft, useUnsavedGuard } from "@/lib/hooks";
 import { submitReviewAction } from "@/app/jobs/[id]/review/actions";
@@ -157,6 +158,9 @@ interface CreativeReviewProps {
   /** Team-only: mint a shareable no-login client review link. When provided, a "Share with client"
    *  control appears (internal review). Bound to the job id server-side by the caller. */
   mintLink?: () => Promise<{ ok: boolean; token?: string; error?: string }>;
+  /** Team-only: save edited copy as a NEW creative version. When provided, an "Edit copy" mode
+   *  appears (internal review). Bound to the job id server-side by the caller. */
+  editCopyAction?: (body: CreateCreativeBody) => Promise<{ ok: boolean; error?: string }>;
 }
 
 /**
@@ -178,10 +182,16 @@ export function CreativeReview({
   deliveries,
   magicToken,
   mintLink,
+  editCopyAction,
 }: CreativeReviewProps): JSX.Element {
   const router = useRouter();
   const canvasRef = useRef<HTMLDivElement>(null);
   const [shareState, setShareState] = useState<"idle" | "working" | "copied" | "error">("idle");
+  const [editing, setEditing] = useState(false);
+  const [editHeadline, setEditHeadline] = useState("");
+  const [editSubhead, setEditSubhead] = useState("");
+  const [editCta, setEditCta] = useState("");
+  const [savingCopy, setSavingCopy] = useState(false);
 
   const latestIdx = creatives.length - 1;
   const [versionIdx, setVersionIdx] = useState(latestIdx);
@@ -352,6 +362,49 @@ export function CreativeReview({
     }
   }
 
+  function startEdit(): void {
+    setEditHeadline(copy?.headline ?? "");
+    setEditSubhead(copy?.subhead ?? "");
+    setEditCta(copy?.cta ?? "");
+    setEditing(true);
+    setBanner("");
+    setError("");
+  }
+
+  async function saveCopy(): Promise<void> {
+    if (editCopyAction === undefined || doc === undefined || savingCopy) return;
+    const templateKey = doc.manifest.template_key;
+    if (templateKey === null) {
+      setError("This creative has no template — its copy can't be versioned here.");
+      return;
+    }
+    if (editHeadline.trim() === "") {
+      setError("The headline can't be empty.");
+      return;
+    }
+    setSavingCopy(true);
+    setError("");
+    const result = await editCopyAction({
+      template_key: templateKey,
+      copy_block: {
+        headline: editHeadline.trim(),
+        subhead: editSubhead.trim() === "" ? null : editSubhead.trim(),
+        cta: editCta.trim() === "" ? null : editCta.trim(),
+        language: copy?.language ?? "en",
+        status: "edited",
+      },
+      image_artifact: imageLayer?.artifact_ref ?? null,
+    });
+    setSavingCopy(false);
+    if (result.ok) {
+      setEditing(false);
+      setBanner("Saved as a new version.");
+      router.refresh();
+    } else {
+      setError(result.error ?? "Could not save the new version.");
+    }
+  }
+
   /* ---- empty state: no creative yet ---- */
 
   if (doc === undefined) {
@@ -405,24 +458,24 @@ export function CreativeReview({
               </div>
             )}
 
-            {/* copy block */}
+            {/* copy block — live-previews the edit values while editing */}
             <div className="creview__copy">
-              {copy === null ? (
+              {copy === null && !editing ? (
                 <span className="creview__copy-empty" style={{ color: textInk }}>
                   No copy on this version yet
                 </span>
               ) : (
                 <>
                   <span className="creview__headline" style={{ color: textInk, fontFamily: headingFont }}>
-                    {copy.headline}
+                    {editing ? editHeadline || "Headline" : copy?.headline}
                   </span>
-                  {copy.subhead !== null && copy.subhead !== "" && (
+                  {(editing ? editSubhead : copy?.subhead ?? "") !== "" && (
                     <span className="creview__subhead" style={{ color: textInk }}>
-                      {copy.subhead}
+                      {editing ? editSubhead : copy?.subhead}
                     </span>
                   )}
-                  {copy.cta !== null && copy.cta !== "" && (
-                    <span className="creview__cta">{copy.cta}</span>
+                  {(editing ? editCta : copy?.cta ?? "") !== "" && (
+                    <span className="creview__cta">{editing ? editCta : copy?.cta}</span>
                   )}
                 </>
               )}
@@ -474,6 +527,63 @@ export function CreativeReview({
                 ? "✓ Client link copied"
                 : "Share with client ↗"}
           </button>
+        )}
+
+        {editCopyAction !== undefined && !isTerminal && !editing && (
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm creview__share"
+            onClick={startEdit}
+          >
+            Edit copy → new version
+          </button>
+        )}
+
+        {editing && (
+          <div className="creview__composer">
+            <h2 className="creview__label">Edit copy</h2>
+            <input
+              className="creview__input"
+              value={editHeadline}
+              maxLength={MAX_TEXT}
+              placeholder="Headline"
+              aria-label="Headline"
+              onChange={(e): void => setEditHeadline(e.target.value)}
+            />
+            <input
+              className="creview__input"
+              value={editSubhead}
+              maxLength={MAX_TEXT}
+              placeholder="Subhead (optional)"
+              aria-label="Subhead"
+              onChange={(e): void => setEditSubhead(e.target.value)}
+            />
+            <input
+              className="creview__input"
+              value={editCta}
+              maxLength={MAX_TEXT}
+              placeholder="CTA (optional)"
+              aria-label="Call to action"
+              onChange={(e): void => setEditCta(e.target.value)}
+            />
+            <div className="creview__composer-actions">
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={(): void => setEditing(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                disabled={savingCopy || editHeadline.trim() === ""}
+                onClick={(): void => void saveCopy()}
+              >
+                {savingCopy ? "Saving…" : "Save as new version"}
+              </button>
+            </div>
+          </div>
         )}
 
         {/* version selector */}
