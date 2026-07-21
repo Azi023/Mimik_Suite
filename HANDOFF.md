@@ -4,7 +4,37 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `c65f572`) — SECURITY AUDIT PASS: upload hardening + RBAC + full sweep
+## ► LATEST (2026-07-21, main `0ae0626`) — TRACK A COMPLETE + DEPLOY PREP (VPS audited, CI pipeline live)
+
+**378 Suite / 19 contracts green, all pushed to github.com/Azi023/Mimik_Suite.**
+- **TRACK A COMPLETE** (`a221661`): header/footer brand bands render across all 3 templates → BrandLayout
+  fully renders. Column-grid snapping + free-position logo = documented v1 non-goals. Frontend ~100% of
+  what's sellable; remaining is deliberate polish.
+- **DEPLOY PREP** (`0ae0626`): SSH-audited the VPS (195.201.33.87). **Ubuntu 24.04, 2 vCPU, 3.7 GB RAM
+  (~1.7 GB free), Coolify + planflow/striker/hermes resident, Playwright already on host, 6 GB reclaimable
+  images.** Verdict: **fits with care** — Postgres is external (Supabase) so on-box steady state ~450 MB;
+  the risk is the Chromium render spike (mem_limits added: api 900m / web 450m). Prior session already
+  built the deploy infra (Dockerfile.api, web/Dockerfile, docker-compose.prod.yml, DEPLOY.md). This session:
+  pushed the 2 private sibling path-deps (Azi023/mimik-contracts, mimik-knowledge) + added
+  `.github/workflows/build-images.yml` (builds off-box → GHCR; VPS can't build the 1.5 GB image).
+
+### ⏭ To finish the deploy — OPERATOR steps (I can't do these: secrets / no Spaceship+Coolify+Supabase access)
+1. **Pick the subdomain** (studio./app./suite.mimikcreations.com) → add an **A record on Spaceship** →
+   195.201.33.87. (DO NOT migrate the domain to Cloudflare — it carries live M365 email; subdomain only.)
+2. **Supabase project** → DATABASE_URL (asyncpg) + SUPABASE_URL + anon key (auth AND the external Postgres).
+3. **Repo secret `GH_PAT`** (reads the 2 sibling repos) + optional var `NEXT_PUBLIC_API_URL` = the subdomain.
+4. **Coolify**: new Docker Compose resource from `docker-compose.prod.yml`, set env secrets, assign domain →
+   web:3000 (+ `/api` → api:8000), deploy. Optional: `docker image prune -f` on the box first (frees 6 GB).
+RAM headroom: stop planflow.csedash.xyz (~400–500 MB) when needed; end-of-month RAM upgrade removes the ceiling.
+
+### Track B (later, operator-led): the Command-Center is a SEPARATE app/repo
+Planning to happen on a FRESH Claude session, heavily operator-guided with visual refs. It's a different
+app/tenant from the product (locked design decision) → needs its own repo (`mimik-command-center` or similar).
+Logged in FRONTEND_ROADMAP §5 (B1–B12). Not started.
+
+---
+
+## ► (2026-07-21, main `c65f572`) — SECURITY AUDIT PASS: upload hardening + RBAC + full sweep
 
 **377 Suite / 19 contracts green, ruff clean, web tsc + next lint clean. All pushed.** A dedicated
 security pass (upload rules + RBAC + "check everything"). Two fixes + a documented audit:
