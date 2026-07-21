@@ -220,6 +220,8 @@ export interface ApiCreativeManifest {
   template_key: string | null;
   copy_block: ApiCopyBlock | null;
   layers: ApiLayer[];
+  /** Per-creative layout override; absent/null = inherit the brand default. */
+  layout?: ApiBrandLayout | null;
 }
 
 /** mimik_contracts.creative.CreativeDoc */
@@ -534,8 +536,10 @@ export interface CreateCreativeBody {
     language: string;
     status: "draft" | "approved" | "edited";
   };
-  /** Cached image ref to reuse; null → placeholder brand ground. */
+  /** Cached image ref to reuse; null → placeholder brand ground. Rejected if an external URL. */
   image_artifact: string | null;
+  /** Per-creative layout override; omit to inherit the brand default. */
+  layout?: ApiBrandLayout;
 }
 
 /** POST /jobs/{id}/creatives — mint a new CreativeDoc version (team-gated at the API). */

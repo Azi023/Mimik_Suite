@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   type ApiApproval,
   type ApiBrand,
+  type ApiBrandLayout,
   type ApiCreativeDoc,
   type ApiDelivery,
   type ApiJob,
   type ApiJobStatus,
+  type ApiLogoPlacement,
+  type ApiMargins,
   type ApiRevisionZone,
   type ApprovalActionKind,
   type ApprovalTarget,
@@ -115,6 +118,21 @@ function isLightHex(hex: string): boolean {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.6;
 }
 
+/** The 9 logo anchors, in a 3×3 grid order (for the placement picker). */
+const PLACEMENTS: ReadonlyArray<ApiLogoPlacement> = [
+  "top_left", "top_center", "top_right",
+  "middle_left", "center", "middle_right",
+  "bottom_left", "bottom_center", "bottom_right",
+];
+
+/** Map a normalized (0..1) canvas point to the nearest of the 9 anchors (drag → snap). */
+function nearestAnchor(x: number, y: number): ApiLogoPlacement {
+  const col = x < 0.34 ? "left" : x < 0.67 ? "center" : "right";
+  const row = y < 0.34 ? "top" : y < 0.67 ? "middle" : "bottom";
+  if (row === "middle" && col === "center") return "center";
+  return `${row}_${col}` as ApiLogoPlacement;
+}
+
 /** 9-anchor logo placement → flexbox alignment. */
 function logoAnchorStyle(placement: string): { justifyContent: string; alignItems: string } {
   const [v, h] = ((): [string, string] => {
@@ -192,6 +210,13 @@ export function CreativeReview({
   const [editSubhead, setEditSubhead] = useState("");
   const [editCta, setEditCta] = useState("");
   const [savingCopy, setSavingCopy] = useState(false);
+  // Layout-edit mode (per-creative override): placement, logo scale, safe-zone margins.
+  const [layoutEditing, setLayoutEditing] = useState(false);
+  const [editPlacement, setEditPlacement] = useState<ApiLogoPlacement>("top_left");
+  const [editScale, setEditScale] = useState(0.15);
+  const [editMargin, setEditMargin] = useState(6);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [savingLayout, setSavingLayout] = useState(false);
 
   const latestIdx = creatives.length - 1;
   const [versionIdx, setVersionIdx] = useState(latestIdx);
@@ -226,7 +251,13 @@ export function CreativeReview({
   );
   const onLight = imageLayer === undefined && isLightHex(groundColor);
   const textInk = onLight ? "#14161c" : "#ffffff";
-  const layout = brand.tokens.layout;
+  // The creative's own layout override wins, else the brand default. Edits preview live.
+  const baseLayout = doc?.manifest.layout ?? brand.tokens.layout;
+  const dispPlacement: ApiLogoPlacement | undefined = layoutEditing
+    ? editPlacement
+    : baseLayout?.logo_placement;
+  const dispScale = layoutEditing ? editScale : baseLayout?.logo_scale ?? 0.15;
+  const dispMargin = layoutEditing ? editMargin : baseLayout?.margins.top ?? 0;
   const headingFont = brand.tokens.typography.heading_font ?? undefined;
 
   const activity = useMemo(
@@ -241,12 +272,43 @@ export function CreativeReview({
   /* ---- canvas pin placement ---- */
 
   function onCanvasClick(event: React.MouseEvent<HTMLDivElement>): void {
-    if (isTerminal || busy || canvasRef.current === null) return;
+    // In layout-edit mode the canvas is for dragging the logo, not dropping change pins.
+    if (isTerminal || busy || layoutEditing || canvasRef.current === null) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = (event.clientX - rect.left) / rect.width;
     const y = (event.clientY - rect.top) / rect.height;
     setPending({ x, y, zone: suggestZone(y) });
     setPendingText("");
+  }
+
+  /* ---- logo drag → snap to nearest anchor (layout-edit mode) ---- */
+
+  function pointNorm(event: React.PointerEvent<HTMLElement>): { x: number; y: number } | null {
+    if (canvasRef.current === null) return null;
+    const rect = canvasRef.current.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+    };
+  }
+
+  function onLogoGrab(event: React.PointerEvent<HTMLSpanElement>): void {
+    if (!layoutEditing) return;
+    event.stopPropagation();
+    const p = pointNorm(event);
+    if (p !== null) setDragPos(p);
+  }
+
+  function onCanvasPointerMove(event: React.PointerEvent<HTMLDivElement>): void {
+    if (!layoutEditing || dragPos === null) return;
+    const p = pointNorm(event);
+    if (p !== null) setDragPos(p);
+  }
+
+  function onLogoDrop(): void {
+    if (!layoutEditing || dragPos === null) return;
+    setEditPlacement(nearestAnchor(dragPos.x, dragPos.y));
+    setDragPos(null);
   }
 
   function commitPin(): void {
@@ -394,6 +456,10 @@ export function CreativeReview({
         status: "edited",
       },
       image_artifact: imageLayer?.artifact_ref ?? null,
+      // Carry forward any per-creative layout override so a copy edit never silently drops it.
+      ...(doc.manifest.layout !== undefined && doc.manifest.layout !== null
+        ? { layout: doc.manifest.layout }
+        : {}),
     });
     setSavingCopy(false);
     if (result.ok) {
@@ -402,6 +468,59 @@ export function CreativeReview({
       router.refresh();
     } else {
       setError(result.error ?? "Could not save the new version.");
+    }
+  }
+
+  function startLayoutEdit(): void {
+    setEditPlacement(baseLayout?.logo_placement ?? "top_left");
+    setEditScale(baseLayout?.logo_scale ?? 0.15);
+    setEditMargin(baseLayout?.margins.top ?? 6);
+    setLayoutEditing(true);
+    setBanner("");
+    setError("");
+  }
+
+  async function saveLayout(): Promise<void> {
+    if (editCopyAction === undefined || doc === undefined || savingLayout) return;
+    const templateKey = doc.manifest.template_key;
+    if (templateKey === null || copy === null) {
+      setError("This creative needs a template and copy before its layout can be versioned.");
+      return;
+    }
+    // Merge the edited fields onto the base layout so header/footer/grid/guides are preserved.
+    const margins: ApiMargins = { top: editMargin, right: editMargin, bottom: editMargin, left: editMargin };
+    const layout: ApiBrandLayout = {
+      logo_placement: editPlacement,
+      logo_scale: editScale,
+      margins,
+      header: baseLayout?.header ?? false,
+      footer: baseLayout?.footer ?? false,
+      grid_columns: baseLayout?.grid_columns ?? 12,
+      grid_gutter_pct: baseLayout?.grid_gutter_pct ?? 2,
+      guides: baseLayout?.guides ?? [],
+      show_guides: baseLayout?.show_guides ?? false,
+    };
+    setSavingLayout(true);
+    setError("");
+    const result = await editCopyAction({
+      template_key: templateKey,
+      copy_block: {
+        headline: copy.headline,
+        subhead: copy.subhead,
+        cta: copy.cta,
+        language: copy.language,
+        status: copy.status,
+      },
+      image_artifact: imageLayer?.artifact_ref ?? null,
+      layout,
+    });
+    setSavingLayout(false);
+    if (result.ok) {
+      setLayoutEditing(false);
+      setBanner("Saved layout as a new version.");
+      router.refresh();
+    } else {
+      setError(result.error ?? "Could not save the layout.");
     }
   }
 
@@ -444,15 +563,49 @@ export function CreativeReview({
               backgroundPosition: "center",
             }}
             onClick={onCanvasClick}
+            onPointerMove={onCanvasPointerMove}
+            onPointerUp={onLogoDrop}
             role="img"
             aria-label={`Creative preview, version ${doc.version}`}
           >
             {imageLayer !== undefined && <div className="creview__scrim" aria-hidden="true" />}
 
-            {/* logo chip at the brand's anchor */}
-            {layout !== undefined && (
-              <div className="creview__logo-layer" style={logoAnchorStyle(layout.logo_placement)}>
-                <span className="creview__logo" style={{ color: textInk, borderColor: textInk }}>
+            {/* safe-zone overlay (rulers) — shown while editing layout */}
+            {layoutEditing && (
+              <div
+                className="creview__safezone"
+                aria-hidden="true"
+                style={{ inset: `${dispMargin}%` }}
+              />
+            )}
+
+            {/* logo chip — at its anchor, or following the pointer mid-drag */}
+            {dispPlacement !== undefined && (
+              <div
+                className="creview__logo-layer"
+                style={
+                  layoutEditing && dragPos !== null
+                    ? { justifyContent: "flex-start", alignItems: "flex-start", padding: 0 }
+                    : logoAnchorStyle(dispPlacement)
+                }
+              >
+                <span
+                  className={`creview__logo${layoutEditing ? " creview__logo--draggable" : ""}`}
+                  style={{
+                    color: textInk,
+                    borderColor: textInk,
+                    fontSize: `${11 + dispScale * 40}px`,
+                    ...(layoutEditing && dragPos !== null
+                      ? {
+                          position: "absolute",
+                          left: `${dragPos.x * 100}%`,
+                          top: `${dragPos.y * 100}%`,
+                          transform: "translate(-50%, -50%)",
+                        }
+                      : {}),
+                  }}
+                  onPointerDown={layoutEditing ? onLogoGrab : undefined}
+                >
                   {brand.name}
                 </span>
               </div>
@@ -529,14 +682,77 @@ export function CreativeReview({
           </button>
         )}
 
-        {editCopyAction !== undefined && !isTerminal && !editing && (
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm creview__share"
-            onClick={startEdit}
-          >
-            Edit copy → new version
-          </button>
+        {editCopyAction !== undefined && !isTerminal && !editing && !layoutEditing && (
+          <div className="creview__editbtns">
+            <button type="button" className="btn btn--ghost btn--sm" onClick={startEdit}>
+              Edit copy
+            </button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={startLayoutEdit}>
+              Edit layout
+            </button>
+          </div>
+        )}
+
+        {layoutEditing && (
+          <div className="creview__composer">
+            <h2 className="creview__label">Logo &amp; layout — drag the logo, or pick an anchor</h2>
+            <div className="creview__anchorgrid" role="group" aria-label="Logo placement">
+              {PLACEMENTS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`creview__anchor${editPlacement === p ? " creview__anchor--active" : ""}`}
+                  aria-label={p.replace("_", " ")}
+                  aria-pressed={editPlacement === p}
+                  onClick={(): void => setEditPlacement(p)}
+                >
+                  <span className="creview__anchor-dot" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+            <label className="creview__slider">
+              Logo size <span className="creview__slider-val">{Math.round(editScale * 100)}%</span>
+              <input
+                type="range"
+                min={5}
+                max={40}
+                value={Math.round(editScale * 100)}
+                aria-label="Logo size"
+                onChange={(e): void => setEditScale(Number(e.target.value) / 100)}
+              />
+            </label>
+            <label className="creview__slider">
+              Safe margin <span className="creview__slider-val">{editMargin}%</span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={editMargin}
+                aria-label="Safe-zone margin"
+                onChange={(e): void => setEditMargin(Number(e.target.value))}
+              />
+            </label>
+            <div className="creview__composer-actions">
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={(): void => {
+                  setLayoutEditing(false);
+                  setDragPos(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                disabled={savingLayout}
+                onClick={(): void => void saveLayout()}
+              >
+                {savingLayout ? "Saving…" : "Save as new version"}
+              </button>
+            </div>
+          </div>
         )}
 
         {editing && (
