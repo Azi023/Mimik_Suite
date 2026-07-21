@@ -22,6 +22,7 @@ from creative.render.compositor import render_context_to_png
 from creative.render.templates import TemplateContext
 from mimik_contracts import (
     Brand,
+    BrandLayout,
     CopyBlock,
     CreativeManifest,
     Layer,
@@ -62,9 +63,11 @@ def build_manifest(
     *,
     template_key: str | None = None,
     image_artifact: str | None = None,
+    layout: BrandLayout | None = None,
 ) -> CreativeManifest:
     """Assemble the deterministic manifest for one creative. `image_artifact` is a cached
-    L1 ref (data URI / storage path); None keeps the free placeholder ground."""
+    L1 ref (data URI / storage path); None keeps the free placeholder ground. `layout` is a
+    per-creative override; None inherits the brand's default layout at render time."""
     layers = []
     if image_artifact:
         layers.append(
@@ -77,6 +80,7 @@ def build_manifest(
         or suggest_template(copy_block, format_key, has_imagery=image_artifact is not None),
         copy_block=copy_block,
         layers=layers,
+        layout=layout,
     )
 
 

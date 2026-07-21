@@ -114,4 +114,7 @@ def assemble_context(
         logo_ref=brand.tokens.logo.ref,
         image_ref=_image_ref(manifest),
         scrim=scrim,
+        # Per-creative layout override wins; else the brand's default layout; else the template's
+        # built-in defaults (None). This is the seam that makes BrandLayout actually render.
+        layout=manifest.layout or brand.tokens.layout,
     )

@@ -216,3 +216,47 @@ async def test_deliveries_endpoint_lists_archived_with_job_title(client: AsyncCl
     assert deliveries[0]["job_id"] == job_id
     assert deliveries[0]["job_title"] == "August offer"
     assert deliveries[0]["drive_path"].startswith("Mimik Clients/")
+
+
+async def test_create_creative_rejects_external_image_artifact(client: AsyncClient) -> None:
+    """image_artifact becomes a url(...) the compositor fetches — external refs are SSRF (R-001)."""
+    owner, _c, job_id, _cid = await _setup_job_with_creative(client)
+    for bad in [
+        "http://169.254.169.254/latest/meta-data/",
+        "https://evil.example/x.png",
+        "//evil.example/x",
+        "file:///etc/passwd",
+        "../../secret.png",
+    ]:
+        resp = await client.post(
+            f"/jobs/{job_id}/creatives",
+            json={"template_key": "centered_hero", "copy_block": {"headline": "x"}, "image_artifact": bad},
+            headers=_auth(owner),
+        )
+        assert resp.status_code == 422, f"image_artifact {bad!r} was NOT rejected"
+
+
+async def test_create_creative_allows_data_uri_and_internal_ref(client: AsyncClient) -> None:
+    owner, _c, job_id, _cid = await _setup_job_with_creative(client)
+    for good in ["data:image/png;base64,AAAA", "assets/brand/logo.png", "brand-asset-123"]:
+        resp = await client.post(
+            f"/jobs/{job_id}/creatives",
+            json={"template_key": "centered_hero", "copy_block": {"headline": "x"}, "image_artifact": good},
+            headers=_auth(owner),
+        )
+        assert resp.status_code == 201, f"image_artifact {good!r} rejected: {resp.text}"
+
+
+async def test_create_creative_with_layout_override_persists(client: AsyncClient) -> None:
+    owner, _c, job_id, _cid = await _setup_job_with_creative(client)
+    resp = await client.post(
+        f"/jobs/{job_id}/creatives",
+        json={
+            "template_key": "centered_hero",
+            "copy_block": {"headline": "x"},
+            "layout": {"logo_placement": "bottom_right", "logo_scale": 0.3},
+        },
+        headers=_auth(owner),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["manifest"]["layout"]["logo_placement"] == "bottom_right"

@@ -111,3 +111,22 @@ def test_delivery_path_requires_approved_copy() -> None:
     manifest.copy_block = manifest.copy_block.model_copy(update={"status": CopyStatus.APPROVED})
     ctx = assemble_context(brand, manifest, require_approved_copy=True)
     assert ctx.headline == manifest.copy_block.headline
+
+
+def test_assemble_populates_layout_from_brand_default() -> None:
+    """The §4 wiring: assemble_context now sets ctx.layout so BrandLayout actually renders."""
+    brand = _brand()
+    ctx = assemble_context(brand, _manifest(brand))
+    assert ctx.layout is not None, "brand default layout must reach the render context"
+
+
+def test_assemble_creative_layout_override_wins() -> None:
+    """A per-creative layout override beats the brand default at assembly."""
+    from mimik_contracts import BrandLayout, LogoPlacement
+
+    brand = _brand()
+    override = BrandLayout(logo_placement=LogoPlacement.BOTTOM_RIGHT, logo_scale=0.3)
+    ctx = assemble_context(brand, _manifest(brand, layout=override))
+    assert ctx.layout is not None
+    assert ctx.layout.logo_placement is LogoPlacement.BOTTOM_RIGHT
+    assert ctx.layout.logo_scale == 0.3

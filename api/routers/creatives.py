@@ -5,8 +5,10 @@ happens at archive time (see api/services/approval_flow.py), so persisting is br
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.auth import Principal, get_principal, require_role
@@ -14,15 +16,39 @@ from api.db import repo
 from api.db.mappers import to_brand, to_creative_doc
 from api.db.session import get_session
 from creative.pipeline import build_manifest
-from mimik_contracts import ActorRole, CopyBlock, CreativeDoc, JobStatus
+from mimik_contracts import ActorRole, BrandLayout, CopyBlock, CreativeDoc, JobStatus
 
 router = APIRouter(prefix="/jobs/{job_id}/creatives", tags=["creatives"])
+
+# Any URI scheme (http:, https:, file:, gopher:, ...). An artifact ref becomes a CSS `url(...)`
+# the headless compositor fetches at render time, so an EXTERNAL ref is an SSRF vector.
+_URI_SCHEME = re.compile(r"^[a-z][a-z0-9+.\-]*:", re.IGNORECASE)
+
+
+def _assert_safe_image_artifact(value: str | None) -> str | None:
+    """image_artifact flows into a `url(...)` the renderer fetches. Allow only inline data URIs
+    and internal (relative, no-scheme, no-traversal) asset refs — NEVER an external URL/host,
+    which the compositor would fetch server-side (SSRF). See docs/SECURITY_FINDINGS.md R-001."""
+    if value is None or value == "":
+        return value
+    if value.startswith("data:"):
+        return value  # inline bytes — no network fetch, no SSRF
+    if value.startswith("//") or _URI_SCHEME.match(value):
+        raise ValueError("image_artifact must be an internal asset ref or data URI, not a URL")
+    if ".." in value:
+        raise ValueError("image_artifact must not contain path traversal ('..')")
+    return value
 
 
 class CreateCreative(BaseModel):
     template_key: str
     copy_block: CopyBlock
     image_artifact: str | None = None  # cached L1/L2 ref; None -> placeholder brand ground
+    layout: BrandLayout | None = None  # per-creative layout override; None -> brand default
+
+    _safe_artifact = field_validator("image_artifact")(
+        staticmethod(_assert_safe_image_artifact)
+    )
 
 
 @router.post("", response_model=CreativeDoc, status_code=201)
@@ -46,6 +72,7 @@ async def create_creative(
         job.format_key,
         template_key=body.template_key,
         image_artifact=body.image_artifact,
+        layout=body.layout,
     )
     row = await repo.create_creative_doc(
         session,
