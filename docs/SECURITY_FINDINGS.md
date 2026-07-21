@@ -131,6 +131,64 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 
 ---
 
+## F-004 — Upload MIME check trusted the client Content-Type (disguised-file upload)  ✅ FIXED
+
+- **Where:** `api/routers/assets.py` (`POST /brands/{id}/assets`) + `api/services/brand_memory.py`.
+- **Finding:** the allowlist (png/jpeg/webp for images; ttf/otf/woff2 for fonts — already strict, no SVG,
+  no scripts) was enforced against `file.content_type`, a **client-supplied, spoofable header**. A PHP /
+  HTML / JS / SVG(-with-script) / PDF / ELF payload with `Content-Type: image/png` was stored as
+  `<uuid>.png` with the true (malicious) bytes, and the DB recorded the fake mime.
+- **Impact:** disguised-file upload. Exploitability was LOW in this architecture (files are stored under
+  server-UUID paths in a NON-served dir and only read as image bytes by the compositor / base64-embedded as
+  `data:` URIs — a renamed PHP never executes; SVG-in-CSS is script-inert), but it's a real gap and the
+  operator asked for strict rules. **Path traversal was already NOT possible** (paths = `<uuid>.<validated-
+  ext>` under `root/tenant_id/brand_id`; the client filename never touches the filesystem).
+- **Fix:** `a1bfc27` — `store_asset_file` now SNIFFS the magic bytes (`sniff_mime`) and returns the TRUSTED
+  mime; only real png/jpeg/webp/ttf/otf/woff2 pass (else 415), cross-kind is rejected (PNG-as-font), and the
+  DB stores the sniffed mime. `safe_display_filename()` sanitizes the client filename to display-only
+  metadata (strips path parts / control + quote/angle chars / leading dots; caps length).
+- **Re-verify:** `uv run --no-sync pytest -q tests/test_brand_memory.py -k "disguised or cross_kind or safe_display"`
+  — rejects PHP/SVG/PDF/GIF disguised as png, rejects cross-kind, sanitizes traversal/injection filenames.
+- **Upload is team-only** (`require_role`); clients never reach it (constraint #3).
+
+---
+
+## F-005 — RBAC: client principals could create tenant resources  ✅ FIXED
+
+- **Where:** `POST /clients`, `/brands`, `/jobs`, `/pillars`, `/briefs`, `/briefs/{id}/signoff`.
+- **Finding:** these creates used bare `get_principal` (any authenticated principal). A bounded **client**-
+  role principal (the review-only portal) could therefore **create tenant resources** — spin up new clients,
+  or create brands/jobs **for other clients in the tenant**. The write-side analog of F-001/F-002; violates
+  constraint #3 (the team runs the pipeline, the client only reviews).
+- **Fix:** `c65f572` — all six now `require_role("owner","admin","ops","designer","team")` → a client
+  principal gets 403 before the body is trusted. Clients keep only their bounded actions (approvals,
+  own-client tasks/comments, portal reads). +1 test (client principal 403 on every create).
+- **Re-verify:** `uv run --no-sync pytest -q tests/test_jobs.py -k "cannot_create_tenant_resources"`.
+
+---
+
+## A-001 — Full security audit sweep (2026-07-21) — what was checked
+
+Beyond the fixes above, these surfaces were audited and found **already sound** (no change needed):
+- **JWT / auth** (`api/core/supabase_auth.py`): algorithms are pinned per verification path; the HS256 path
+  uses a SEPARATE configured secret (not the JWKS public key) → **RS/HS confusion not exploitable**; `none`
+  and unknown algs rejected; **audience (`authenticated`) + issuer + exp enforced**. Role/tenant come from
+  our `UserAccount`, never provider token metadata.
+- **SSRF via URL fetch** (`api/services/brief_extraction.py`, reachable from `POST /briefs`, intake): a real
+  egress guard (`_assert_public_http_url`) resolves the host and refuses loopback / RFC1918 / link-local
+  (incl. `169.254.169.254` cloud metadata) / non-global, with a **per-redirect-hop re-check**. Dedicated
+  `tests/test_ssrf_guard.py`. Outbound httpx (Stripe/WhatsApp/notifications) uses fixed hosts.
+- **Path traversal**: asset storage uses server-UUID paths + validated extension (F-004); the archive path
+  uses `safe_segment`. Client filenames are display-only.
+- **CORS**: no permissive CORS middleware — the browser talks to the API only via same-origin Next server
+  actions (httpOnly cookie server-side), so there is no cross-origin credentialed surface to abuse.
+- **Tenant isolation**: every query filtered by `tenant_id` (`tests/test_tenant_isolation.py`); cross-tenant
+  was never reachable in the IDOR findings.
+- **Client-as-untrusted (constraint #3)**: client freeform text fills constrained contract slots (data),
+  is never merged into a system prompt, and client-facing generation runs low-privilege.
+
+---
+
 ## R-001 — Build-session security review (board/deliveries/billing/prefs/copy-editor)  ✅ REVIEWED
 
 Reviewed every surface added in the 2026-07-21 build session. **No new vulnerabilities introduced.**
@@ -164,8 +222,7 @@ brand-asset refs (not arbitrary URLs) would harden it. Added to open items.
 - **Rate-limiting** on `POST /approvals/magic` + `POST /portal/session` — a leaked/guessed token has no
   throttle today. *(Not implemented.)*
 - **Magic-link revocation** — no way to invalidate a shared link before its TTL (D-001). *(Not implemented.)*
-- **Write-route review** — this pass focused on READS. Spot-check client-principal WRITE routes (create
-  pillar/brief/job) confine `client_id` too (tasks.py does; the rest use team-role gates — confirm). *(Partial.)*
+- ~~Write-route RBAC review~~ → **DONE, F-005** (creates gated to team; tasks/preferences confine client_id).
 - ~~`image_artifact` allowlist / compositor SSRF~~ → **FIXED, F-003.** (Follow-on: apply the same
   scheme/host guard to any OTHER path that sets `artifact_ref` — e.g. reference-creative ingest — if it
   can carry an external URL into a render. *Not yet swept.*)

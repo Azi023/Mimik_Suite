@@ -4,7 +4,34 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `a8e2246`) — PER-CREATIVE CANVAS EDITOR + SSRF FIX → Track A ~90%
+## ► LATEST (2026-07-21, main `c65f572`) — SECURITY AUDIT PASS: upload hardening + RBAC + full sweep
+
+**377 Suite / 19 contracts green, ruff clean, web tsc + next lint clean. All pushed.** A dedicated
+security pass (upload rules + RBAC + "check everything"). Two fixes + a documented audit:
+- **F-004 upload hardening** (`a1bfc27`): the asset upload trusted the client `Content-Type`. Now
+  `store_asset_file` SNIFFS magic bytes — only real png/jpeg/webp (images) / ttf/otf/woff2 (fonts) pass;
+  PHP/HTML/JS/SVG/PDF/ELF disguised as image/png → 415; cross-kind rejected; DB stores the true mime.
+  `safe_display_filename` sanitizes the filename. (Path traversal was ALREADY impossible — server-UUID
+  paths.) Upload is team-only. +4 tests.
+- **F-005 RBAC** (`c65f572`): `POST /clients,/brands,/jobs,/pillars,/briefs,/briefs/{id}/signoff` used bare
+  get_principal → a bounded CLIENT principal could create tenant resources (incl. for OTHER clients). Now
+  team-role-gated (403 for clients). The write-side analog of the IDOR sweep. +1 test.
+- **A-001 audit summary** (docs/SECURITY_FINDINGS.md): audited + found ALREADY sound — JWT (alg pinned, no
+  RS/HS confusion, aud/iss/exp enforced), SSRF-fetch (egress guard w/ per-hop re-check + metadata-IP block,
+  test_ssrf_guard.py), path traversal, CORS (none — same-origin server actions), tenant isolation, client-
+  as-untrusted (#3). **The codebase is in strong security shape.**
+
+**Security OPEN (logged, not fixed):** rate-limiting on `/approvals/magic` + `/portal/session`; magic-link
+revocation; `artifact_ref` allowlist sweep beyond POST /creatives; 2 temp passwords to rotate.
+
+**Completion:** Track A frontend ~90%, backend ~92%. NOT literal 100% — remaining is engine-side compositor
+rendering (header/footer bands + column grid, §4) + free-position logo (needs a contract field). **Next per
+operator: HOSTING** (roadmap §7 has the plan — standard Next+FastAPI+PG+Redis via docker compose on the VPS
++ Caddy/nginx TLS; needs Dockerfiles for web+api added). Track B (command-center) still deferred + logged.
+
+---
+
+## ► (2026-07-21, main `a8e2246`) — PER-CREATIVE CANVAS EDITOR + SSRF FIX → Track A ~90%
 
 **374 Suite / 19 contracts green, ruff clean, web tsc + next lint clean. All pushed to
 github.com/Azi023/Mimik_Suite (private).** Did (a) the full per-creative canvas override + (b) the
