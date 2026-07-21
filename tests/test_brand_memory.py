@@ -31,12 +31,18 @@ def assets_root(tmp_path: Path):
     config._settings = None
 
 
+_TTF = b"\x00\x01\x00\x00" + b"\x00" * 20
+_PHP = b"<?php system($_GET[0]); ?>" + b"\x00" * 20
+_SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+
+
 def test_store_asset_file_uses_server_named_paths(assets_root: Path) -> None:
-    path = brand_memory.store_asset_file(
-        tenant_id="t1", brand_id="b1", kind="logo", mime="image/png", data=_PNG
+    path, mime = brand_memory.store_asset_file(
+        tenant_id="t1", brand_id="b1", kind="logo", data=_PNG
     )
     stored = Path(path)
     assert stored.exists() and stored.read_bytes() == _PNG
+    assert mime == "image/png", "the TRUSTED mime is sniffed from bytes, not a header"
     # Server-generated name (uuid.ext) under tenant/brand — the client filename never
     # touches the filesystem, and the path shape survives the asset-ref validator.
     assert stored.parent == assets_root / "t1" / "b1"
@@ -44,24 +50,39 @@ def test_store_asset_file_uses_server_named_paths(assets_root: Path) -> None:
     assert " " not in path and "'" not in path
 
 
-def test_store_asset_file_rejects_bad_mime_and_oversize(assets_root: Path) -> None:
-    with pytest.raises(brand_memory.UnsupportedAssetMime):
-        brand_memory.store_asset_file(
-            tenant_id="t1", brand_id="b1", kind="logo", mime="image/svg+xml", data=_PNG
-        )
+def test_store_asset_file_rejects_disguised_scripts_and_svg(assets_root: Path) -> None:
+    """The upload gate is the MAGIC BYTES, not the header. A PHP/HTML/script or a scriptable
+    SVG disguised as image/png is rejected no matter what Content-Type claims."""
+    for payload in (_PHP, _SVG, b"GIF89a" + b"\x00" * 20, b"%PDF-1.4" + b"\x00" * 20):
+        with pytest.raises(brand_memory.UnsupportedAssetMime):
+            brand_memory.store_asset_file(tenant_id="t1", brand_id="b1", kind="logo", data=payload)
+
+
+def test_store_asset_file_rejects_oversize_and_cross_kind(assets_root: Path) -> None:
     with pytest.raises(brand_memory.AssetTooLarge):
         brand_memory.store_asset_file(
-            tenant_id="t1",
-            brand_id="b1",
-            kind="logo",
-            mime="image/png",
+            tenant_id="t1", brand_id="b1", kind="logo",
             data=b"x" * (brand_memory.MAX_ASSET_BYTES + 1),
         )
+    # A real TTF uploaded as an image kind (or a PNG as a font) is cross-kind → rejected.
     with pytest.raises(brand_memory.UnsupportedAssetMime):
-        # font mimes are only valid for kind=font
-        brand_memory.store_asset_file(
-            tenant_id="t1", brand_id="b1", kind="logo", mime="font/ttf", data=_PNG
-        )
+        brand_memory.store_asset_file(tenant_id="t1", brand_id="b1", kind="logo", data=_TTF)
+    with pytest.raises(brand_memory.UnsupportedAssetMime):
+        brand_memory.store_asset_file(tenant_id="t1", brand_id="b1", kind="font", data=_PNG)
+    # ...but a real TTF as kind=font is accepted, with the trusted mime.
+    _path, mime = brand_memory.store_asset_file(
+        tenant_id="t1", brand_id="b1", kind="font", data=_TTF
+    )
+    assert mime == "font/ttf"
+
+
+def test_safe_display_filename_strips_paths_and_control_chars() -> None:
+    assert brand_memory.safe_display_filename("../../etc/passwd") == "passwd"
+    assert brand_memory.safe_display_filename("a\\b\\evil.png") == "evil.png"
+    dangerous = brand_memory.safe_display_filename('x"><img>.png')
+    assert all(c not in dangerous for c in '"<>'), dangerous
+    assert brand_memory.safe_display_filename(None) == "upload"
+    assert brand_memory.safe_display_filename("") == "upload"
 
 
 def _study(**overrides: object) -> AssetStudy:
@@ -123,8 +144,8 @@ async def _brand_and_asset(session, assets_root, *, kind: str = "reference_creat
     )
     session.add(brand)
     await session.flush()
-    path = brand_memory.store_asset_file(
-        tenant_id=tenant.id, brand_id=brand.id, kind=kind, mime="image/png", data=_PNG
+    path, _mime = brand_memory.store_asset_file(
+        tenant_id=tenant.id, brand_id=brand.id, kind=kind, data=_PNG
     )
     asset = BrandAssetRow(
         tenant_id=tenant.id, client_id="c1", brand_id=brand.id, kind=kind,
@@ -232,8 +253,8 @@ async def test_derive_knockout_logo_turns_mark_white(session, assets_root) -> No
     session.add(brand)
     await session.flush()
     purple = _solid_png("#8C4F8D")
-    path = brand_memory.store_asset_file(
-        tenant_id=tenant.id, brand_id=brand.id, kind="logo", mime="image/png", data=purple
+    path, _mime = brand_memory.store_asset_file(
+        tenant_id=tenant.id, brand_id=brand.id, kind="logo", data=purple
     )
     asset = BrandAssetRow(
         tenant_id=tenant.id, client_id="c1", brand_id=brand.id, kind="logo",

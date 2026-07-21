@@ -63,6 +63,39 @@ def _extension_for(kind: str, mime: str) -> str:
     return ext
 
 
+def safe_display_filename(name: str | None) -> str:
+    """Sanitize a client-supplied filename to safe DISPLAY metadata (it never becomes a path).
+    Strips any directory components + control/quote chars and caps length, so it can't inject
+    into a Drive title / HTML / CSS context downstream or masquerade as a path."""
+    if not name:
+        return "upload"
+    base = name.replace("\\", "/").split("/")[-1]  # drop any path, both separators
+    cleaned = "".join(c for c in base if c.isprintable() and c not in '"\'`<>').strip()
+    cleaned = cleaned.lstrip(".")  # no leading dots (hidden / traversal-ish)
+    return cleaned[:120] or "upload"
+
+
+def sniff_mime(data: bytes) -> str | None:
+    """Identify a file's type from its MAGIC BYTES, never a client-supplied header. Only the
+    formats we accept are recognized; everything else (PHP, HTML, scripts, ELF, PDF, SVG, …)
+    returns None → rejected. This is the real upload gate — Content-Type is spoofable."""
+    if len(data) < 12:
+        return None
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:4] == b"wOF2":
+        return "font/woff2"
+    if data[:4] == b"OTTO":
+        return "font/otf"
+    if data[:4] in (b"\x00\x01\x00\x00", b"true", b"ttcf"):
+        return "font/ttf"
+    return None
+
+
 def validate_asset_mime(kind: str, mime: str) -> None:
     """Allow-list check for asset rows created WITHOUT bytes (e.g. Drive registration).
     Raises UnsupportedAssetMime — the DB must never carry a mime the render/vision paths
@@ -71,24 +104,29 @@ def validate_asset_mime(kind: str, mime: str) -> None:
 
 
 def store_asset_file(
-    *, tenant_id: str, brand_id: str, kind: str, mime: str, data: bytes
-) -> str:
-    """Write uploaded bytes to disk; return the storage path for the DB row.
+    *, tenant_id: str, brand_id: str, kind: str, data: bytes
+) -> tuple[str, str]:
+    """Write uploaded bytes to disk; return (storage_path, TRUSTED mime).
 
-    The path is built ONLY from server-generated ids + a validated extension — the
-    client's filename never touches the filesystem (it is stored as display metadata on
-    the row). The result is asset-ref-shaped (no spaces/quotes), so it survives the
-    contract validator.
+    The trusted mime is SNIFFED from the bytes (never a client header) and must be allowed for
+    this asset kind — so a PHP/HTML/script/SVG payload disguised as image/png is rejected here,
+    and the DB always carries the true type. The path is built ONLY from server-generated ids +
+    the validated extension — the client's filename never touches the filesystem (it is display
+    metadata on the row). The result is asset-ref-shaped (no spaces/quotes) for the contract validator.
     """
     if len(data) > MAX_ASSET_BYTES:
         raise AssetTooLarge(f"asset exceeds {MAX_ASSET_BYTES} bytes")
-    ext = _extension_for(kind, mime)
+    real_mime = sniff_mime(data)
+    if real_mime is None:
+        raise UnsupportedAssetMime("file content is not a recognized image/font type")
+    # Cross-kind guard too: a real PNG uploaded as kind=font (or vice-versa) is rejected.
+    ext = _extension_for(kind, real_mime)
     root = Path(get_settings().assets_local_root)
     target_dir = root / tenant_id / brand_id
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{uuid4()}.{ext}"
     path.write_bytes(data)
-    return str(path)
+    return str(path), real_mime
 
 
 def read_asset_bytes(asset: BrandAssetRow) -> bytes:
@@ -126,11 +164,10 @@ async def derive_knockout_logo(
 
     source = read_asset_bytes(asset)
     knocked = await derive_knockout_png(source, asset.mime)
-    path = store_asset_file(
+    path, _mime = store_asset_file(
         tenant_id=brand.tenant_id,
         brand_id=brand.id,
         kind="logo",
-        mime="image/png",
         data=knocked,
     )
     return await repo.create_brand_asset(

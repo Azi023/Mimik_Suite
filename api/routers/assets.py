@@ -47,13 +47,12 @@ async def upload_asset(
 ) -> BrandAsset:
     brand = await _own_brand(session, principal, brand_id)
     data = await file.read(brand_memory.MAX_ASSET_BYTES + 1)
-    mime = file.content_type or "application/octet-stream"
     try:
-        path = brand_memory.store_asset_file(
+        # The trusted mime is SNIFFED from the bytes — the client Content-Type is never trusted.
+        path, mime = brand_memory.store_asset_file(
             tenant_id=principal.tenant_id,
             brand_id=brand_id,
             kind=kind.value,
-            mime=mime,
             data=data,
         )
     except brand_memory.AssetTooLarge as exc:
@@ -66,7 +65,7 @@ async def upload_asset(
         client_id=brand.client_id,
         brand_id=brand_id,
         kind=kind.value,
-        filename=file.filename or "upload",
+        filename=brand_memory.safe_display_filename(file.filename),
         mime=mime,
         local_path=path,
         license=license,
