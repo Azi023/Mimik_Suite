@@ -213,6 +213,24 @@ brand-asset refs (not arbitrary URLs) would harden it. Added to open items.
 
 ---
 
+## INC-001 — Secret committed to GitHub during VPS cleanup (assistant error)  ✅ REMEDIATED
+
+- **What:** while preserving planflow's code before decommission, the assistant `git add -A && commit &&
+  push`-ed on the VPS. The untracked file `planflow/data-import/merge_local_dump.py` contained a
+  hardcoded prod DB DSN (`...password=Pf@2026!xK9mWq`). Pushed to `github.com/Azi023/planflow` as commit
+  `a1970f6`. Root cause: the command chained the commit after a secret-grep with `&&` instead of gating
+  on the grep result.
+- **Remediation (done immediately):** `git reset --soft HEAD~1` + unstage the file, then
+  `git push --force origin main` → remote `main` back to `7ea6f83`; the file is untracked again (local
+  only, out of git). The secret commit is off the branch.
+- **Residual + action:** GitHub may retain the dangling commit by SHA until GC. Since planflow's DB is
+  being decommissioned the exposure is largely moot, BUT treat **`Pf@2026!xK9mWq` as compromised** —
+  rotate it if reused anywhere. (planflow repo is private, limiting blast radius.)
+- **Lesson:** never auto-commit machine-local files without inspecting content; a secret-grep must GATE
+  the commit (abort on hit), not just print.
+
+---
+
 ## Open items for a security pass (not yet done)
 - ~~Client-principal read scoping across jobs/clients/brands/ops/briefs/pillars~~ → **AUDITED + FIXED
   (F-001, F-002). Full sweep done — every client-data GET now confines or 403s a client principal.**

@@ -4,7 +4,30 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `0ae0626`) — TRACK A COMPLETE + DEPLOY PREP (VPS audited, CI pipeline live)
+## ► LATEST (2026-07-21, main `HEAD`) — DEPLOY IN PROGRESS: subdomain live, VPS cleanup, build blocked on GH_PAT
+
+**Subdomain = `suite.mimikcreations.com`** (A → 195.201.33.87 added on Spaceship; `preview.mimik` A record
+removed by operator). CI variable `NEXT_PUBLIC_API_URL=https://suite.mimikcreations.com/api` set on the repo.
+- **VPS cleanup:** hermes systemd services (`hermes-gateway`,`hermes-webui`) **stopped+disabled** → freed
+  ~430 MB (RAM avail 1.35→1.78 GB), reversible. planflow code preserved on github.com/Azi023/planflow.
+  `preview.mimik` served nothing on the box. **Still to remove (via COOLIFY UI, not SSH — it auto-restarts):**
+  the `csedash.xyz`/planflow Coolify app (Stop → frees ~500 MB → Delete AFTER migrating its DB); striker
+  (no running container/service found — just delete its Coolify resource + `rm -rf /root/workspace/striker`).
+- **⚠ INC-001 (SECURITY_FINDINGS.md):** assistant accidentally pushed a prod DB password to Azi023/planflow
+  during cleanup; force-pushed it away immediately. `Pf@2026!xK9mWq` should be treated as compromised/rotated.
+- **Image build:** `.github/workflows/build-images.yml` triggered + validated — fails ONLY at the private
+  sibling checkout: **operator must add repo Actions secret `GH_PAT`** (fine-grained PAT, Contents:Read on
+  Azi023/mimik-contracts + mimik-knowledge). Then re-run → images land in ghcr.io/azi023/mimik-suite-{api,web}.
+- **⚠ Supabase region:** the existing project (`uxewpubrylgiykjhutqn`) is in **Tokyo**; the VPS is in
+  **Germany** → ~250 ms/query → sluggish. **Recommend a NEW Supabase project in EU (Frankfurt)** before wiring
+  (region can't be changed post-creation). Then set SUPABASE_URL + SUPABASE_ANON_KEY + DATABASE_URL (asyncpg)
+  in Coolify. App auto-migrates via alembic on boot.
+- **cPanel (jasmin-hostings) question:** static sites/files → yes (subdomain + File Manager/FTP); full-stack
+  apps (planflow Next+Nest+DB) → NO (no Docker/limited Node) → keep on VPS/Node host. PFI depends on its stack.
+
+---
+
+## ► (2026-07-21, main `0ae0626`) — TRACK A COMPLETE + DEPLOY PREP (VPS audited, CI pipeline live)
 
 **378 Suite / 19 contracts green, all pushed to github.com/Azi023/Mimik_Suite.**
 - **TRACK A COMPLETE** (`a221661`): header/footer brand bands render across all 3 templates → BrandLayout
