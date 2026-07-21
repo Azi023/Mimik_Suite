@@ -1,0 +1,52 @@
+# Mimik Suite — PASTE THIS into Coolify's "Docker Compose (Empty)" resource.
+#
+# We PULL prebuilt images from GHCR (built in CI), so you do NOT need the
+# "Private Repository / GitHub App" flow at all. Steps:
+#   1. Coolify → your project → production → + New → "Docker Compose (Empty)".
+#   2. Paste this file.
+#   3. Environment Variables tab → add the secrets (DATABASE_URL, SUPABASE_URL,
+#      SUPABASE_ANON_KEY, JWT_SECRET, APP_ENV=prod). Coolify injects them into
+#      every service — no .env file needed here.
+#   4. Domains → web service = https://suite.mimikcreations.com
+#                 api service = https://suite.mimikcreations.com/api
+#   5. Deploy. (Images are private → make the GHCR packages public, OR add a
+#      registry credential — see docs/DEPLOY.md.)
+
+services:
+  api:
+    image: ghcr.io/azi023/mimik-suite-api:latest
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/openapi.json', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 900m
+    mem_reservation: 350m
+
+  web:
+    image: ghcr.io/azi023/mimik-suite-web:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 450m
+    mem_reservation: 200m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
