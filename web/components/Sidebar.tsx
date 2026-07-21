@@ -84,6 +84,9 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
           <Link className="rail-btn" href="/deliveries" aria-label="Deliveries" title="Deliveries">
             <DeliveriesGlyph />
           </Link>
+          <Link className="rail-btn" href="/billing" aria-label="Billing" title="Billing">
+            <BillingGlyph />
+          </Link>
         </nav>
 
         <div className="rail__footer">
@@ -179,6 +182,16 @@ function DeliveriesGlyph(): JSX.Element {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="M3 7l9-4 9 4-9 4-9-4z" strokeLinejoin="round" />
       <path d="M3 7v10l9 4 9-4V7M12 11v10" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A card glyph for the Billing rail entry (no matching icon in ./icons). */
+function BillingGlyph(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <path d="M2 10h20" strokeLinecap="round" />
     </svg>
   );
 }

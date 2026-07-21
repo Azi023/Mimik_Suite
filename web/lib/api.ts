@@ -654,6 +654,90 @@ export function advanceTaskStatus(
 }
 
 /* ---------------------------------------------------------------------------
+   Billing — subscriptions + checkout ("quote") links.
+--------------------------------------------------------------------------- */
+
+/** mimik_contracts.enums.SubscriptionStatus. trialing/active grant access; the rest gate it off. */
+export type ApiSubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "incomplete";
+
+/** mimik_contracts.billing.Subscription. */
+export interface ApiSubscription {
+  id: string;
+  created_at: string;
+  tenant_id: string;
+  client_id: string;
+  status: ApiSubscriptionStatus;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  price_id: string | null;
+  current_period_end: string | null;
+}
+
+/** GET /clients/{id}/subscription — the client's subscription (404 if none). Client-confined. */
+export function getClientSubscription(
+  clientId: string,
+  sessionToken?: string,
+): Promise<ApiSubscription> {
+  return apiGet<ApiSubscription>(
+    `/clients/${encodeURIComponent(clientId)}/subscription`,
+    sessionToken,
+  );
+}
+
+/** POST /billing/checkout — mint a Stripe checkout ("quote"/payment) link for a client. */
+export function startCheckout(
+  clientId: string,
+  sessionToken?: string,
+): Promise<{ checkout_url: string; session_id: string }> {
+  return apiPost<{ checkout_url: string; session_id: string }>(
+    "/billing/checkout",
+    { client_id: clientId },
+    sessionToken,
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Preferences — the per-client learned taste profile (the learning loop).
+--------------------------------------------------------------------------- */
+
+/** mimik_contracts.workflow.PreferenceSignal (subset the profile view renders). */
+export interface ApiPreferenceSignal {
+  source: string;
+  reason_tag: string | null;
+  weight: number;
+  attributes: Record<string, string>;
+  creative_doc_id: string | null;
+  created_at: string;
+}
+
+/** GET /clients/{id}/preferences/profile response. */
+export interface ApiPreferenceProfile {
+  profile: {
+    summary: string;
+    signals: ApiPreferenceSignal[];
+    client_id: string;
+  };
+  ranker_active: boolean;
+  signal_count: number;
+}
+
+/** GET /clients/{id}/preferences/profile — the client's learned preference profile. Client-confined. */
+export function getPreferenceProfile(
+  clientId: string,
+  sessionToken?: string,
+): Promise<ApiPreferenceProfile> {
+  return apiGet<ApiPreferenceProfile>(
+    `/clients/${encodeURIComponent(clientId)}/preferences/profile`,
+    sessionToken,
+  );
+}
+
+/* ---------------------------------------------------------------------------
    Briefs — the versioned, sign-off-able brand-brief document.
 --------------------------------------------------------------------------- */
 

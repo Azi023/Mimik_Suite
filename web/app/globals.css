@@ -3724,6 +3724,74 @@ ul {
   border-radius: var(--r-xs);
   word-break: break-all;
 }
+
+/* billing pills + quote link */
+.billing__pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.billing__pill--ok { background: rgba(59, 185, 102, 0.16); color: var(--dot-done); }
+.billing__pill--warn { background: rgba(245, 166, 35, 0.16); color: var(--dot-progress); }
+.billing__pill--bad { background: rgba(240, 68, 56, 0.12); color: var(--dot-new); }
+.billing__link { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.billing__err { display: block; margin-top: 4px; font-size: 11px; color: #e5484d; }
+
+/* preference profile */
+.prefs { display: flex; flex-direction: column; gap: var(--sp-5); max-width: 780px; }
+.prefs__cards { display: flex; gap: var(--sp-4); flex-wrap: wrap; }
+.prefs__card {
+  flex: 1 1 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--sp-5);
+}
+.prefs__card-num { font-size: 26px; font-weight: 700; color: var(--ink); }
+.prefs__card-num--on { color: var(--dot-done); }
+.prefs__card-num--off { color: var(--dot-progress); }
+.prefs__card-label { font-size: 12px; color: var(--muted); }
+.prefs__summary {
+  font-size: 15px;
+  color: var(--ink-2);
+  background: var(--accent-soft);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+}
+.prefs__section { display: flex; flex-direction: column; gap: var(--sp-3); }
+.prefs__signals { display: flex; flex-direction: column; gap: var(--sp-2); list-style: none; }
+.prefs__signal {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+}
+.prefs__signal-source {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.prefs__signal-source--approval { background: rgba(59, 185, 102, 0.16); color: var(--dot-done); }
+.prefs__signal-source--rejection { background: rgba(240, 68, 56, 0.12); color: var(--dot-new); }
+.prefs__signal-source--pick { background: var(--accent-soft); color: var(--accent); }
+.prefs__signal-reason { font-size: 11px; color: var(--muted); text-transform: capitalize; }
+.prefs__signal-attrs { font-size: 12px; color: var(--ink-2); margin-left: auto; }
 .tasks__pager { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); }
 .tasks__pager-label { font-size: 13px; color: var(--muted); }
 
