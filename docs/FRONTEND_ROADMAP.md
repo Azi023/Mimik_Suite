@@ -48,7 +48,16 @@ wired into the brief editor, brand-kit editor, onboarding wizard, and the review
 **Security:** IDOR fix on `/jobs` (client-principal confinement) + `GET /me` + role-based route-gating +
 `docs/SECURITY_FINDINGS.md`.
 
-**Rough completion — Track A frontend: ~90%** (was ~40%). Backend ~92%. DONE: the sellable core loop
+**✅ TRACK A COMPLETE (2026-07-21).** Frontend + product pipeline shipped, verified, secured, pushed.
+Header/footer brand bands now render across all 3 templates (with content inset); logo placement/size +
+margins + per-creative layout override all render. Column-grid *snapping* is a deliberate v1 non-goal
+(the safe-zone + bands + anchor system covers brand layout; true per-column text snapping needs per-template
+text-zone rework for marginal client value — revisit only if a client asks). Free-position logo (x/y) is
+likewise deferred (needs a contract field; the 9-anchor drag-snap ships now). Next: **hosting** (§7), then
+Track B (§5, separate Command-Center app — planning to be done on a fresh operator-led session).
+
+--- historical completion trail ---
+**~90%** (pre-bands). Backend ~92%. DONE: the sellable core loop
 (review → approve → portal), resilience layer, deliveries, billing+quotes, preference-profile visibility,
 board states, inline copy-versioning, AND the **per-creative canvas layout editor** (drag logo → snap to
 anchor / size / margins → new version), backed by the new `CreativeManifest.layout` contract field +

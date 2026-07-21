@@ -100,7 +100,44 @@ def _edge_pads(ctx: TemplateContext, frac: float) -> tuple[int, int, int, int]:
         right = max(right, round(m.right / 100 * short))
         bottom = max(bottom, round(m.bottom / 100 * short))
         left = max(left, round(m.left / 100 * short))
+        # Header/footer brand bands reserve a strip at top/bottom — content must clear them.
+        band = _band_height(fmt.width, fmt.height)
+        if layout.header:
+            top = max(top, band + _base_pad(fmt.width, fmt.height, frac))
+        if layout.footer:
+            bottom = max(bottom, band + _base_pad(fmt.width, fmt.height, frac))
     return top, right, bottom, left
+
+
+# Header/footer band height as a fraction of the canvas height.
+_BAND_FRAC = 0.07
+
+
+def _band_height(width: int, height: int) -> int:
+    return round(height * _BAND_FRAC)
+
+
+def _bands_html(ctx: TemplateContext) -> str:
+    """Solid brand-color strips at the very top/bottom when the brand's layout opts into a
+    header/footer band. Absolutely positioned over the ground; content already clears them via
+    the raised safe-zone floor (_edge_pads). Empty string when neither is enabled (no regression)."""
+    layout = ctx.layout
+    if layout is None or (not layout.header and not layout.footer):
+        return ""
+    w, h = ctx.size()
+    band = _band_height(w, h)
+    parts: list[str] = []
+    if layout.header:
+        parts.append(
+            f'<div style="position:absolute;top:0;left:0;right:0;height:{band}px;'
+            f'background:{ctx.primary}"></div>'
+        )
+    if layout.footer:
+        parts.append(
+            f'<div style="position:absolute;bottom:0;left:0;right:0;height:{band}px;'
+            f'background:{ctx.primary}"></div>'
+        )
+    return "".join(parts)
 
 
 # Conservative width assumed for a horizontal logo lockup (height × this factor); the actual
@@ -227,6 +264,7 @@ class CenteredHero(LayoutTemplate):
         return (
             f'<div style="position:relative;width:{w}px;height:{h}px;overflow:hidden;{ground}">'
             f"{scrim}"
+            f"{_bands_html(ctx)}"
             f"{_logo(ctx, pad_t, pad_l, round(h * 0.06))}"
             f'<div style="position:absolute;left:{pad_l}px;right:{pad_r}px;bottom:{pad_b}px">'
             f'<h1 style="font-family:{ctx.heading_font};color:#fff;font-size:{h_size}px;'
@@ -292,6 +330,7 @@ class LowerBand(LayoutTemplate):
         return (
             f'<div style="position:relative;width:{w}px;height:{h}px;overflow:hidden;background:{ctx.primary}">'
             f'<div style="position:absolute;top:0;left:0;right:0;height:{h - band_h}px;{top}"></div>'
+            f"{_bands_html(ctx)}"
             f'<div style="position:absolute;left:0;right:0;bottom:0;height:{band_h}px;'
             f'background:{ctx.primary};padding:{band_pad_top}px {pad_r}px {pad_b}px {pad_l}px;'
             f"box-sizing:border-box;"
@@ -427,6 +466,7 @@ class SoftEditorial(LayoutTemplate):
             f'<div style="position:relative;width:{w}px;height:{h}px;overflow:hidden;'
             f"background:linear-gradient(170deg,{pal['ground_top']} 0%,"
             f"{pal['ground_bottom']} 100%)\">"
+            f"{_bands_html(ctx)}"
             f"{badge}"
             f'<div style="position:absolute;left:{pad_l}px;right:{pad_r}px;'
             f"top:{content_top}px;bottom:{wave_h}px;text-align:center;"

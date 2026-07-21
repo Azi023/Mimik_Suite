@@ -222,3 +222,28 @@ def test_no_layout_keeps_legacy_logo_position() -> None:
     assert geom.logo_zone is not None
     # Legacy default anchors the logo at the template's own top/left pad, not the canvas edges.
     assert geom.logo_zone.x > 0 and geom.logo_zone.y > 0
+
+
+def test_header_footer_bands_render_and_inset_content() -> None:
+    """A brand that enables header/footer bands gets brand-colour strips on every template, and
+    the content safe-zone floor rises so text/logo clear the bands. None = no band (no regression)."""
+    from mimik_contracts import BrandLayout
+
+    from creative.render.templates import _band_height, _edge_pads
+
+    banded = BrandLayout(header=True, footer=True)
+    ctx = _ctx(layout=banded)
+    w, h = ctx.size()
+    band = _band_height(w, h)
+
+    for key in ("centered_hero", "lower_band", "soft_editorial"):
+        html = get_template(key).render(ctx)
+        assert f"height:{band}px" in html, f"{key} did not render a header/footer band"
+
+    # Content clears the bands: top/bottom pad is at least the band height.
+    top, _r, bottom, _l = _edge_pads(ctx, 0.05)
+    assert top >= band and bottom >= band
+
+    # No layout → no band strips (legacy render unchanged).
+    plain = get_template("centered_hero").render(_ctx())
+    assert f"height:{band}px" not in plain
