@@ -15,6 +15,7 @@
 services:
   api:
     image: ghcr.io/azi023/mimik-suite-api:latest
+    pull_policy: always   # always fetch the newest :latest on redeploy (avoid stale-cache)
     restart: unless-stopped
     environment:
       REDIS_URL: redis://redis:6379/0
@@ -32,6 +33,7 @@ services:
 
   web:
     image: ghcr.io/azi023/mimik-suite-web:latest
+    pull_policy: always
     restart: unless-stopped
     environment:
       NODE_ENV: production
