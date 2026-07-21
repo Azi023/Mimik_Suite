@@ -4,7 +4,36 @@
 
 ---
 
-## ► LATEST (2026-07-21, deploying) — MIMIK SUITE APP LIVE ON THE VPS; only host-nginx vhost + cert left
+## ► LATEST (2026-07-21) — ✅✅ MIMIK SUITE IS LIVE IN PRODUCTION
+
+**https://suite.mimikcreations.com (login) + https://api.suite.mimikcreations.com (API) — both HTTPS, valid
+Let's Encrypt certs, verified 200.** DB = Supabase EU (session pooler :5432, cert-verified TLS via bundled
+Supabase CA), 17 tables migrated. All 3 containers healthy. RAM ~2 GB free.
+
+### HOW IT'S DEPLOYED (important — NOT via Coolify)
+The VPS's real reverse proxy is **host nginx + certbot** (no Traefik). Coolify's compose-paste kept fighting
+us (stale port bindings, 8000 conflict), so Mimik Suite runs as a **self-managed docker-compose stack**:
+- **`/root/mimik-suite/docker-compose.yml`** + `/root/mimik-suite/.env` (secrets, chmod 600; extracted from
+  the Coolify container). Project name `mimiksuite`. Images pulled from GHCR. `restart: unless-stopped`
+  (survives reboot). Ports: **web 127.0.0.1:3020**, **api 127.0.0.1:8020** (8000 was taken by another app).
+- **nginx vhost `/etc/nginx/sites-available/mimik-suite`**: suite→3020, api.suite→8020. Certs auto-renew.
+- **Redeploy after a new image build:** `ssh hetzner-vps 'cd /root/mimik-suite && docker compose -p mimiksuite pull && docker compose -p mimiksuite up -d'`.
+- **⚠ CLEANUP TODO (operator):** DELETE the redundant **Coolify "Mimik Suite" resource** (it crash-loops on
+  the 8000 conflict — harmless but noisy). Coolify is not used for this app.
+
+### Fixes that got the API healthy (all in the image)
+1. `postgresql://`→`+asyncpg` auto-normalize. 2. TLS: system-CA SSLContext + **bundled docker/supabase-ca.crt**
+(Supabase Root 2021 CA) = verified TLS, no MITM. 3. Supabase **Session pooler :5432** (not tx :6543).
+
+### Still open / next
+- **DNS:** `suite` + `api.suite` A → 195.201.33.87 (Spaceship) — done. `NEXT_PUBLIC_API_URL=https://api.suite.mimikcreations.com`
+  baked into web (CI var).
+- Screenshots (light/dark) still not run. PFI-on-Firebase parked (needs Blaze). Track B untouched.
+- ⚠ INC-001: rotate the planflow DB pw (was briefly on GitHub). VPS RAM freed: hermes+planflow stopped.
+
+---
+
+## ► (2026-07-21) — deploy debug trail: host-nginx discovery, DB/TLS fixes
 
 **THE APP WORKS.** Coolify Docker-Compose resource "Mimik Suite" (project → production) is deployed:
 all 3 containers up — **api HEALTHY** (`alembic upgrade head` vs Supabase → **17 tables**, ver 27bc3b786ef3),
