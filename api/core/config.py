@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://mimik:mimik@localhost:5434/mimik_suite"
+    # Optional path to a CA bundle for the DB's TLS cert (only if the host uses a private CA;
+    # Supabase's pooler uses publicly-trusted certs and needs none). Enables full verification.
+    db_ssl_root_cert: str = ""
     redis_url: str = "redis://localhost:6381/0"
     jwt_secret: str = "dev-only-insecure-change-me-0000000000"  # >=32 bytes; real secret via env
     jwt_algorithm: str = "HS256"
@@ -50,15 +53,22 @@ class Settings(BaseSettings):
 
     @property
     def db_connect_args(self) -> dict[str, object]:
-        """asyncpg connect args. Managed Postgres (Supabase et al.) REQUIRES TLS; asyncpg does not
-        enable it by default, so a remote host gets `ssl=require` (encrypt, skip cert-chain
-        verification — the pragmatic Supabase setting). A local/loopback host connects plaintext."""
+        """asyncpg connect args. Managed Postgres (Supabase et al.) REQUIRES TLS and asyncpg does
+        not enable it by default, so a remote host gets **`ssl=verify-full`** — encrypt AND verify
+        the server cert chain + hostname (rejects MITM). This works against Supabase's Session/
+        Transaction *pooler* (`*.pooler.supabase.com`, publicly-trusted certs) — the recommended DSN.
+        A local/loopback host connects plaintext. (If a host presents a private CA, point
+        `DB_SSL_ROOT_CERT` at its bundle — but the pooler needs none.)"""
         from urllib.parse import urlparse
 
         host = (urlparse(self.resolved_database_url).hostname or "").lower()
         if host in ("", "localhost", "127.0.0.1", "::1", "db"):
             return {}
-        return {"ssl": "require"}
+        if self.db_ssl_root_cert:
+            import ssl
+
+            return {"ssl": ssl.create_default_context(cafile=self.db_ssl_root_cert)}
+        return {"ssl": "verify-full"}
 
     @property
     def resolved_jwks_url(self) -> str:
