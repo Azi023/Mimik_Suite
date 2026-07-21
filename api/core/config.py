@@ -66,10 +66,20 @@ class Settings(BaseSettings):
         if host in ("", "localhost", "127.0.0.1", "::1", "db"):
             return {}
         import ssl
+        from pathlib import Path
 
         ctx = ssl.create_default_context()
-        if self.db_ssl_root_cert:
-            ctx.load_verify_locations(cafile=self.db_ssl_root_cert)
+        cafile = self.db_ssl_root_cert
+        # Supabase serves its DB behind its OWN CA ("Supabase Root 2021 CA", self-signed) which is
+        # not in the public trust store — so full verification fails against the system bundle. We
+        # ship that CA (docker/supabase-ca.crt, a PUBLIC cert) and add it to the trust for *.supabase
+        # hosts, keeping check_hostname + CERT_REQUIRED. Result: verified TLS, no MITM, no user setup.
+        if not cafile and host.endswith(".supabase.com"):
+            bundled = Path(__file__).resolve().parents[2] / "docker" / "supabase-ca.crt"
+            if bundled.exists():
+                cafile = str(bundled)
+        if cafile:
+            ctx.load_verify_locations(cafile=cafile)
         return {"ssl": ctx}
 
     @property
