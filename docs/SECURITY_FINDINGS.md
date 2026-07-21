@@ -109,6 +109,30 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 
 ---
 
+## R-001 — Build-session security review (board/deliveries/billing/prefs/copy-editor)  ✅ REVIEWED
+
+Reviewed every surface added in the 2026-07-21 build session. **No new vulnerabilities introduced.**
+- **`GET /deliveries`** (new) — built client-confined from the start (joins JobRow for `client_id`;
+  a client principal is forced to its own). Tested. Same F-002 discipline.
+- **`GET /me`** (new) — returns the caller's OWN identity only; no id parameter, no enumeration.
+- **`POST /portal/session`** (new) — magic-grant-scoped to one job; token in body; no client selector
+  (D-001). **`POST /approvals/magic`** re-verifies the token server-side on every write.
+- **Copy editor → `POST /jobs/{id}/creatives`** — the target is **team-role-gated** (`require_role`),
+  and `editCopyAction` is passed ONLY on the internal review page (never portal/magic). A client cannot
+  author engine output (constraint #3). Verified end-to-end.
+- **Billing / preferences** — consume endpoints already confined by `_resolve_client_for_principal`.
+- **Server actions** — all read the httpOnly session cookie server-side (or, for magic, forward a token
+  the backend re-verifies); none trust client-supplied identity. Checkout/quote URL comes from Stripe.
+- **No** `shell=True` / `eval` / `exec` / raw SQL in any new code; all DB access is via SQLAlchemy.
+
+**One pre-existing hardening note (NOT introduced here):** `POST /creatives`'s `image_artifact` becomes a
+`Layer.artifact_ref` the compositor may fetch/embed at render time → a potential SSRF/path surface. It is
+**team-gated** (trusted principal), and the copy editor only ever resends the *existing* manifest's ref
+(not fresh user input), so no new exposure — but validating `artifact_ref` against an allowlist of real
+brand-asset refs (not arbitrary URLs) would harden it. Added to open items.
+
+---
+
 ## Open items for a security pass (not yet done)
 - ~~Client-principal read scoping across jobs/clients/brands/ops/briefs/pillars~~ → **AUDITED + FIXED
   (F-001, F-002). Full sweep done — every client-data GET now confines or 403s a client principal.**
@@ -120,4 +144,6 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 - **Magic-link revocation** — no way to invalidate a shared link before its TTL (D-001). *(Not implemented.)*
 - **Write-route review** — this pass focused on READS. Spot-check client-principal WRITE routes (create
   pillar/brief/job) confine `client_id` too (tasks.py does; the rest use team-role gates — confirm). *(Partial.)*
+- **`image_artifact` allowlist** (R-001) — validate `POST /creatives`'s `image_artifact` / `artifact_ref`
+  is a real brand-asset ref, not an arbitrary URL, to close the compositor SSRF surface. *(Team-gated; low.)*
 - **2 temp login passwords** flagged for rotation (see HANDOFF).

@@ -4,7 +4,32 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `4b7e771`) — GAPS CLOSED + IDOR SWEEP: magic portal + /me + route-gating + resilience → Track A ~70%
+## ► LATEST (2026-07-21, main `bbdd9e9`+) — TAIL SHIPPED: board/deliveries/billing/prefs/copy-editor → Track A ~85%; REPO PUSHED
+
+**369+ Suite / 18 contracts green, ruff clean, web tsc + next lint clean.** Pushed to
+**github.com/Azi023/Mimik_Suite (PRIVATE)** — remote `origin` set, all commits up, no secrets tracked
+(verified). Shipped the remaining product tail on **Opus**:
+- **/deliveries** — Drive-archive ledger. NEW secure `GET /deliveries` (client-confined via JobRow join) + table.
+- **/billing** — per-client subscription + **"Send quote"** (mints a checkout/payment link to share;
+  degrades to an honest message when no payment provider is configured — constraint #7).
+- **/clients/[id]/preferences** — the learning-loop made visible (signal count, ranker active, summary, feed).
+- **Board** — "Generating" (pulsing) + "At risk" card badges (roadmap §3.4).
+- **Copy editor** — inline headline/subhead/CTA edit on the review canvas (live preview) → **"Save as new
+  version"** (`POST /creatives`, team-only). The feasible slice of §3.5.
+- **docs/SCREENSHOTS.md** — the durable Playwright light/dark guide (your ask) + **R-001** security review.
+
+**DEFERRED (needs your call — contract change):** the FULL canvas editor (drag logo / rulers / snapping /
+per-piece layout override) needs a per-creative `layout` field on `CreativeManifest` + the compositor
+header/footer/grid wiring (§4). Copy-versioning is the shipped slice; the layout-override slice is gated.
+
+### 🔒 Security — new surfaces reviewed (R-001 in SECURITY_FINDINGS.md), no new leaks
+GET /deliveries confined + tested; GET /me = own identity only; POST /portal/session magic-scoped; copy
+editor's POST /creatives is team-gated. **Full IDOR sweep from earlier still holds (F-001/F-002, 6 routers).**
+New open item: **image_artifact SSRF hardening** (team-gated, pre-existing, low) — allowlist artifact refs.
+
+---
+
+## ► (2026-07-21, main `4b7e771`) — GAPS CLOSED + IDOR SWEEP: magic portal + /me + route-gating + resilience → Track A ~70%
 
 **368 Suite (was 359) / 18 contracts green, ruff clean, web tsc + next lint clean.** Continued the same
 day: closed the portal backend gaps, added the no-login magic flow, hardened routing, shipped the
