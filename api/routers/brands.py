@@ -40,7 +40,8 @@ class CreateBrand(BaseModel):
 @router.post("", response_model=Brand, status_code=201)
 async def create_brand(
     body: CreateBrand,
-    principal: Principal = Depends(get_principal),
+    # TEAM action — a bounded client principal never provisions brands (constraint #3).
+    principal: Principal = Depends(require_role("owner", "admin", "ops", "designer", "team")),
     session: AsyncSession = Depends(get_session),
 ) -> Brand:
     # The client must exist within the caller's tenant — else this is a cross-tenant attach.

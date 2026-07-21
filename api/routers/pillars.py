@@ -10,13 +10,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal
+from api.core.auth import Principal, get_principal, require_role
 from api.db import repo
 from api.db.mappers import to_pillar
 from api.db.session import get_session
 from mimik_contracts import PILLAR_PRESETS, ActorRole, ContentPillar, PillarPreset, preset
 
 router = APIRouter(prefix="/pillars", tags=["pillars"])
+
+# Creating a pillar is a TEAM action — a bounded client principal never authors content plans.
+_TEAM = require_role("owner", "admin", "ops", "designer", "team")
 
 
 class CreatePillar(BaseModel):
@@ -43,7 +46,7 @@ async def list_presets() -> list[PillarPreset]:
 @router.post("", response_model=ContentPillar, status_code=201)
 async def create_pillar(
     body: CreatePillar,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(_TEAM),
     session: AsyncSession = Depends(get_session),
 ) -> ContentPillar:
     # The client must exist within the caller's tenant — else this is a cross-tenant attach.

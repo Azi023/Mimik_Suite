@@ -37,7 +37,8 @@ class SignoffBrief(BaseModel):
 @router.post("", response_model=Brief, status_code=201)
 async def create_brief(
     body: CreateBrief,
-    principal: Principal = Depends(get_principal),
+    # TEAM action — a bounded client principal never authors briefs (constraint #3).
+    principal: Principal = Depends(require_role("owner", "admin", "ops", "designer", "team")),
     session: AsyncSession = Depends(get_session),
 ) -> Brief:
     # The brand must exist within the caller's tenant — else cross-tenant attach.
@@ -102,7 +103,8 @@ async def list_briefs(
 async def signoff_brief(
     brief_id: str,
     body: SignoffBrief,
-    principal: Principal = Depends(get_principal),
+    # TEAM action — sign-off freezes the brief; a client principal never signs off.
+    principal: Principal = Depends(require_role("owner", "admin", "ops", "designer", "team")),
     session: AsyncSession = Depends(get_session),
 ) -> Brief:
     row = await repo.get_brief(session, tenant_id=principal.tenant_id, brief_id=brief_id)

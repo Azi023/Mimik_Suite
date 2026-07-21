@@ -370,3 +370,39 @@ async def test_client_principal_isolation_briefs_pillars(
     # pillars — listing (even asking for client B) only returns A's pillars.
     pillars = (await client.get(f"/pillars?client_id={b_cid}", headers=_auth(ctoken))).json()
     assert all(p["client_id"] == a_cid for p in pillars), "client saw another client's pillars!"
+
+
+async def test_client_principal_cannot_create_tenant_resources(
+    client: AsyncClient, supabase_env, tenant_two_clients
+) -> None:
+    """A bounded client principal (portal = review-only) must be 403 on every tenant-resource
+    create — clients/brands/jobs/pillars/briefs (constraint #3). The WRITE analog of F-001/F-002."""
+    owner, a_cid, _b_cid = tenant_two_clients
+    a_brand = await _new_brand_for(client, owner, a_cid, "ABrandX")
+    prov = await client.post(
+        "/admin/accounts",
+        json={"auth_subject": "portal-a", "role": "client", "client_id": a_cid},
+        headers=_auth(owner),
+    )
+    assert prov.status_code == 201, prov.text
+    ctoken = supabase_env("portal-a")
+
+    assert (await client.post("/clients", json={"name": "X"}, headers=_auth(ctoken))).status_code == 403
+    assert (
+        await client.post(
+            "/brands", json={"client_id": a_cid, "name": "Y", "slug": "y"}, headers=_auth(ctoken)
+        )
+    ).status_code == 403
+    assert (
+        await client.post(
+            "/jobs", json={"brand_id": a_brand, "title": "Z", "format_key": "ig_post"}, headers=_auth(ctoken)
+        )
+    ).status_code == 403
+    assert (
+        await client.post(
+            "/pillars", json={"client_id": a_cid, "preset_key": "promotional"}, headers=_auth(ctoken)
+        )
+    ).status_code == 403
+    assert (
+        await client.post("/briefs", json={"brand_id": a_brand}, headers=_auth(ctoken))
+    ).status_code == 403

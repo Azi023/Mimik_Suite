@@ -10,13 +10,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal
+from api.core.auth import Principal, get_principal, require_role
 from api.db import repo
 from api.db.mappers import to_job
 from api.db.session import get_session
 from mimik_contracts import ActorRole, Job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+# Creating a job is a TEAM action — a bounded client principal never authors pipeline work.
+_TEAM = require_role("owner", "admin", "ops", "designer", "team")
 
 
 class CreateJob(BaseModel):
@@ -33,7 +36,7 @@ class CreateJob(BaseModel):
 @router.post("", response_model=Job, status_code=201)
 async def create_job(
     body: CreateJob,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(_TEAM),
     session: AsyncSession = Depends(get_session),
 ) -> Job:
     # The brand must belong to the caller's tenant (this also fixes the client_id from the row).

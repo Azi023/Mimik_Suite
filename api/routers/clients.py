@@ -6,13 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal
+from api.core.auth import Principal, get_principal, require_role
 from api.db import repo
 from api.db.mappers import to_client
 from api.db.session import get_session
 from mimik_contracts import ActorRole, Client
 
 router = APIRouter(prefix="/clients", tags=["clients"])
+
+# Creating tenant resources is a TEAM action — a bounded client principal never provisions
+# clients/brands/jobs/pillars/briefs (constraint #3: the portal is a review-only surface).
+_TEAM = require_role("owner", "admin", "ops", "designer", "team")
 
 
 class CreateClient(BaseModel):
@@ -28,7 +32,7 @@ class CreateClient(BaseModel):
 @router.post("", response_model=Client, status_code=201)
 async def create_client(
     body: CreateClient,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(_TEAM),
     session: AsyncSession = Depends(get_session),
 ) -> Client:
     row = await repo.create_client(
