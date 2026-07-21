@@ -4,7 +4,38 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `HEAD`) — DEPLOY IN PROGRESS: subdomain live, VPS cleanup, build blocked on GH_PAT
+## ► LATEST (2026-07-21, deploying) — MIMIK SUITE APP LIVE ON THE VPS; only host-nginx vhost + cert left
+
+**THE APP WORKS.** Coolify Docker-Compose resource "Mimik Suite" (project → production) is deployed:
+all 3 containers up — **api HEALTHY** (`alembic upgrade head` vs Supabase → **17 tables**, ver 27bc3b786ef3),
+**redis healthy**, **web serving on :3000**. Images pull from GHCR (`ghcr.io/azi023/mimik-suite-{api,web}:latest`,
+public, CI-built). DB = Supabase **EU** (Frankfurt), **Session pooler port 5432** (NOT 6543).
+
+### ✅ Fixes that got the API healthy (all baked into the image)
+1. `postgresql://` → auto `+asyncpg` (Settings.resolved_database_url).
+2. TLS: system-CA `SSLContext` verify-full + **bundled `docker/supabase-ca.crt`** (Supabase Root 2021 CA) →
+   cert-verified TLS, no MITM, zero user setup (Settings.db_connect_args).
+3. `pull_policy: always` + assistant pre-pulls on the VPS (Coolify cached stale `:latest`).
+
+### ⛳ ONLY THING LEFT — reverse proxy is HOST NGINX, not Coolify/Traefik!
+80/443 are served by **host `nginx` + certbot** (no Traefik/coolify-proxy container exists). csedash + the
+portfolio are nginx vhosts. So Coolify's "Domain" field did NOTHING (0 traefik labels on the containers),
+and `suite.mimikcreations.com` fell through to the portfolio (atheeque.site) default vhost.
+**Remaining (host nginx + certbot):**
+1. Compose now binds **127.0.0.1:3000 (web)** + **127.0.0.1:8000 (api)** → operator: **Edit Compose File in
+   Coolify → repaste `docker-compose.coolify.yml` → Deploy** to publish the ports.
+2. DNS: add A **`api.suite`** → 195.201.33.87 (Spaceship). Web bundle now targets `https://api.suite.mimikcreations.com`.
+3. nginx vhosts: `suite.mimikcreations.com`→`proxy_pass http://127.0.0.1:3000;`,
+   `api.suite.mimikcreations.com`→`http://127.0.0.1:8000;` (mirror existing confs).
+4. `certbot --nginx -d suite.mimikcreations.com -d api.suite.mimikcreations.com` → `nginx -t && systemctl reload nginx`.
+5. Verify `curl https://api.suite.mimikcreations.com/api/openapi.json`. Assistant has root SSH to `hetzner-vps`
+   → can do 3-5 once ports publish (step 1).
+
+### RAM: hermes(systemd)+planflow(pm2) stopped → ~2.3 GB free. ⚠ INC-001: rotate the planflow DB pw (was briefly on GitHub).
+
+---
+
+## ► (2026-07-21, main `HEAD`) — DEPLOY IN PROGRESS: subdomain live, VPS cleanup, build blocked on GH_PAT
 
 **Subdomain = `suite.mimikcreations.com`** (A → 195.201.33.87 added on Spaceship; `preview.mimik` A record
 removed by operator). CI variable `NEXT_PUBLIC_API_URL=https://suite.mimikcreations.com/api` set on the repo.
