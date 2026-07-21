@@ -37,6 +37,30 @@ class Settings(BaseSettings):
         return {e.strip().lower() for e in self.superadmin_emails.split(",") if e.strip()}
 
     @property
+    def resolved_database_url(self) -> str:
+        """The DATABASE_URL forced onto the async driver. Managed Postgres consoles (Supabase,
+        Neon, RDS) hand out a plain `postgresql://` DSN; we run on asyncpg, so normalize the scheme
+        rather than make every operator remember `+asyncpg`. A URL that already names a driver
+        (`postgresql+asyncpg://`, `postgresql+psycopg://`, …) is left untouched."""
+        url = self.database_url
+        for prefix in ("postgresql://", "postgres://"):
+            if url.startswith(prefix):
+                return "postgresql+asyncpg://" + url[len(prefix) :]
+        return url
+
+    @property
+    def db_connect_args(self) -> dict[str, object]:
+        """asyncpg connect args. Managed Postgres (Supabase et al.) REQUIRES TLS; asyncpg does not
+        enable it by default, so a remote host gets `ssl=require` (encrypt, skip cert-chain
+        verification — the pragmatic Supabase setting). A local/loopback host connects plaintext."""
+        from urllib.parse import urlparse
+
+        host = (urlparse(self.resolved_database_url).hostname or "").lower()
+        if host in ("", "localhost", "127.0.0.1", "::1", "db"):
+            return {}
+        return {"ssl": "require"}
+
+    @property
     def resolved_jwks_url(self) -> str:
         if self.supabase_jwks_url:
             return self.supabase_jwks_url
