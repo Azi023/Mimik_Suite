@@ -40,6 +40,15 @@ export function JobRow({ job, selected, onSelect }: JobRowProps): JSX.Element {
       <div className="job-card__tags">
         <span className={`tag tag--${FORMAT_TONE[job.format]}`}>{job.format}</span>
         <span className={`tag tag--${pillarTone}`}>{job.pillar}</span>
+        {job.generating === true && (
+          <span className="job-badge job-badge--generating">
+            <span className="job-badge__pulse" aria-hidden="true" />
+            Generating
+          </span>
+        )}
+        {job.atRisk === true && job.generating !== true && (
+          <span className="job-badge job-badge--risk">At risk</span>
+        )}
       </div>
 
       <h4 className="job-card__title">{job.title}</h4>

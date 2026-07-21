@@ -3594,6 +3594,33 @@ ul {
 }
 .review-panel__fullreview:hover { text-decoration: underline; }
 
+/* board card status badges: generating (pulsing) + at-risk */
+.job-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+}
+.job-badge--generating { background: var(--accent-soft); color: var(--accent); }
+.job-badge--risk { background: rgba(240, 68, 56, 0.12); color: var(--dot-new); }
+.job-badge__pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  animation: job-pulse 1.4s ease-in-out infinite;
+}
+@keyframes job-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.5); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .job-badge__pulse { animation: none; }
+}
+
 /* ===========================================================================
    Shared segmented control (filters).
 =========================================================================== */

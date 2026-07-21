@@ -62,6 +62,10 @@ export interface Job {
   comments: number;
   /** Attachment count shown in the card footer. */
   attachments: number;
+  /** The computed at-risk flag (publish deadline pressure) — drives the card's red badge. */
+  atRisk?: boolean;
+  /** True while imagery is being generated (human-paced window) — drives the pulsing badge. */
+  generating?: boolean;
 }
 
 /** One compositing layer of a creative document. Maps to mimik-contracts Layer (L1..L5). */

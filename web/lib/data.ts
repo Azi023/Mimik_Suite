@@ -163,6 +163,8 @@ function toJob(card: ApiBoardCard, pillarNameById: ReadonlyMap<string, string>):
     assignees: toAssignees(card.job.assignee),
     comments: 0,
     attachments: 0,
+    atRisk: card.at_risk,
+    generating: card.job.status === "generating",
   };
 }
 
