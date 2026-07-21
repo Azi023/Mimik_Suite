@@ -4,7 +4,31 @@
 
 ---
 
-## ► LATEST (2026-07-21, main `bbdd9e9`+) — TAIL SHIPPED: board/deliveries/billing/prefs/copy-editor → Track A ~85%; REPO PUSHED
+## ► LATEST (2026-07-21, main `a8e2246`) — PER-CREATIVE CANVAS EDITOR + SSRF FIX → Track A ~90%
+
+**374 Suite / 19 contracts green, ruff clean, web tsc + next lint clean. All pushed to
+github.com/Azi023/Mimik_Suite (private).** Did (a) the full per-creative canvas override + (b) the
+image_artifact SSRF hardening; skipped (c) Track B per your call.
+- **(a) Per-creative layout editor** — CONTRACT CHANGE `CreativeManifest.layout: BrandLayout | None`
+  (mimik-contracts `4e8b91a`, +1 test) — backward-compatible override. Backend (`4d95011`):
+  `assemble_context` now SETS `ctx.layout = manifest.layout or brand.tokens.layout` (fixes the §4 gap —
+  BrandLayout never rendered before!); `build_manifest` + `POST /creatives` thread the override; +3 tests.
+  Frontend (`a8e2246`): team-only "Edit layout" on the review — **drag the logo → snaps to the nearest of
+  9 anchors**, anchor grid, size + safe-margin sliders, live preview (logo + dashed safe-zone), "Save as
+  new version". Copy edits carry an existing override forward.
+- **(b) SSRF fix (F-003)** — `POST /creatives`'s `image_artifact` becomes a `url(...)` the compositor
+  fetches server-side; it accepted external URLs (e.g. `169.254.169.254` metadata). Now allows only
+  `data:` URIs + internal refs, rejects any scheme/host/`..` → 422. +2 tests. Team-gated, but real.
+
+**NOTE — mimik-contracts commit `4e8b91a` is LOCAL ONLY** (that sibling repo has no remote). Mimik_Suite
+depends on it via path dep, so it's fine locally; if you want it on GitHub too, it needs its own remote.
+
+**Remaining tail (see FRONTEND_ROADMAP):** compositor header/footer + column-grid *rendering* (§4,
+engine-side); free-position logo (needs `logo_x/logo_y` on the contract). Track-B add-ons (B1–B12) untouched.
+
+---
+
+## ► (2026-07-21, main `bbdd9e9`) — TAIL SHIPPED: board/deliveries/billing/prefs/copy-editor → Track A ~85%; REPO PUSHED
 
 **369+ Suite / 18 contracts green, ruff clean, web tsc + next lint clean.** Pushed to
 **github.com/Azi023/Mimik_Suite (PRIVATE)** — remote `origin` set, all commits up, no secrets tracked

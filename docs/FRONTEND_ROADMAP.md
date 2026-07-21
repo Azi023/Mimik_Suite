@@ -48,12 +48,12 @@ wired into the brief editor, brand-kit editor, onboarding wizard, and the review
 **Security:** IDOR fix on `/jobs` (client-principal confinement) + `GET /me` + role-based route-gating +
 `docs/SECURITY_FINDINGS.md`.
 
-**Rough completion — Track A frontend: ~85%** (was ~40%). Backend ~90%. The sellable core loop
-(review → approve → portal), the resilience layer, deliveries, billing+quotes, preference-profile
-visibility, the board states, and inline copy-versioning are DONE. **Remaining tail:** the FULL
-per-creative canvas editor (drag logo / rulers / snapping / per-piece layout override) — needs a
-per-creative `layout` field on `CreativeManifest` (a contract change) + the compositor header/footer/grid
-wiring (§4); then Track-B command-center add-ons (B1–B12).
+**Rough completion — Track A frontend: ~90%** (was ~40%). Backend ~92%. DONE: the sellable core loop
+(review → approve → portal), resilience layer, deliveries, billing+quotes, preference-profile visibility,
+board states, inline copy-versioning, AND the **per-creative canvas layout editor** (drag logo → snap to
+anchor / size / margins → new version), backed by the new `CreativeManifest.layout` contract field +
+`assemble_context` layout wiring. **Remaining tail:** compositor header/footer band + column-grid rendering
+(§4, engine-side); free-position logo (needs `logo_x/logo_y` on the contract); then Track-B add-ons (B1–B12).
 
 ---
 

@@ -109,6 +109,28 @@ Threat model anchors (from `CLAUDE.md` locked constraints):
 
 ---
 
+## F-003 — SSRF via `image_artifact` in POST /creatives  ✅ FIXED
+
+- **Where:** `api/routers/creatives.py` — `CreateCreative.image_artifact`.
+- **Finding:** `image_artifact` becomes a `Layer.artifact_ref` that the headless compositor interpolates
+  into a CSS `url(...)` and **fetches server-side at render time**. It was validated for injection safety
+  (`validate_asset_ref`) but NOT for destination — an **external URL** was accepted, so a team member (or
+  anything that can reach this team-gated route) could point it at `http://169.254.169.254/…` (cloud
+  metadata), internal services, or `file://` → classic SSRF / local-file read.
+- **Impact:** SSRF. Mitigated by team-role gating (not client-reachable), but still a real internal
+  surface. The copy/layout editor only ever resends the *existing* ref, so no user-facing exposure — the
+  risk was the raw API accepting an arbitrary ref.
+- **Fix:** `4d95011` — a `field_validator` on `image_artifact`: allow only `data:` URIs (inline, no fetch)
+  and internal refs (no URI scheme, no leading `//`, no `..` traversal); **reject any scheme/host** → 422.
+- **Re-verify:**
+  ```
+  uv run --no-sync pytest -q tests/test_approvals.py -k "image_artifact"
+  ```
+  Rejects `http(s)://`, `//host`, `file://`, `169.254.169.254`, `../..`; allows `data:` + internal refs.
+- **Discovered:** 2026-07-21, logged as an R-001 open item, then fixed the same session.
+
+---
+
 ## R-001 — Build-session security review (board/deliveries/billing/prefs/copy-editor)  ✅ REVIEWED
 
 Reviewed every surface added in the 2026-07-21 build session. **No new vulnerabilities introduced.**
@@ -144,6 +166,7 @@ brand-asset refs (not arbitrary URLs) would harden it. Added to open items.
 - **Magic-link revocation** — no way to invalidate a shared link before its TTL (D-001). *(Not implemented.)*
 - **Write-route review** — this pass focused on READS. Spot-check client-principal WRITE routes (create
   pillar/brief/job) confine `client_id` too (tasks.py does; the rest use team-role gates — confirm). *(Partial.)*
-- **`image_artifact` allowlist** (R-001) — validate `POST /creatives`'s `image_artifact` / `artifact_ref`
-  is a real brand-asset ref, not an arbitrary URL, to close the compositor SSRF surface. *(Team-gated; low.)*
+- ~~`image_artifact` allowlist / compositor SSRF~~ → **FIXED, F-003.** (Follow-on: apply the same
+  scheme/host guard to any OTHER path that sets `artifact_ref` — e.g. reference-creative ingest — if it
+  can carry an external URL into a render. *Not yet swept.*)
 - **2 temp login passwords** flagged for rotation (see HANDOFF).
