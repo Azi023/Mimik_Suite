@@ -1,0 +1,93 @@
+# Build the API + web images off-box and push to GHCR.
+#
+# The VPS is RAM-constrained and CANNOT build the ~1.5GB Playwright API image
+# (it would OOM — see docs/DEPLOY.md). This builds in CI instead, then Coolify
+# PULLS the tags. The API build context needs the two sibling path-dep repos
+# (mimik-contracts, mimik-knowledge), which are PRIVATE — checked out with a PAT.
+#
+# ── ONE-TIME SETUP (operator) ────────────────────────────────────────────────
+#   Add a repo secret GH_PAT = a token that can READ Azi023/mimik-contracts and
+#   Azi023/mimik-knowledge (classic PAT with `repo`, or a fine-grained PAT with
+#   Contents:Read on both). The GHCR push itself uses the built-in GITHUB_TOKEN.
+#   Optionally set a repo variable NEXT_PUBLIC_API_URL to your chosen subdomain
+#   (default below), since it is baked into the web bundle at build time.
+
+name: build-images
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: azi023  # ghcr namespaces are lowercase
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Mimik_Suite
+        uses: actions/checkout@v4
+        with:
+          path: work/Mimik_Suite
+
+      - name: Checkout mimik-contracts (private path-dep)
+        uses: actions/checkout@v4
+        with:
+          repository: Azi023/mimik-contracts
+          token: ${{ secrets.GH_PAT }}
+          path: work/mimik-contracts
+
+      - name: Checkout mimik-knowledge (private path-dep)
+        uses: actions/checkout@v4
+        with:
+          repository: Azi023/mimik-knowledge
+          token: ${{ secrets.GH_PAT }}
+          path: work/mimik-knowledge
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(git -C work/Mimik_Suite rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # API — context is the parent that holds all three sibling dirs.
+      - name: Build & push API
+        uses: docker/build-push-action@v6
+        with:
+          context: work
+          file: work/Mimik_Suite/Dockerfile.api
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/mimik-suite-api:latest
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/mimik-suite-api:${{ steps.sha.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Web — self-contained context; the public API origin is baked in at build.
+      - name: Build & push web
+        uses: docker/build-push-action@v6
+        with:
+          context: work/Mimik_Suite/web
+          file: work/Mimik_Suite/web/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://suite.mimikcreations.com/api' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/mimik-suite-web:latest
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/mimik-suite-web:${{ steps.sha.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

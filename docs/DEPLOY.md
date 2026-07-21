@@ -5,6 +5,37 @@ Coolify. Postgres is **external** (Supabase); Redis runs as a tiny sidecar
 container. This doc covers building images, pushing to GHCR, wiring Coolify, DNS,
 and the env vars the operator must set.
 
+---
+
+## ✅ Confirmed VPS state — 2026-07-21 (SSH audit)
+
+`hetzner-vps` = **195.201.33.87** (also the `preview.mimikcreations.com` A record).
+- **Ubuntu 24.04.4, 2 vCPU (AMD EPYC), 3.7 GB RAM, 75 GB disk (40 GB free), 2 GB swap.**
+  RAM is the binding constraint: **~1.7 GB free, swap already 883 MB used.**
+- **Coolify** runs the box (Traefik on 80/443 + coolify-db/redis/realtime) alongside
+  **planflow, striker, hermes** (3 Next apps + 2 APIs). Deploy Mimik Suite as a **new
+  Coolify resource** — reuse its Traefik/TLS; do NOT hand-roll a second proxy on 80/443.
+- **Playwright/Chromium is already on the host** (`~/.cache/ms-playwright/chromium-1208`).
+- **~6 GB of reclaimable Docker images** — run `docker image prune -f` on the box to free
+  space before pulling (safe; removes only dangling/unused).
+
+**Capacity verdict — it fits, with care.** On-box steady state is light because **Postgres is
+external (Supabase)**: web ~200 MB + api idle ~200 MB + redis ~50 MB ≈ **~450 MB**. The risk is
+the **Playwright render spike (~400–600 MB)** at archive-on-approval. With ~1.7 GB free + 2 GB
+swap and the `mem_limit`s now in `docker-compose.prod.yml` (api 900m / web 450m), a single
+serialized render fits. Mitigations if it gets tight: reclaim the 6 GB images; the render is
+on-demand + serialized (not steady); temporarily stop planflow/striker for headroom; the
+end-of-month RAM upgrade removes the ceiling entirely.
+
+## Image builds run in CI (`.github/workflows/build-images.yml`)
+
+The box can't build the 1.5 GB API image, so a **GitHub Actions workflow** builds both images
+(checking out the two private sibling path-deps) and pushes to GHCR on every push to `main`.
+**One-time operator setup:** add a repo secret **`GH_PAT`** (a token that can read
+`Azi023/mimik-contracts` + `Azi023/mimik-knowledge`); optionally set a repo variable
+`NEXT_PUBLIC_API_URL` to the chosen subdomain (baked into the web bundle at build). The GHCR
+push uses the built-in `GITHUB_TOKEN`. Then Coolify pulls `ghcr.io/azi023/mimik-suite-{api,web}`.
+
 > **RAM caveat (read first).** The current VPS is 2 vCPU / 4 GB with only
 > ~1.8 GB free (Coolify + two other apps already resident). The **API image is
 > heavy (~1.5 GB)** because it bundles Playwright + Chromium + system libs —

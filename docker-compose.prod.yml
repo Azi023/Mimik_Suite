@@ -27,6 +27,10 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    # RAM-tight box: cap so a Playwright render spike can't OOM the operator's other
+    # apps. ~900m leaves room for one serialized Chromium render (Postgres is external).
+    mem_limit: 900m
+    mem_reservation: 350m
     healthcheck:
       # /openapi.json is always served by FastAPI and needs no auth — a cheap
       # liveness signal. python is present in the Playwright base image.
@@ -56,6 +60,8 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+    mem_limit: 450m
+    mem_reservation: 200m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
