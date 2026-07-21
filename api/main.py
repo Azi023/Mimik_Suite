@@ -13,6 +13,7 @@ from api.routers import (
     briefs,
     clients,
     creatives,
+    deliveries,
     intake,
     invitations,
     jobs,
@@ -49,6 +50,7 @@ app.include_router(billing.router)
 app.include_router(invitations.router)
 app.include_router(me.router)
 app.include_router(portal.router)
+app.include_router(deliveries.router)
 
 
 @app.get("/health", tags=["meta"])

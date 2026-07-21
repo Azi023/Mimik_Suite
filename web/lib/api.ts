@@ -623,6 +623,23 @@ export function listTasks(
   return apiGet<ApiTask[]>(`/tasks${query !== "" ? `?${query}` : ""}`, sessionToken);
 }
 
+/** GET /deliveries — one archived-to-Drive record (the join view: delivery + its job title). */
+export interface ApiDeliveryRecord {
+  id: string;
+  job_id: string;
+  job_title: string;
+  client_id: string;
+  creative_doc_id: string;
+  drive_path: string;
+  delivered_at: string | null;
+  created_at: string;
+}
+
+/** GET /deliveries — the tenant's archive records (client principals auto-confined to their own). */
+export function listDeliveries(sessionToken?: string): Promise<ApiDeliveryRecord[]> {
+  return apiGet<ApiDeliveryRecord[]>("/deliveries", sessionToken);
+}
+
 /** POST /tasks/{id}/status — advance a task open -> in_progress -> done (team roles only). */
 export function advanceTaskStatus(
   taskId: string,

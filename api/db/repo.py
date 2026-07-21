@@ -345,6 +345,22 @@ async def list_deliveries(
     return list((await session.execute(stmt)).scalars())
 
 
+async def list_tenant_deliveries(
+    session: AsyncSession, *, tenant_id: str, client_id: str | None = None
+) -> list[tuple[DeliveryRow, JobRow]]:
+    """Every delivery in a tenant, joined to its job (for title + client scoping), newest first.
+    `client_id` confines to one client — the bounded-portal filter for a client principal."""
+    stmt = (
+        select(DeliveryRow, JobRow)
+        .join(JobRow, JobRow.id == DeliveryRow.job_id)
+        .where(DeliveryRow.tenant_id == tenant_id)
+        .order_by(DeliveryRow.created_at.desc())
+    )
+    if client_id is not None:
+        stmt = stmt.where(JobRow.client_id == client_id)
+    return [(d, j) for d, j in (await session.execute(stmt)).all()]
+
+
 # --- Task ---
 async def create_task(session: AsyncSession, *, tenant_id: str, **fields) -> TaskRow:
     row = TaskRow(tenant_id=tenant_id, **fields)

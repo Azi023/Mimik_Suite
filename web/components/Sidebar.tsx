@@ -81,6 +81,9 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
           <Link className="rail-btn" href="/tasks" aria-label="Tasks" title="Tasks">
             <TasksGlyph />
           </Link>
+          <Link className="rail-btn" href="/deliveries" aria-label="Deliveries" title="Deliveries">
+            <DeliveriesGlyph />
+          </Link>
         </nav>
 
         <div className="rail__footer">
@@ -166,6 +169,16 @@ function TasksGlyph(): JSX.Element {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="M9 6h11M9 12h11M9 18h11" strokeLinecap="round" />
       <path d="M4 6l1 1 1.5-2M4 12l1 1 1.5-2M4 18l1 1 1.5-2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A truck/box glyph for the Deliveries rail entry (no matching icon in ./icons). */
+function DeliveriesGlyph(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M3 7l9-4 9 4-9 4-9-4z" strokeLinejoin="round" />
+      <path d="M3 7v10l9 4 9-4V7M12 11v10" strokeLinejoin="round" />
     </svg>
   );
 }

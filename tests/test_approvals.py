@@ -195,3 +195,24 @@ async def test_stale_magic_link_cannot_demote_archived_job(client: AsyncClient) 
         "/approvals/magic", json={"token": token, "action": "request_change", "note": "late"}
     )
     assert demote.status_code == 409
+
+
+async def test_deliveries_endpoint_lists_archived_with_job_title(client: AsyncClient) -> None:
+    """GET /deliveries surfaces the archive records (drive_path + job title), joined to the job.
+    Client-principal confinement follows the F-002 pattern (own client only) — see deliveries.py."""
+    owner, _client_id, job_id, creative_id = await _setup_job_with_creative(client)
+    # Empty until something is approved.
+    assert (await client.get("/deliveries", headers=_auth(owner))).json() == []
+
+    approved = await client.post(
+        "/approvals",
+        json={"job_id": job_id, "creative_doc_id": creative_id, "action": "approve"},
+        headers=_auth(owner),
+    )
+    assert approved.status_code == 200, approved.text
+
+    deliveries = (await client.get("/deliveries", headers=_auth(owner))).json()
+    assert len(deliveries) == 1
+    assert deliveries[0]["job_id"] == job_id
+    assert deliveries[0]["job_title"] == "August offer"
+    assert deliveries[0]["drive_path"].startswith("Mimik Clients/")

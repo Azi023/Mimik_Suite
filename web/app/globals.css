@@ -3716,6 +3716,14 @@ ul {
 .tasks__pill--done { background: rgba(59, 185, 102, 0.16); color: var(--dot-done); }
 .tasks__done-tick { color: var(--dot-done); font-weight: 700; }
 
+.deliveries__path {
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  word-break: break-all;
+}
 .tasks__pager { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); }
 .tasks__pager-label { font-size: 13px; color: var(--muted); }
 
