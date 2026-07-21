@@ -15,9 +15,17 @@ removed by operator). CI variable `NEXT_PUBLIC_API_URL=https://suite.mimikcreati
   (no running container/service found — just delete its Coolify resource + `rm -rf /root/workspace/striker`).
 - **⚠ INC-001 (SECURITY_FINDINGS.md):** assistant accidentally pushed a prod DB password to Azi023/planflow
   during cleanup; force-pushed it away immediately. `Pf@2026!xK9mWq` should be treated as compromised/rotated.
-- **Image build:** `.github/workflows/build-images.yml` triggered + validated — fails ONLY at the private
-  sibling checkout: **operator must add repo Actions secret `GH_PAT`** (fine-grained PAT, Contents:Read on
-  Azi023/mimik-contracts + mimik-knowledge). Then re-run → images land in ghcr.io/azi023/mimik-suite-{api,web}.
+- **Image build: ✅ GREEN.** GH_PAT added → both images built + pushed to **ghcr.io/azi023/mimik-suite-api**
+  + **mimik-suite-web** (run 29814663858, 4m25s). Fixed en route: web/.dockerignore excluded `design/` but
+  globals.css `@import`s design/tokens.css (`10c… fix`). Images are PRIVATE → Coolify needs a GHCR pull
+  credential (GH token w/ read:packages) OR make the 2 packages public.
+- **VPS cleanup DONE:** hermes (systemd) + planflow (**pm2** — not Coolify!) stopped/deleted → **RAM avail
+  ~2.28 GB** (freed ~900 MB). striker wasn't running. **Coolify holds ONLY csedash (cse-backend/frontend/
+  redis) — KEEP, remove nothing there.** meridian + imaginateve-api (pm2) left running. planflow code on
+  GitHub + its DB untouched (dump before full teardown for migration).
+- **PFI = a Next.js app (NOT static)** → can't run on cPanel. Recommend **Vercel** (free, made for Next;
+  it already has apphosting.yaml for Firebase as an alt). Point a jasmin-hostings subdomain at it (Vercel:
+  CNAME → cname.vercel-dns.com, or A → 76.76.21.21). Do NOT add it back to the RAM-tight VPS.
 - **⚠ Supabase region:** the existing project (`uxewpubrylgiykjhutqn`) is in **Tokyo**; the VPS is in
   **Germany** → ~250 ms/query → sluggish. **Recommend a NEW Supabase project in EU (Frankfurt)** before wiring
   (region can't be changed post-creation). Then set SUPABASE_URL + SUPABASE_ANON_KEY + DATABASE_URL (asyncpg)
