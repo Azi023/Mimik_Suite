@@ -54,7 +54,12 @@ _Last updated: 2026-07-21 (session: local-test → creative-engine v2)._
 | # | Task | Agent | Status | Review |
 |---|---|---|---|---|
 | 01 | Remove frontend mock-fallback → real empty states | Codex (high) | ✅ done, unstaged | ✅ Claude-verified (tsc clean, no `any`, auth untouched) |
-| 02 | Draft `docs/STYLE_PROFILES.md` — 3 real profiles (Simply Nikah / Glo2Go / Island Cart) + schema | Codex (gpt-5.6-sol, xhigh) | ✅ done, unstaged | ✅ Claude-verified (accurate, source-bound); awaiting operator red-lines |
+| 02 | Draft `docs/STYLE_PROFILES.md` — 3 real profiles (Simply Nikah / Glo2Go / Island Cart) + schema | Codex (gpt-5.6-sol, xhigh) | ✅ done, committed `7f9557b` | ✅ Claude-verified (accurate, source-bound) |
+| — | **Checkpoint commit `7f9557b`** — mock-fix + engine-v2 spec + profiles + art-director spike | Claude | ✅ committed (not pushed) | — |
+| 03 | `scripts/seed_profiles.py` — add the 3 real clients from the profiles | Codex (gpt-5.6-sol, xhigh) | ✅ ran vs local DB | ✅ 3 clients live (Simply Nikah / Glo2Go / Island Cart), idempotent |
+| 05 | `creative/style_profile.py` — encode 3 profiles as Pydantic `StyleProfile` (M3/M4 foundation) | Codex (gpt-5.6-sol, xhigh) | ✅ done, unstaged | ✅ Claude-verified (4 tests, faithful load, modesty guardrail machine-checkable) |
+| 06 | Multi-source references: add Unsplash+Pexels fetchers (env-key gated) + fix `build_query`; TODO pinterest/dribbble/behance/envato | Codex (gpt-5.6-sol, xhigh) | ✅ done, unstaged | ✅ Claude-verified (7 tests, query fixed, key-guard works); **awaiting operator keys** for live judge loop |
+| 04 | **M2 R&D** `creative/references/gather.py` — reference-finder (keyless Openverse source) + CLI | Codex (gpt-5.6-sol, xhigh) | ✅ built + tested | ⛔ **Claude DECLINED Openverse results** — irrelevant CC-archive junk (impala for "skin clinic"). Finding: quality = **source problem**; `build_query` also over-stacks → 0 results. Next: swap source (Unsplash/Pexels/design) + fix query. Seam is ready. |
 
 _Codex output lands in `scratchpad/codex_run_*.log`; Claude reviews `git diff` before anything commits._
 
