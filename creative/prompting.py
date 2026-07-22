@@ -13,6 +13,7 @@ ever fills a data fence (`<tag>...</tag>`) whose template marks it data-never-in
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from collections.abc import Callable
@@ -22,6 +23,8 @@ from typing import TypeVar
 from mimik_knowledge import load_prompt
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
 
 # ```json ... ``` (or bare ```) wrapping the whole reply — models add these despite the ask.
 _CODE_FENCE_RE = re.compile(r"^```[a-zA-Z0-9_-]*\s*(.*?)\s*```$", re.DOTALL)
@@ -75,19 +78,46 @@ def parse_json_reply(reply: str) -> dict[str, object]:
 
 
 def default_generate() -> tuple[Callable[[str], str], str]:
-    """The free Gemini TEXT wrapper with the model pinned up front, so provenance
-    (`source_model`) matches the actual call. Returns (generate, model_name)."""
+    """Return an env-ordered text-provider chain and its best-effort provenance label."""
     # Imported here, not at module level: creative.copy imports this module, so a
     # top-level import back into creative.copy is a circular-import trap whose failure
     # depends on which package a test file happens to import first.
-    from creative.copy.gemini_text import _FALLBACK_MODEL, generate_text
+    from creative.copy import gemini_text, openai_text, openrouter_text
 
-    model = os.environ.get("GEMINI_TEXT_MODEL") or _FALLBACK_MODEL
+    order = tuple(
+        name.strip().casefold()
+        for name in os.environ.get(
+            "TEXT_BACKEND_ORDER",
+            "gemini,openrouter,openai",
+        ).split(",")
+        if name.strip()
+    )
+    providers = {
+        "gemini": ("GEMINI_API_KEY", gemini_text.generate_text),
+        "openrouter": ("OPENROUTER_API_KEY", openrouter_text.generate_text),
+        "openai": ("OPENAI_API_KEY", openai_text.generate_text),
+    }
 
-    def generate(prompt: str, *, _model: str = model) -> str:
-        return generate_text(prompt, model=_model)
+    def generate(prompt: str) -> str:
+        last_error: RuntimeError | OSError | None = None
+        for provider_name in order:
+            provider = providers.get(provider_name)
+            if provider is None:
+                logger.warning("Unknown text provider '%s'; skipping", provider_name)
+                continue
+            key_env, provider_generate = provider
+            if not os.environ.get(key_env):
+                continue
+            try:
+                return provider_generate(prompt)
+            except (RuntimeError, OSError) as exc:
+                last_error = exc
+                logger.warning("Text provider '%s' failed: %s", provider_name, exc)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("No configured text provider has an API key")
 
-    return generate, model
+    return generate, f"chain:{','.join(order)}"
 
 
 def generate_with_retry(
