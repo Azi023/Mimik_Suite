@@ -1,0 +1,110 @@
+[
+  {
+    "id": "C1",
+    "rule": "For photo templates, never place the text panel over the photo's focal subject (face or product). Put it over the calmest negative space, and make the panel fit within that safe region. Otherwise smart-crop or scale the photo to push the subject opposite the panel and reserve about 40% of the frame as clean text space; prefer crop-to-compose over shrinking text.",
+    "why": "Covering the subject reads as amateur, and region anchoring alone can still let the panel overflow back onto the face.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "Glo2Go hero covered the model's face; sharpened v2 2026-07-22.",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "C2",
+    "rule": "Balance mass. Offset a large text block with the subject or negative space; avoid dead-center collisions.",
+    "why": "Balanced visual mass keeps the text and subject from competing at the center of the composition.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "general",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "T1",
+    "rule": "The CTA must stand out from body copy: use a filled button or pill in a brand color with its own weight, never the same style as the description.",
+    "why": "The CTA is the action and cannot blend into the paragraph.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "operator (Glo2Go CTA blended with the body text)",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "T2",
+    "rule": "Use less text for larger impact. Prefer a short headline and a tight sub; reduce body size and word count so the panel breathes. Do not overfill.",
+    "why": "Shorter copy creates breathing room and stronger hierarchy.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "operator + house 8-words-max taste",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "B1",
+    "rule": "Use the actual brand logo image where available, not the brand name as text. Fall back to a wordmark badge only when no logo file exists.",
+    "why": "The real logo preserves the client's brand identity instead of substituting generic text.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "operator (Glo2Go used the word, not the mark)",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "B2",
+    "rule": "Load the brand font. Do not use a generic system-sans fallback in a finished creative.",
+    "why": "A generic fallback makes finished work look unbranded.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "Claude (Glo2Go rendered in a system font)",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "P1",
+    "rule": "For photo templates, make the text panel blend with the poster instead of sitting on it as a pasted box. Use a touch more opacity and a soft feathered edge or subtle shadow so it reads as part of the design.",
+    "why": "A flat panel looks pasted onto the composition rather than integrated with it.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "operator (Glo2Go panel looked flat/pasted)",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "G1",
+    "rule": "Illustration-guardrail brands such as Simply Nikah never use real people or photos. Use faceless illustration only and enforce it in QA.",
+    "why": "The brand profile requires modest, faceless illustration and excludes people photography.",
+    "applies_to": [
+      "simply-nikah"
+    ],
+    "source": "profile",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "G2",
+    "rule": "Product brands such as Island Cart use the client's real product cutout, not stock substitutes.",
+    "why": "Stock substitutes can show the wrong products.",
+    "applies_to": [
+      "island-cart"
+    ],
+    "source": "live-judged (stock returned wrong products)",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  }
+]

@@ -1,11 +1,11 @@
 import type { JSX } from "react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { OnboardingWizard } from "@/components/OnboardingWizard";
 import { type ApiPillarPreset, listPillarPresets } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
 import { redirectClientToPortal } from "@/lib/guard";
+import { OnboardingWizard } from "./OnboardingWizard";
 
 export const dynamic = "force-dynamic";
 
