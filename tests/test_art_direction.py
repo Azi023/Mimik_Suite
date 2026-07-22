@@ -24,7 +24,10 @@ def _brand() -> Brand:
 
 
 def test_llm_path_uses_model_prompt() -> None:
-    def fake_gen(_prompt: str) -> str:
+    prompts: list[str] = []
+
+    def fake_gen(prompt: str) -> str:
+        prompts.append(prompt)
         return '{"image_prompt": "A serene sunrise over a calm couple walking, ample sky negative space for text.", "art_direction_notes": "warm"}'
 
     req = build_image_request(
@@ -34,6 +37,8 @@ def test_llm_path_uses_model_prompt() -> None:
     assert "sunrise" in req.prompt
     assert req.width == 1080 and req.height == 1080
     assert req.params["pillar"] == "Promotional"
+    assert prompts[0].startswith("Design rules to obey:\n")
+    assert "- L2:" in prompts[0]
 
 
 def test_fallback_on_bad_reply() -> None:

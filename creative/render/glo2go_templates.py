@@ -14,11 +14,25 @@ from html import escape
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 from mimik_contracts import get_format, validate_asset_ref
 
+from creative.knowledge.feedback import load_rules
 from creative.render.compositor import render_context_to_png
+from creative.render.glo2go_layout import (
+    DEFAULT_SUBJECT_ZOOM,
+    DEFAULT_TEXT_ALIGNMENT,
+    HeroComposition,
+    PanelAnchor,
+    TextAlignment,
+    TextRegion,
+    badge_box,
+    badge_theme,
+    hero_composition,
+    layout_grid,
+    resolve_badge_luminance,
+)
 from creative.render.templates import (
     TEMPLATES,
     LayoutTemplate,
@@ -46,17 +60,12 @@ class Glo2GoTemplateContext(TemplateContext):
     """Glo2Go copy, image, and composition controls shared by both archetypes."""
 
     density: Literal["compact", "dense"] = "compact"
-    text_region: Literal[
-        "top",
-        "bottom",
-        "left",
-        "right",
-        "top_left",
-        "top_right",
-        "bottom_left",
-        "bottom_right",
-        "center",
-    ] | None = None
+    text_region: TextRegion | None = None
+    panel_anchor: PanelAnchor | None = None
+    text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT
+    subject_zoom: float = Field(default=DEFAULT_SUBJECT_ZOOM, gt=0, le=1)
+    badge_background_luminance: float | None = Field(default=None, ge=0, le=1)
+    design_rule_ids: tuple[str, ...] = ()
     image_ref_2: str | None = None
     myth_label: str | None = None
     myth_text: str | None = None
@@ -76,17 +85,6 @@ class _Frame:
     left: int
     badge_width: int
     badge_height: int
-
-
-@dataclass(frozen=True)
-class _HeroComposition:
-    panel_x: int
-    panel_y: int
-    panel_width: int
-    panel_height: int
-    panel_padding: int
-    headline_size: int
-    body_size: int
 
 
 @dataclass(frozen=True)
@@ -168,17 +166,15 @@ def _density(archetype: str, copy: dict[str, str]) -> Literal["compact", "dense"
 
 def _frame(ctx: TemplateContext) -> _Frame:
     fmt = get_format(ctx.format_key)
-    short = min(fmt.width, fmt.height)
-    house = round(short * 0.06)
-    badge_height = round(short * 0.055)
-    badge_width = round(short * 0.24)
+    grid = layout_grid(fmt)
+    badge = badge_box(fmt, grid)
     return _Frame(
-        top=max(house, fmt.safe_zone.top),
-        right=max(house, fmt.safe_zone.right),
-        bottom=max(house, fmt.safe_zone.bottom),
-        left=max(house, fmt.safe_zone.left),
-        badge_width=badge_width,
-        badge_height=badge_height,
+        top=grid.top,
+        right=grid.right,
+        bottom=grid.bottom,
+        left=grid.left,
+        badge_width=badge.width,
+        badge_height=badge.height,
     )
 
 
@@ -195,96 +191,17 @@ def _line_count(text: str | None, font_size: int, available_width: int, glyph: f
     return max(1, math.ceil(len(text) * font_size * glyph / max(1, available_width)))
 
 
-def _hero_composition(ctx: Glo2GoTemplateContext) -> _HeroComposition:
-    width, height = ctx.size()
-    frame = _frame(ctx)
-    dense = ctx.density == "dense"
-    panel_width = round(width * (0.66 if dense else 0.54))
-    panel_padding = round(width * (0.034 if dense else 0.040))
-    headline_size = round(width * (0.052 if dense else 0.064))
-    body_size = round(width * (0.023 if dense else 0.026))
-    content_width = panel_width - 2 * panel_padding
-    headline_lines = _line_count(ctx.headline, headline_size, content_width, 0.56)
-    body_lines = _line_count(ctx.subhead, body_size, content_width, 0.52)
-    panel_height = 2 * panel_padding + round(headline_lines * headline_size * 1.08)
-    if body_lines:
-        panel_height += round(body_size * 0.75 + body_lines * body_size * 1.45)
-    if ctx.cta:
-        panel_height += round(body_size * 2.55)
-    panel_x, panel_y = _hero_panel_anchor(
-        ctx,
-        panel_width=panel_width,
-        panel_height=panel_height,
-        frame=frame,
-    )
-    return _HeroComposition(
-        panel_x=panel_x,
-        panel_y=panel_y,
-        panel_width=panel_width,
-        panel_height=panel_height,
-        panel_padding=panel_padding,
-        headline_size=headline_size,
-        body_size=body_size,
-    )
-
-
-def _hero_panel_anchor(
-    ctx: Glo2GoTemplateContext,
-    *,
-    panel_width: int,
-    panel_height: int,
-    frame: _Frame,
-) -> tuple[int, int]:
-    """Map a vision region to a safe pixel anchor while preserving the legacy default."""
-    width, height = ctx.size()
-    if ctx.text_region is None:
-        return (
-            frame.left,
-            max(frame.top + frame.badge_height, height - frame.bottom - panel_height),
-        )
-
-    horizontal = {
-        "top": "center",
-        "bottom": "center",
-        "left": "left",
-        "right": "right",
-        "top_left": "left",
-        "top_right": "right",
-        "bottom_left": "left",
-        "bottom_right": "right",
-        "center": "center",
-    }[ctx.text_region]
-    vertical = {
-        "top": "top",
-        "bottom": "bottom",
-        "left": "center",
-        "right": "center",
-        "top_left": "top",
-        "top_right": "top",
-        "bottom_left": "bottom",
-        "bottom_right": "bottom",
-        "center": "center",
-    }[ctx.text_region]
-
-    x = {
-        "left": frame.left,
-        "center": round((width - panel_width) / 2),
-        "right": width - frame.right - panel_width,
-    }[horizontal]
-    y = {
-        "top": frame.top,
-        "center": round((height - panel_height) / 2),
-        "bottom": height - frame.bottom - panel_height,
-    }[vertical]
-
-    # A top/right panel must clear the fixed top-right logo badge rather than trade one
-    # collision for another. Other top anchors stay aligned to the safe-zone edge.
-    badge_left = width - frame.right - frame.badge_width
-    if vertical == "top" and x + panel_width > badge_left:
-        y = frame.top + frame.badge_height + round(frame.badge_height * 0.35)
-    return (
-        max(frame.left, min(x, width - frame.right - panel_width)),
-        max(frame.top, min(y, height - frame.bottom - panel_height)),
+def _hero_composition(ctx: Glo2GoTemplateContext) -> HeroComposition:
+    return hero_composition(
+        get_format(ctx.format_key),
+        headline=ctx.headline,
+        subhead=ctx.subhead,
+        cta=ctx.cta,
+        dense=ctx.density == "dense",
+        text_region=ctx.text_region,
+        panel_anchor=ctx.panel_anchor,
+        text_alignment=ctx.text_alignment,
+        subject_zoom=ctx.subject_zoom,
     )
 
 
@@ -363,9 +280,12 @@ def _as_glo2go_context(ctx: TemplateContext) -> Glo2GoTemplateContext:
 
 def _canvas_open(ctx: Glo2GoTemplateContext, archetype: str) -> str:
     width, height = ctx.size()
+    grid = layout_grid(get_format(ctx.format_key))
+    rule_ids = " ".join(ctx.design_rule_ids)
     return (
         f'<div class="g2g-canvas" data-archetype="{archetype}" '
         f'data-density="{ctx.density}" '
+        f'data-grid-step="{grid.step}" data-design-rule-ids="{escape(rule_ids, quote=True)}" '
         f'data-effects="{Effect.TEXT_PANEL_OVER_PHOTO.value} {Effect.BADGE_PILL.value} '
         f'{Effect.SOFT_SHADOW.value}" aria-label="{escape(ctx.headline, quote=True)}" '
         f'style="--g2g-plum:{ctx.primary};--g2g-ink:{ctx.ink};'
@@ -392,6 +312,8 @@ def _common_css(ctx: Glo2GoTemplateContext) -> str:
         "justify-content:center;border-radius:999px;background:var(--g2g-plum);"
         "color:var(--g2g-ground);font-weight:700;letter-spacing:-.01em;"
         "box-shadow:0 8px 22px rgba(38,12,46,.16);white-space:nowrap}"
+        ".g2g-badge--light{background:var(--g2g-ground);color:var(--g2g-ink);"
+        "box-shadow:0 8px 22px rgba(38,12,46,.20),inset 0 0 0 1px rgba(90,42,107,.12)}"
         ".g2g-logo-badge{padding:8px 18px}.g2g-logo{display:block;max-width:100%;"
         "max-height:100%;object-fit:contain}"
         ".g2g-panel h1{margin:0;font-weight:760;line-height:1.08;letter-spacing:-.025em;"
@@ -403,35 +325,49 @@ def _common_css(ctx: Glo2GoTemplateContext) -> str:
         ".g2g-cta{display:inline-flex;align-items:center;width:max-content;max-width:100%;"
         "border-radius:999px;background:var(--g2g-plum);color:var(--g2g-ground);"
         "font-weight:750;line-height:1.1;letter-spacing:-.01em}"
+        ".g2g-panel[data-text-alignment=center] .g2g-cta{margin-left:auto;margin-right:auto}"
+        ".g2g-panel[data-text-alignment=right] .g2g-cta{margin-left:auto}"
         "</style>"
     )
 
 
-def _badge(ctx: Glo2GoTemplateContext) -> str:
+def _badge(ctx: Glo2GoTemplateContext, *, adaptive: bool = False) -> str:
     frame = _frame(ctx)
     font_size = round(frame.badge_height * 0.34)
+    theme = badge_theme(ctx.badge_background_luminance) if adaptive else "plum"
+    theme_class = " g2g-badge--light" if theme == "light" else ""
     if ctx.logo_ref:
         return (
-            f'<div class="g2g-badge g2g-logo-badge" '
+            f'<div class="g2g-badge g2g-logo-badge{theme_class}" data-badge-theme="{theme}" '
             f'style="top:{frame.top}px;right:{frame.right}px;'
             f'width:{frame.badge_width}px;height:{frame.badge_height}px">'
             f'<img class="g2g-logo" src="{escape(ctx.logo_ref, quote=True)}" alt=""></div>'
         )
     return (
-        f'<div class="g2g-badge" style="top:{frame.top}px;right:{frame.right}px;'
+        f'<div class="g2g-badge{theme_class}" data-badge-theme="{theme}" '
+        f'style="top:{frame.top}px;right:{frame.right}px;'
         f'width:{frame.badge_width}px;height:{frame.badge_height}px;font-size:{font_size}px">'
         "G2G Aesthetics</div>"
     )
 
 
-def _cta_html(cta: str | None, body_size: int) -> str:
+def _cta_html(
+    cta: str | None,
+    body_size: int,
+    *,
+    margin_top: int | None = None,
+    height: int | None = None,
+) -> str:
     if not cta:
         return ""
     padding_y = round(body_size * 0.55)
     padding_x = round(body_size * 0.92)
+    margin = margin_top if margin_top is not None else round(body_size * 0.82)
+    height_style = f"height:{height}px;" if height is not None else f"padding:{padding_y}px 0;"
     return (
-        f'<span class="g2g-cta" style="margin-top:{round(body_size * 0.82)}px;'
-        f'padding:{padding_y}px {padding_x}px;font-size:{round(body_size * 0.9)}px">'
+        f'<span class="g2g-cta" style="margin-top:{margin}px;{height_style}'
+        f'padding-left:{padding_x}px;padding-right:{padding_x}px;'
+        f'font-size:{round(body_size * 0.9)}px">'
         f"{escape(cta)}</span>"
     )
 
@@ -446,24 +382,34 @@ class SinglePhotoEducationHero(LayoutTemplate):
     def render(self, ctx: TemplateContext) -> str:
         glo = _as_glo2go_context(ctx)
         comp = _hero_composition(glo)
-        photo_position = "64% center" if glo.density == "dense" else "center center"
         subhead = (
-            f'<p style="margin-top:{round(comp.body_size * 0.72)}px;'
-            f'font-size:{comp.body_size}px">{escape(glo.subhead)}</p>'
+            f'<p style="margin-top:{comp.grid.step}px;font-size:{comp.body_size}px;'
+            f'line-height:{comp.body_line_height}px">{escape(glo.subhead)}</p>'
             if glo.subhead
             else ""
         )
-        cta = _cta_html(glo.cta, comp.body_size)
+        cta = _cta_html(
+            glo.cta,
+            comp.body_size,
+            margin_top=comp.grid.step,
+            height=comp.cta_height or None,
+        )
         region = glo.text_region or "default"
         return (
             f"{_canvas_open(glo, self.key)}{_common_css(glo)}"
             f'<img class="g2g-photo" src="{escape(glo.image_ref, quote=True)}" alt="" '
-            f'style="object-position:{photo_position}">'
-            f"{_badge(glo)}"
+            f'data-subject-zoom="{glo.subject_zoom:.2f}" '
+            f'style="left:{comp.photo.x}px;top:{comp.photo.y}px;width:{comp.photo.width}px;'
+            f'height:{comp.photo.height}px;object-position:center center">'
+            f"{_badge(glo, adaptive=True)}"
             f'<section class="g2g-panel g2g-hero-panel" data-text-region="{region}" '
+            f'data-panel-anchor="{comp.panel_anchor}" '
+            f'data-text-alignment="{comp.text_alignment}" '
             f'style="left:{comp.panel_x}px;top:{comp.panel_y}px;width:{comp.panel_width}px;'
-            f'min-height:{comp.panel_height}px;padding:{comp.panel_padding}px">'
-            f'<h1 style="font-size:{comp.headline_size}px">{escape(glo.headline)}</h1>'
+            f'min-height:{comp.panel_height}px;padding:{comp.panel_padding}px;'
+            f'text-align:{comp.text_alignment}">'
+            f'<h1 style="font-size:{comp.headline_size}px;line-height:{comp.headline_line_height}px">'
+            f'{escape(glo.headline)}</h1>'
             f"{subhead}{cta}</section></div>"
         )
 
@@ -572,13 +518,17 @@ def _build_context(
     profile: StyleProfile,
     image_ref_2: str | None = None,
     logo_ref: str | None = None,
-    text_region: str | None = None,
+    text_region: TextRegion | None = None,
+    panel_anchor: PanelAnchor | None = None,
+    text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
+    subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
+    badge_background_luminance: float | None = None,
 ) -> Glo2GoTemplateContext:
     if archetype not in GLO2GO_TEMPLATES:
         choices = ", ".join(GLO2GO_TEMPLATES)
         raise ValueError(f"Unknown Glo2Go archetype {archetype!r}; choose from: {choices}")
     _require_glo2go_profile(profile)
-    get_format(format_key)  # Fail loud through the established format registry.
+    fmt = get_format(format_key)  # Fail loud through the established format registry.
 
     primary = _palette_color(profile, "primary", _PLUM_FALLBACK)
     ink = _palette_color(profile, "ink", _PLUM_FALLBACK)
@@ -586,10 +536,17 @@ def _build_context(
     embedded_image = _embed_local_image(image_ref)
     embedded_image_2 = _embed_local_image(image_ref_2) if image_ref_2 else None
     embedded_logo = _embed_local_image(logo_ref) if logo_ref else None
+    rule_ids = tuple(rule.id for rule in load_rules(profile.id))
 
     if archetype == "single_photo_education_hero":
         headline = _copy_value(copy, "headline", required=True)
         assert headline is not None
+        resolved_badge_luminance = resolve_badge_luminance(
+            embedded_image,
+            fmt,
+            subject_zoom=subject_zoom,
+            sampled_luminance=badge_background_luminance,
+        )
         return Glo2GoTemplateContext(
             format_key=format_key,
             headline=headline,
@@ -605,6 +562,11 @@ def _build_context(
             image_ref=embedded_image,
             density=_density(archetype, copy),
             text_region=text_region,
+            panel_anchor=panel_anchor,
+            text_alignment=text_alignment,
+            subject_zoom=subject_zoom,
+            badge_background_luminance=resolved_badge_luminance,
+            design_rule_ids=rule_ids,
         )
 
     myth_label = _copy_value(copy, "myth_label", required=True)
@@ -628,6 +590,11 @@ def _build_context(
         image_ref_2=embedded_image_2,
         density=_density(archetype, copy),
         text_region=text_region,
+        panel_anchor=panel_anchor,
+        text_alignment=text_alignment,
+        subject_zoom=subject_zoom,
+        badge_background_luminance=badge_background_luminance,
+        design_rule_ids=rule_ids,
         cta=_copy_value(copy, "cta"),
         myth_label=myth_label,
         myth_text=myth_text,
@@ -645,7 +612,11 @@ def build_glo2go_html(
     profile: StyleProfile,
     image_ref_2: str | None = None,
     logo_ref: str | None = None,
-    text_region: str | None = None,
+    text_region: TextRegion | None = None,
+    panel_anchor: PanelAnchor | None = None,
+    text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
+    subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
+    badge_background_luminance: float | None = None,
 ) -> str:
     """Build editable HTML for structural tests and future layer-level editing.
 
@@ -662,6 +633,10 @@ def build_glo2go_html(
         image_ref_2=image_ref_2,
         logo_ref=logo_ref,
         text_region=text_region,
+        panel_anchor=panel_anchor,
+        text_alignment=text_alignment,
+        subject_zoom=subject_zoom,
+        badge_background_luminance=badge_background_luminance,
     )
     return GLO2GO_TEMPLATES[archetype].render(ctx)
 
@@ -674,7 +649,11 @@ async def render_glo2go(
     format_key: str,
     image_ref_2: str | None = None,
     logo_ref: str | None = None,
-    text_region: str | None = None,
+    text_region: TextRegion | None = None,
+    panel_anchor: PanelAnchor | None = None,
+    text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
+    subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
+    badge_background_luminance: float | None = None,
 ) -> bytes:
     """Render a Glo2Go archetype through the existing Playwright compositor."""
     profile = get_style_profile(_GLO2GO_PROFILE_ID)
@@ -687,5 +666,9 @@ async def render_glo2go(
         image_ref_2=image_ref_2,
         logo_ref=logo_ref,
         text_region=text_region,
+        panel_anchor=panel_anchor,
+        text_alignment=text_alignment,
+        subject_zoom=subject_zoom,
+        badge_background_luminance=badge_background_luminance,
     )
     return await render_context_to_png(ctx, archetype)

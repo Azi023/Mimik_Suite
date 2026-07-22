@@ -75,6 +75,13 @@ _Last updated: 2026-07-21 (session: local-test → creative-engine v2)._
 
 _Codex output lands in `scratchpad/codex_run_*.log`; Claude reviews `git diff` before anything commits._
 
+### 2026-07-22 — make it a real product (not scripts) + first designer feedback
+- **API restarted** (was frozen on M0 code → /exports 404); now current. Studio confirmed working (empty by design — no UI generate yet).
+- **Creative-head feedback captured** into the flywheel: L1 logo-contrast-on-dark, L2 smaller left/centered panel, L3 zoom-out subject, L4 grid alignment, L5 live-text-must-be-real (→ SVG is the live-text master; PSD live-text SKIPPED as too complex).
+- **Decisions:** PSD live-text = skipped. Codex/agy usage = separate pools from Claude quota, unmeterable via CLI, headroom OK.
+- **`docs/PLAN_EDITOR_AND_COMMAND_CENTER.md`** drafted — the in-product editor ("mark & tell AI", client-bounded, SVG-layer based) + Command Center (→ agy).
+- **RULES** ▶ dispatched (L1–L4 in glo2go templates + svg, rubric-aware). **GEN** (studio generate+download UI, real feature) queued NEXT — sequential (shares template files).
+
 ---
 
 ## Refinement 2026-07-22 — client archetypes are genuinely diverse (Q1–Q3 answers)

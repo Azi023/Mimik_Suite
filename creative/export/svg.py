@@ -9,7 +9,18 @@ from xml.etree import ElementTree
 
 from mimik_contracts import PRESETS, CreativeFormat
 
+from creative.knowledge.feedback import load_rules
 from creative.render.compositor import render_html_to_png
+from creative.render.glo2go_layout import (
+    DEFAULT_SUBJECT_ZOOM,
+    DEFAULT_TEXT_ALIGNMENT,
+    PanelAnchor,
+    TextAlignment,
+    TextRegion,
+    badge_theme,
+    hero_composition,
+    resolve_badge_luminance,
+)
 
 
 _SVG_NS = "http://www.w3.org/2000/svg"
@@ -24,30 +35,10 @@ _IMAGE_MIME_BY_SUFFIX = {
 }
 _SYSTEM_FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 _DEFAULT_BADGE_TEXT = "G2G Aesthetics"
-_REGION_AXES = {
-    "top": ("center", "top"),
-    "bottom": ("center", "bottom"),
-    "left": ("left", "center"),
-    "right": ("right", "center"),
-    "top_left": ("left", "top"),
-    "top_right": ("right", "top"),
-    "bottom_left": ("left", "bottom"),
-    "bottom_right": ("right", "bottom"),
-    "center": ("center", "center"),
-}
+_GLO2GO_PROFILE_ID = "glo2go-aesthetics"
 
 ElementTree.register_namespace("", _SVG_NS)
 ElementTree.register_namespace("inkscape", _INKSCAPE_NS)
-
-
-@dataclass(frozen=True)
-class _Frame:
-    top: int
-    right: int
-    bottom: int
-    left: int
-    badge_width: int
-    badge_height: int
 
 
 @dataclass(frozen=True)
@@ -58,7 +49,21 @@ class _Composition:
     panel_height: int
     panel_padding: int
     headline_size: int
+    headline_line_height: int
     body_size: int
+    body_line_height: int
+    cta_height: int
+    grid_step: int
+    panel_anchor: PanelAnchor
+    text_alignment: TextAlignment
+    badge_x: int
+    badge_y: int
+    badge_width: int
+    badge_height: int
+    photo_x: int
+    photo_y: int
+    photo_width: int
+    photo_height: int
     headline_lines: tuple[str, ...]
     subhead_lines: tuple[str, ...]
 
@@ -92,19 +97,6 @@ def _embed_local_image(image_ref: str) -> str:
     return f"data:{mime};base64,{encoded}"
 
 
-def _frame(fmt: CreativeFormat) -> _Frame:
-    short = min(fmt.width, fmt.height)
-    house = round(short * 0.06)
-    return _Frame(
-        top=max(house, fmt.safe_zone.top),
-        right=max(house, fmt.safe_zone.right),
-        bottom=max(house, fmt.safe_zone.bottom),
-        left=max(house, fmt.safe_zone.left),
-        badge_width=round(short * 0.24),
-        badge_height=round(short * 0.055),
-    )
-
-
 def _wrap_preserving_text(text: str, max_chars: int) -> tuple[str, ...]:
     """Wrap at whitespace while keeping concatenated tspan content byte-for-byte equal."""
     if not text:
@@ -132,56 +124,50 @@ def _composition(
     headline: str,
     sub: str | None,
     cta: str | None,
-    text_region: str,
+    text_region: TextRegion | None,
+    panel_anchor: PanelAnchor | None,
+    text_alignment: TextAlignment,
+    subject_zoom: float,
 ) -> _Composition:
-    if text_region not in _REGION_AXES:
-        choices = ", ".join(_REGION_AXES)
-        raise ValueError(f"Unknown text region {text_region!r}; choose from: {choices}")
-
     dense = sum(len(value.strip()) for value in (headline, sub or "", cta or "")) > 150
-    panel_width = round(fmt.width * (0.66 if dense else 0.54))
-    panel_padding = round(fmt.width * (0.034 if dense else 0.040))
-    headline_size = round(fmt.width * (0.052 if dense else 0.064))
-    body_size = round(fmt.width * (0.023 if dense else 0.026))
-    content_width = panel_width - 2 * panel_padding
-    headline_chars = max(1, int(content_width / (headline_size * 0.56)))
-    body_chars = max(1, int(content_width / (body_size * 0.52)))
+    layout = hero_composition(
+        fmt,
+        headline=headline,
+        subhead=sub,
+        cta=cta,
+        dense=dense,
+        text_region=text_region,
+        panel_anchor=panel_anchor,
+        text_alignment=text_alignment,
+        subject_zoom=subject_zoom,
+    )
+    content_width = layout.panel_width - 2 * layout.panel_padding
+    headline_chars = max(1, int(content_width / (layout.headline_size * 0.56)))
+    body_chars = max(1, int(content_width / (layout.body_size * 0.52)))
     headline_lines = _wrap_preserving_text(headline, headline_chars)
     subhead_lines = _wrap_preserving_text(sub, body_chars) if sub and sub.strip() else ()
-
-    headline_height = round(len(headline_lines) * headline_size * 1.08)
-    subhead_height = 0
-    if subhead_lines:
-        subhead_height = round(body_size * 0.72 + len(subhead_lines) * body_size * 1.45)
-    cta_height = round(body_size * 2.55) if cta and cta.strip() else 0
-    panel_height = 2 * panel_padding + headline_height + subhead_height + cta_height
-
-    frame = _frame(fmt)
-    horizontal, vertical = _REGION_AXES[text_region]
-    x = {
-        "left": frame.left,
-        "center": round((fmt.width - panel_width) / 2),
-        "right": fmt.width - frame.right - panel_width,
-    }[horizontal]
-    y = {
-        "top": frame.top,
-        "center": round((fmt.height - panel_height) / 2),
-        "bottom": fmt.height - frame.bottom - panel_height,
-    }[vertical]
-
-    badge_left = fmt.width - frame.right - frame.badge_width
-    if vertical == "top" and x + panel_width > badge_left:
-        y = frame.top + frame.badge_height + round(frame.badge_height * 0.35)
-    panel_x = max(frame.left, min(x, fmt.width - frame.right - panel_width))
-    panel_y = max(frame.top, min(y, fmt.height - frame.bottom - panel_height))
     return _Composition(
-        panel_x=panel_x,
-        panel_y=panel_y,
-        panel_width=panel_width,
-        panel_height=panel_height,
-        panel_padding=panel_padding,
-        headline_size=headline_size,
-        body_size=body_size,
+        panel_x=layout.panel_x,
+        panel_y=layout.panel_y,
+        panel_width=layout.panel_width,
+        panel_height=layout.panel_height,
+        panel_padding=layout.panel_padding,
+        headline_size=layout.headline_size,
+        headline_line_height=layout.headline_line_height,
+        body_size=layout.body_size,
+        body_line_height=layout.body_line_height,
+        cta_height=layout.cta_height,
+        grid_step=layout.grid.step,
+        panel_anchor=layout.panel_anchor,
+        text_alignment=layout.text_alignment,
+        badge_x=layout.badge.x,
+        badge_y=layout.badge.y,
+        badge_width=layout.badge.width,
+        badge_height=layout.badge.height,
+        photo_x=layout.photo.x,
+        photo_y=layout.photo.y,
+        photo_width=layout.photo.width,
+        photo_height=layout.photo.height,
         headline_lines=headline_lines,
         subhead_lines=subhead_lines,
     )
@@ -210,7 +196,9 @@ def _add_wrapped_text(
     font_size: int,
     font_weight: int,
     fill: str,
+    text_alignment: TextAlignment,
 ) -> ElementTree.Element:
+    svg_anchor = {"left": "start", "center": "middle", "right": "end"}[text_alignment]
     text = ElementTree.SubElement(
         layer,
         _svg_tag("text"),
@@ -221,6 +209,7 @@ def _add_wrapped_text(
             "font-family": _SYSTEM_FONT,
             "font-size": str(font_size),
             "font-weight": str(font_weight),
+            "text-anchor": svg_anchor,
             f"{{{_XML_NS}}}space": "preserve",
         },
     )
@@ -237,6 +226,22 @@ def _add_wrapped_text(
     return text
 
 
+def _content_x(comp: _Composition) -> int:
+    return {
+        "left": comp.panel_x + comp.panel_padding,
+        "center": comp.panel_x + round(comp.panel_width / 2),
+        "right": comp.panel_x + comp.panel_width - comp.panel_padding,
+    }[comp.text_alignment]
+
+
+def _aligned_box_x(comp: _Composition, width: int) -> int:
+    return {
+        "left": comp.panel_x + comp.panel_padding,
+        "center": comp.panel_x + round((comp.panel_width - width) / 2),
+        "right": comp.panel_x + comp.panel_width - comp.panel_padding - width,
+    }[comp.text_alignment]
+
+
 def render_creative_svg(
     *,
     format_key: str,
@@ -248,7 +253,11 @@ def render_creative_svg(
     palette_ground: str,
     badge_text: str | None,
     logo_ref: str | None,
-    text_region: str = "bottom_right",
+    text_region: TextRegion | None = None,
+    panel_anchor: PanelAnchor | None = None,
+    text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
+    subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
+    badge_background_luminance: float | None = None,
 ) -> str:
     """Return the Glo2Go hero as a complete SVG with named, editable layers."""
     if not headline.strip():
@@ -261,7 +270,19 @@ def render_creative_svg(
         sub=sub,
         cta=cta,
         text_region=text_region,
+        panel_anchor=panel_anchor,
+        text_alignment=text_alignment,
+        subject_zoom=subject_zoom,
     )
+    embedded_image = _embed_local_image(image_ref)
+    sampled_luminance = resolve_badge_luminance(
+        embedded_image,
+        fmt,
+        subject_zoom=subject_zoom,
+        sampled_luminance=badge_background_luminance,
+    )
+    resolved_badge_theme = badge_theme(sampled_luminance)
+    rule_ids = " ".join(rule.id for rule in load_rules(_GLO2GO_PROFILE_ID))
     root = ElementTree.Element(
         _svg_tag("svg"),
         {
@@ -269,24 +290,30 @@ def render_creative_svg(
             "width": str(fmt.width),
             "height": str(fmt.height),
             "viewBox": f"0 0 {fmt.width} {fmt.height}",
+            "data-grid-step": str(comp.grid_step),
+            "data-subject-zoom": f"{subject_zoom:.2f}",
+            "data-design-rule-ids": rule_ids,
         },
     )
 
     background = _layer(root, "layer-background")
+    background.set("data-subject-zoom", f"{subject_zoom:.2f}")
     ElementTree.SubElement(
         background,
         _svg_tag("image"),
         {
-            "x": "0",
-            "y": "0",
-            "width": str(fmt.width),
-            "height": str(fmt.height),
+            "x": str(comp.photo_x),
+            "y": str(comp.photo_y),
+            "width": str(comp.photo_width),
+            "height": str(comp.photo_height),
             "preserveAspectRatio": "xMidYMid slice",
-            "href": _embed_local_image(image_ref),
+            "href": embedded_image,
         },
     )
 
     panel = _layer(root, "layer-panel")
+    panel.set("data-panel-anchor", comp.panel_anchor)
+    panel.set("data-text-alignment", comp.text_alignment)
     ElementTree.SubElement(
         panel,
         _svg_tag("rect"),
@@ -303,28 +330,29 @@ def render_creative_svg(
         },
     )
 
-    content_x = comp.panel_x + comp.panel_padding
-    headline_baseline = comp.panel_y + comp.panel_padding + comp.headline_size
+    content_x = _content_x(comp)
+    headline_baseline = comp.panel_y + comp.panel_padding + comp.headline_line_height
     headline_layer = _layer(root, "layer-headline")
     _add_wrapped_text(
         headline_layer,
         lines=comp.headline_lines,
         x=content_x,
         first_baseline=headline_baseline,
-        line_height=round(comp.headline_size * 1.08),
+        line_height=comp.headline_line_height,
         font_size=comp.headline_size,
         font_weight=760,
         fill=palette_ink,
+        text_alignment=comp.text_alignment,
     )
 
     subhead_layer = _layer(root, "layer-subhead")
-    headline_height = round(len(comp.headline_lines) * comp.headline_size * 1.08)
+    headline_height = len(comp.headline_lines) * comp.headline_line_height
     subhead_baseline = (
         comp.panel_y
         + comp.panel_padding
         + headline_height
-        + round(comp.body_size * 0.72)
-        + comp.body_size
+        + comp.grid_step
+        + comp.body_line_height
     )
     if comp.subhead_lines:
         _add_wrapped_text(
@@ -332,34 +360,32 @@ def render_creative_svg(
             lines=comp.subhead_lines,
             x=content_x,
             first_baseline=subhead_baseline,
-            line_height=round(comp.body_size * 1.45),
+            line_height=comp.body_line_height,
             font_size=comp.body_size,
             font_weight=430,
             fill=palette_ink,
+            text_alignment=comp.text_alignment,
         )
 
     cta_layer = _layer(root, "layer-cta")
     if cta and cta.strip():
         subhead_height = 0
         if comp.subhead_lines:
-            subhead_height = round(
-                comp.body_size * 0.72 + len(comp.subhead_lines) * comp.body_size * 1.45
-            )
+            subhead_height = comp.grid_step + len(comp.subhead_lines) * comp.body_line_height
         cta_font_size = round(comp.body_size * 0.9)
         cta_padding_x = round(comp.body_size * 0.92)
-        cta_padding_y = round(comp.body_size * 0.55)
-        cta_height = cta_font_size + 2 * cta_padding_y
+        cta_height = comp.cta_height
         cta_width = min(
             comp.panel_width - 2 * comp.panel_padding,
             round(len(cta) * cta_font_size * 0.56 + 2 * cta_padding_x),
         )
-        cta_x = content_x
+        cta_x = _aligned_box_x(comp, cta_width)
         cta_y = (
             comp.panel_y
             + comp.panel_padding
             + headline_height
             + subhead_height
-            + round(comp.body_size * 0.82)
+            + comp.grid_step
         )
         ElementTree.SubElement(
             cta_layer,
@@ -377,54 +403,59 @@ def render_creative_svg(
             cta_layer,
             _svg_tag("text"),
             {
-                "x": str(cta_x + cta_padding_x),
-                "y": str(cta_y + cta_padding_y + cta_font_size),
+                "x": str(cta_x + round(cta_width / 2)),
+                "y": str(cta_y + round(cta_height / 2)),
                 "fill": palette_ground,
                 "font-family": _SYSTEM_FONT,
                 "font-size": str(cta_font_size),
                 "font-weight": "750",
+                "dominant-baseline": "middle",
+                "text-anchor": "middle",
             },
         )
         cta_text.text = cta
 
     badge_layer = _layer(root, "layer-badge")
-    frame = _frame(fmt)
-    badge_x = fmt.width - frame.right - frame.badge_width
+    badge_layer.set("data-badge-theme", resolved_badge_theme)
+    badge_fill = palette_ground if resolved_badge_theme == "light" else palette_ink
+    badge_ink = palette_ink if resolved_badge_theme == "light" else palette_ground
+    ElementTree.SubElement(
+        badge_layer,
+        _svg_tag("rect"),
+        {
+            "x": str(comp.badge_x),
+            "y": str(comp.badge_y),
+            "width": str(comp.badge_width),
+            "height": str(comp.badge_height),
+            "rx": str(round(comp.badge_height / 2)),
+            "fill": badge_fill,
+            "stroke": palette_ink,
+            "stroke-opacity": "0.12" if resolved_badge_theme == "light" else "0",
+        },
+    )
     if logo_ref:
         ElementTree.SubElement(
             badge_layer,
             _svg_tag("image"),
             {
-                "x": str(badge_x),
-                "y": str(frame.top),
-                "width": str(frame.badge_width),
-                "height": str(frame.badge_height),
+                "x": str(comp.badge_x),
+                "y": str(comp.badge_y),
+                "width": str(comp.badge_width),
+                "height": str(comp.badge_height),
                 "preserveAspectRatio": "xMidYMid meet",
                 "href": _embed_local_image(logo_ref),
             },
         )
     else:
-        ElementTree.SubElement(
-            badge_layer,
-            _svg_tag("rect"),
-            {
-                "x": str(badge_x),
-                "y": str(frame.top),
-                "width": str(frame.badge_width),
-                "height": str(frame.badge_height),
-                "rx": str(round(frame.badge_height / 2)),
-                "fill": palette_ink,
-            },
-        )
         wordmark = ElementTree.SubElement(
             badge_layer,
             _svg_tag("text"),
             {
-                "x": str(badge_x + round(frame.badge_width / 2)),
-                "y": str(frame.top + round(frame.badge_height * 0.62)),
-                "fill": palette_ground,
+                "x": str(comp.badge_x + round(comp.badge_width / 2)),
+                "y": str(comp.badge_y + round(comp.badge_height * 0.62)),
+                "fill": badge_ink,
                 "font-family": _SYSTEM_FONT,
-                "font-size": str(round(frame.badge_height * 0.34)),
+                "font-size": str(round(comp.badge_height * 0.34)),
                 "font-weight": "700",
                 "text-anchor": "middle",
             },

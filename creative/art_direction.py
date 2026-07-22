@@ -20,6 +20,7 @@ from collections.abc import Callable
 from mimik_contracts import Brand, ColorRole
 
 from creative.adapters.base import ImageRequest
+from creative.knowledge.feedback import rules_as_prompt_block
 from creative.prompting import default_generate, parse_json_reply
 
 # Where each template lays its text, so the art-director keeps that zone calm for the overlay.
@@ -71,9 +72,9 @@ def _context_block(brand: Brand, pillar_name: str, topic: str, fmt_label: str, z
     )
 
 
-def _instruction(context: str) -> str:
+def _instruction(context: str, rules: str) -> str:
     return (
-        f"{_SYSTEM}\n\n{context}\n\n"
+        f"{rules}\n\n{_SYSTEM}\n\n{context}\n\n"
         "Write the image prompt now. Requirements:\n"
         "- One paragraph, 60–110 words, concrete and directive (subject, setting, styling, "
         "camera or illustration style, lighting, colour grade tied to the palette, mood).\n"
@@ -83,12 +84,19 @@ def _instruction(context: str) -> str:
     )
 
 
-def _fallback_prompt(brand: Brand, pillar_name: str, topic: str, zone: str) -> str:
+def _fallback_prompt(
+    brand: Brand,
+    pillar_name: str,
+    topic: str,
+    zone: str,
+    rules: str,
+) -> str:
     """Deterministic art-direction if the text model is unavailable — never blocks a run."""
     palette = _palette_line(brand.tokens.colors)
     style = brand.imagery_style or "clean editorial photography with soft natural light"
     return (
-        f"A refined, on-brand background scene for {brand.name} ({brand.niche or 'brand'}) "
+        f"{rules}\n\nA refined, on-brand background scene for {brand.name} "
+        f"({brand.niche or 'brand'}) "
         f"about '{topic}', pillar: {pillar_name}. {style}. Single strong subject, intentional "
         f"composition with generous negative space in {zone}. Colour grade drawn from the brand "
         f"palette: {palette}. Soft directional light, shallow depth, premium and uncluttered mood. "
@@ -111,20 +119,21 @@ def build_image_request(
     art director; falls back to a deterministic prompt on any text-model failure."""
     zone = _TEXT_ZONE_HINT.get(template_key, "the centre of the frame")
     context = _context_block(brand, pillar_name, topic, fmt_label, zone)
+    rules = rules_as_prompt_block(brand.slug)
     if generate is None:
         generate, _model = default_generate()
 
     prompt_text: str
     notes = ""
     try:
-        reply = generate(_instruction(context))
+        reply = generate(_instruction(context, rules))
         data = parse_json_reply(reply)
         prompt_text = str(data.get("image_prompt") or "").strip()
         notes = str(data.get("art_direction_notes") or "").strip()
         if len(prompt_text) < 40:  # too thin to be a real brief → fall back
             raise ValueError("image_prompt too short")
     except (ValueError, KeyError, json.JSONDecodeError, RuntimeError):
-        prompt_text = _fallback_prompt(brand, pillar_name, topic, zone)
+        prompt_text = _fallback_prompt(brand, pillar_name, topic, zone, rules)
         notes = "deterministic fallback (text model unavailable or non-compliant)"
 
     return ImageRequest(

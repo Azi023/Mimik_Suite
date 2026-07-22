@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import struct
+import zlib
 from pathlib import Path
 
 from creative.render.glo2go_templates import build_glo2go_html
@@ -9,6 +12,28 @@ from creative.style_profile import get_style_profile
 
 
 IMAGE_DATA_URI = "data:image/png;base64,aGk="
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(data))
+        + chunk_type
+        + data
+        + struct.pack(">I", zlib.crc32(chunk_type + data) & 0xFFFFFFFF)
+    )
+
+
+def _solid_png_data_uri(hex_color: str, size: int = 8) -> str:
+    red, green, blue = (int(hex_color[index : index + 2], 16) for index in (1, 3, 5))
+    header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+    row = b"\x00" + bytes((red, green, blue)) * size
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(b"IDAT", zlib.compress(row * size))
+        + _png_chunk(b"IEND", b"")
+    )
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
 def _html(archetype: str, copy: dict[str, str]) -> str:
@@ -172,6 +197,82 @@ def test_text_region_changes_hero_panel_anchor() -> None:
     assert 'data-text-region="default"' in default_panel
     assert 'data-text-region="top_right"' in top_right_panel
     assert default_panel != top_right_panel
+
+
+def test_hero_defaults_to_left_anchor_with_centered_copy_on_grid() -> None:
+    html = _html("single_photo_education_hero", {"headline": "Aligned by default"})
+    canvas = html.split(">", maxsplit=1)[0]
+    panel = html.split("<section", maxsplit=1)[1].split(">", maxsplit=1)[0]
+
+    assert 'data-grid-step="' in canvas
+    assert 'data-panel-anchor="left"' in panel
+    assert 'data-text-alignment="center"' in panel
+    assert "text-align:center" in panel
+
+
+def test_hero_renders_explicit_panel_anchor_and_text_alignment() -> None:
+    html = build_glo2go_html(
+        "single_photo_education_hero",
+        image_ref=IMAGE_DATA_URI,
+        copy={"headline": "Explicit alignment"},
+        format_key="ig_post",
+        profile=get_style_profile("glo2go-aesthetics"),
+        panel_anchor="right",
+        text_alignment="left",
+    )
+    panel = html.split("<section", maxsplit=1)[1].split(">", maxsplit=1)[0]
+
+    assert 'data-panel-anchor="right"' in panel
+    assert 'data-text-alignment="left"' in panel
+    assert "text-align:left" in panel
+
+
+def test_badge_theme_switches_from_plum_to_light_over_dark_photo() -> None:
+    profile = get_style_profile("glo2go-aesthetics")
+    light_html = build_glo2go_html(
+        "single_photo_education_hero",
+        image_ref=_solid_png_data_uri("#F4F4F4"),
+        copy={"headline": "Light ground"},
+        format_key="ig_post",
+        profile=profile,
+    )
+    dark_html = build_glo2go_html(
+        "single_photo_education_hero",
+        image_ref=_solid_png_data_uri("#111111"),
+        copy={"headline": "Dark ground"},
+        format_key="ig_post",
+        profile=profile,
+    )
+
+    assert 'data-badge-theme="plum"' in light_html
+    assert 'data-badge-theme="light"' in dark_html
+    assert '<div class="g2g-badge" data-badge-theme="plum"' in light_html
+    assert '<div class="g2g-badge g2g-badge--light" data-badge-theme="light"' in dark_html
+
+
+def test_subject_zoom_changes_photo_transform() -> None:
+    profile = get_style_profile("glo2go-aesthetics")
+    default_html = build_glo2go_html(
+        "single_photo_education_hero",
+        image_ref=IMAGE_DATA_URI,
+        copy={"headline": "Default zoom"},
+        format_key="ig_post",
+        profile=profile,
+    )
+    tighter_html = build_glo2go_html(
+        "single_photo_education_hero",
+        image_ref=IMAGE_DATA_URI,
+        copy={"headline": "Custom zoom"},
+        format_key="ig_post",
+        profile=profile,
+        subject_zoom=0.86,
+    )
+    default_photo = default_html.split('<img class="g2g-photo"', maxsplit=1)[1].split(">", maxsplit=1)[0]
+    tighter_photo = tighter_html.split('<img class="g2g-photo"', maxsplit=1)[1].split(">", maxsplit=1)[0]
+
+    assert 'data-subject-zoom="0.94"' in default_photo
+    assert 'data-subject-zoom="0.86"' in tighter_photo
+    assert default_photo != tighter_photo
 
 
 def test_panel_uses_higher_opacity_and_feathered_shadow() -> None:

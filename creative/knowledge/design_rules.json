@@ -106,5 +106,65 @@
     "active": true,
     "weight": 1.0,
     "created": "2026-07-22"
+  },
+  {
+    "id": "L1",
+    "rule": "Logo/badge on a dark part of the photo needs a LIGHT/reversed logo variant for contrast — swap logo theme by background luminance",
+    "why": "Captured from declined design feedback.",
+    "applies_to": [
+      "glo2go-aesthetics"
+    ],
+    "source": "creative-head",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "L2",
+    "rule": "Text panel can be SMALLER and left-anchored with the copy CENTER-aligned inside it — don't oversize the panel",
+    "why": "Captured from declined design feedback.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "creative-head",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "L3",
+    "rule": "Scale the subject photo DOWN / zoom out — more breathing room reads better than a tight crop",
+    "why": "Captured from declined design feedback.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "creative-head",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "L4",
+    "rule": "Fix alignment — snap all elements (panel, headline, sub, cta, badge) to a consistent grid; ragged alignment reads amateur",
+    "why": "Captured from declined design feedback.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "creative-head",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
+  },
+  {
+    "id": "L5",
+    "rule": "Editable output MUST use LIVE TEXT — PSD text layers must be real type layers, not rasterized pixels",
+    "why": "Captured from declined design feedback.",
+    "applies_to": [
+      "all"
+    ],
+    "source": "creative-head",
+    "active": true,
+    "weight": 1.0,
+    "created": "2026-07-22"
   }
 ]
