@@ -1,9 +1,12 @@
 # Mimik Suite — Build Status & Delegation Ledger
 
 > Living report. What's happening, what's about to be implemented, and who's doing it.
-> **Brain:** Claude Code (this terminal) — plans, specs, reviews, integrates.
-> **Hands:** Codex CLI (`codex exec`, best model / high effort) — executes scoped specs in the background.
-> Rule: Codex never commits; Claude reviews every diff before it lands.
+> **Brain:** Claude Code / Opus (this terminal) — plans, specs, reviews, integrates. Planning is the point.
+> **Hands (executors, driven from this terminal):**
+> - **Codex** `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write` — primary coder (6/7 tasks).
+> - **agy** (Antigravity CLI, Gemini 3.1 Pro High) `agy -p "<spec>" --mode accept-edits --dangerously-skip-permissions` — RESERVED for the **Command Center** (hand it a full plan → it executes).
+> - **gemini** CLI — spare executor for independent parallel tasks.
+> Rule: executors never commit; Claude reviews every diff before it lands.
 
 _Last updated: 2026-07-21 (session: local-test → creative-engine v2)._
 
@@ -58,7 +61,12 @@ _Last updated: 2026-07-21 (session: local-test → creative-engine v2)._
 | — | **Checkpoint commit `7f9557b`** — mock-fix + engine-v2 spec + profiles + art-director spike | Claude | ✅ committed (not pushed) | — |
 | 03 | `scripts/seed_profiles.py` — add the 3 real clients from the profiles | Codex (gpt-5.6-sol, xhigh) | ✅ ran vs local DB | ✅ 3 clients live (Simply Nikah / Glo2Go / Island Cart), idempotent |
 | 05 | `creative/style_profile.py` — encode 3 profiles as Pydantic `StyleProfile` (M3/M4 foundation) | Codex (gpt-5.6-sol, xhigh) | ✅ done, unstaged | ✅ Claude-verified (4 tests, faithful load, modesty guardrail machine-checkable) |
-| 06 | Multi-source references: add Unsplash+Pexels fetchers (env-key gated) + fix `build_query`; TODO pinterest/dribbble/behance/envato | Codex (gpt-5.6-sol, xhigh) | ✅ done, unstaged | ✅ Claude-verified (7 tests, query fixed, key-guard works); **awaiting operator keys** for live judge loop |
+| 06 | Multi-source references: add Unsplash+Pexels fetchers (env-key gated) + fix `build_query`; TODO pinterest/dribbble/behance/envato | Codex (gpt-5.6-sol, xhigh) | ✅ committed `70c0704` | ✅ **live-judged**: Pexels ACCEPT for Glo2Go (on-brief clinic photos); stock DECLINED for Island Cart (need cutout) + Simply Nikah (violates modesty) → profile-routing validated |
+| 07 | **M3 slice #1** `creative/render/glo2go_templates.py` — Glo2Go archetypes (single-hero + myth/fact) w/ text-panel + badge, profile-driven | Codex (gpt-5.6-sol, xhigh) | ✅ done | ✅ **rendered + judged ~72%** — right architecture (real photo, plum, badge, panel); flaws → panel covers face, generic CTA/font, wordmark not logo, flat panel |
+| — | **`docs/DESIGN_RUBRIC.md`** — living self-improving design-critique brain (seeds C1/T1/T2/B1/P1/G1/G2 from the judge) | Claude | ✅ created | the M5 seed; art-director + templates read it |
+| 08 | **Glo2Go v2** — apply rubric (CTA pill, logo image, panel blend, text size) + `creative/vision/text_region.py` (vision negative-space so panel avoids the face) | Codex (gpt-5.6-sol, xhigh) | ✅ done | ✅ **re-judged ~80%** — CTA/text/blend fixed (rubric worked); C1 sharpened (panel still overflows face) |
+| — | **⏸ Visual design-tuning PAUSED** (Glo2Go v3, Simply Nikah, Island Cart visuals) — awaiting a real DESIGNER's feedback → drops into `DESIGN_RUBRIC.md`. Also asset-blocked: need Glo2Go logo file + brand font. | operator/designer | ⏸ held | resume when designer + brand assets arrive |
+| 09 | **M4 slice #1** — layered **SVG export** (editable `<text>` + named layers) from the Glo2Go creative → opens in Figma/Illustrator/Canva | Codex (gpt-5.6-sol, xhigh) | ✅ done, unstaged | ✅ **Claude-verified**: 6 named layers, live editable `<text>` (headline+CTA), embedded image, rasterizes faithfully, 2 tests |
 | 04 | **M2 R&D** `creative/references/gather.py` — reference-finder (keyless Openverse source) + CLI | Codex (gpt-5.6-sol, xhigh) | ✅ built + tested | ⛔ **Claude DECLINED Openverse results** — irrelevant CC-archive junk (impala for "skin clinic"). Finding: quality = **source problem**; `build_query` also over-stacks → 0 results. Next: swap source (Unsplash/Pexels/design) + fix query. Seam is ready. |
 
 _Codex output lands in `scratchpad/codex_run_*.log`; Claude reviews `git diff` before anything commits._
