@@ -1,4 +1,6 @@
-import type { JSX } from "react";
+"use client";
+
+import { useMemo, useState, type JSX } from "react";
 import Link from "next/link";
 import { navItems, workspaceName, type NavItem, type SidebarGroup } from "@/lib/view-models";
 import {
@@ -18,9 +20,11 @@ import {
 /**
  * Two-tier left navigation, per the reference:
  *  1. a slim icon rail (logo bubble, section glyphs, settings pinned bottom)
- *  2. a secondary sidebar (search + API-backed client rows with colored geometric
- *     markers; the active client gets a soft card highlight and a count badge).
- * Hidden on mobile (the TopBar renders a hamburger there).
+ *  2. a secondary sidebar (search filters the client rows; API-backed client rows
+ *     with colored geometric markers; the active client gets a soft card highlight
+ *     and a count badge).
+ * Hidden on mobile (the TopBar hamburger opens MobileNavDrawer, which reuses
+ * this component inside an off-canvas panel).
  *
  * Client groups are threaded in from the server component's API-backed data facade.
  */
@@ -39,6 +43,21 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
   const railItems = navItems.filter((item) => item.id !== "settings");
   const settings = navItems.find((item) => item.id === "settings");
   const hasClients = groups.some((group) => group.projects.length > 0);
+
+  // Search filters the client rows below it; empty groups drop out entirely.
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleGroups = useMemo(() => {
+    if (normalizedQuery === "") return groups;
+    return groups
+      .map((group) => ({
+        ...group,
+        projects: group.projects.filter((project) =>
+          project.name.toLowerCase().includes(normalizedQuery),
+        ),
+      }))
+      .filter((group) => group.projects.length > 0);
+  }, [groups, normalizedQuery]);
 
   return (
     <div className="side">
@@ -110,14 +129,21 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
           <SearchIcon />
           <input
             type="search"
-            placeholder="Search…"
-            aria-label="Search clients and jobs"
+            placeholder="Search clients…"
+            aria-label="Filter clients"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
           />
         </div>
 
         <div className="subbar__scroll">
-          {hasClients ? (
-            groups.map((group) => (
+          {hasClients && visibleGroups.length === 0 ? (
+            <div className="empty-state">
+              <p className="empty-state__title">No matches</p>
+              <p className="empty-state__body">No clients match “{query.trim()}”.</p>
+            </div>
+          ) : hasClients ? (
+            visibleGroups.map((group) => (
               <section key={group.id} className="subbar-group">
                 <h2 className="subbar-group__label">
                   <ChevronDownIcon size={12} />

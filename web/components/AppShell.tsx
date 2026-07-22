@@ -1,5 +1,8 @@
-import type { JSX, ReactNode } from "react";
+"use client";
+
+import { useCallback, useState, type JSX, type ReactNode } from "react";
 import type { SidebarData } from "@/lib/data";
+import { MobileNavDrawer } from "./MobileNavDrawer";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 
@@ -16,14 +19,25 @@ interface AppShellProps {
 /**
  * The dashboard chrome: left sidebar + top bar + main content region.
  * On mobile the sidebar collapses (see globals.css) and the TopBar hamburger
- * stands in for it.
+ * opens the off-canvas MobileNavDrawer, which reuses the same Sidebar content.
  */
 export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JSX.Element {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const openMobileNav = useCallback((): void => setMobileNavOpen(true), []);
+  const closeMobileNav = useCallback((): void => setMobileNavOpen(false), []);
+
   return (
     <div className="app-shell">
       <Sidebar groups={sidebar.groups} />
+      <MobileNavDrawer groups={sidebar.groups} open={mobileNavOpen} onClose={closeMobileNav} />
       <div className="app-main">
-        <TopBar activeClient={sidebar.activeClient} title={title} crumb={crumb} />
+        <TopBar
+          activeClient={sidebar.activeClient}
+          title={title}
+          crumb={crumb}
+          navOpen={mobileNavOpen}
+          onOpenNav={openMobileNav}
+        />
         <main className="app-content">{children}</main>
       </div>
     </div>

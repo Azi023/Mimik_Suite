@@ -17,15 +17,28 @@ interface TopBarProps {
   title?: string;
   /** Secondary crumb next to the title (omitted when not given). */
   crumb?: string;
+  /** True while the mobile nav drawer is open (drives aria-expanded). */
+  navOpen: boolean;
+  /** Opens the mobile nav drawer (hamburger tap; mobile only). */
+  onOpenNav: () => void;
 }
 
-export function TopBar({ activeClient, title = "Board", crumb }: TopBarProps): JSX.Element {
+export function TopBar({
+  activeClient,
+  title = "Board",
+  crumb,
+  navOpen,
+  onOpenNav,
+}: TopBarProps): JSX.Element {
   return (
     <header className="topbar">
       <button
         type="button"
         className="topbar__hamburger"
         aria-label="Open navigation menu"
+        aria-expanded={navOpen}
+        aria-controls="mobile-nav"
+        onClick={onOpenNav}
       >
         <MenuIcon />
       </button>
