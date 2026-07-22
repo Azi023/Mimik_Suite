@@ -39,16 +39,24 @@ gen-lang-client-*.json`). I RESTORED the ignore rules in the working tree (key i
 NOT commit `.gitignore` (you edited it deliberately — confirm intent). **Do not commit that key.** Also open QA:
 portal `/portal/session` leaks a raw PyJWT error; confirm PROD `JWT_SECRET` ≠ the published `.env.example` default.
 
-### ▶ EXACT NEXT ACTION — Wave 1 DONE (B-05 = `e8c5d79`); start W2
-- **Wave 1 complete:** B-01, imagery, text-chain, contracts (A-01+B-02), B-05 all committed + verified.
-- **W2 (parallel, disjoint):** **B-03** — creative lineage migration (`parent_id`/`created_by`/`revision_note` on
-  `creative_docs`; alembic up/down clean on local :5434; `repo.create_creative_doc` sets `version=parent+1`; new
-  `repo.list_creative_versions`; test `tests/test_creative_versions.py`) ∥ **A-02** — typed `/ops` responses
-  (`response_model=BoardResponse`/`list[BoardCard]` in `api/routers/ops.py`, identical JSON; keep the calendar
-  client-IDOR test green). Disjoint files → dispatch both to Codex in parallel.
-- **W3:** strict hot-file sequence B-04→B-06→B-07 (all edit `creative_generation.py` — NEVER parallel) ∥ A-10 (admin UI).
-- Per-task specs + full wave matrix: `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`. Write each Codex spec to `scratchpad/`,
-  reference the plan's task section, demand tests + live-verify, review the diff, then commit (phase-tagged).
+### ▶ EXACT NEXT ACTION — Wave 1 + Wave 2 DONE; start W3
+- **Wave 1 ✅:** B-01, imagery, text-chain, contracts (A-01+B-02 = `mimik-contracts@7fb1210`), B-05 (`e8c5d79`).
+- **Wave 2 ✅:** A-02 typed /ops (`de225f3`) · B-03 creative lineage (`afd5a33` — migration `c7e90f4a1b32`,
+  round-tripped on live :5434, generation still 200 on new schema).
+- **Local DB is now at head `c7e90f4a1b32`** (lineage columns applied). API run cmd unchanged.
+- **W3 — the hard wave. Strict hot-file sequence on `api/services/creative_generation.py` (NEVER parallel):**
+  1. **B-04** — versions + revert API (`GET /creatives/{id}/versions`, `POST /creatives/{id}/revert`); wire the
+     B-03 lineage kwargs into `revise_creative`'s create call. Touches `creatives.py` + `creative_generation.py`.
+  2. **B-06** — `revise_creative` speaks the typed `CanvasRevision` (contract already exists); `layer_ops` →
+     resolve `fill_role` against brand tokens → persist as L5 `layer_overrides` → `render_creative_svg(layer_overrides=)`
+     (B-05 is ready). Keep a BC shim for the old `{edits,instruction,params}` body.
+  3. **B-07** — guarded instruction interpreter (`creative/revision/interpreter.py`): keyword table FIRST, LLM behind
+     `REVISE_LLM=1`; **instruction is DATA in a fenced slot, injection degrades to keywords (locked #3) — review this
+     one hard.**
+  - ∥ **A-10** (admin UI + maybe `PATCH /admin/accounts`) — disjoint from the B-sequence; frontend piece runs on FABLE (#9).
+- Per-task specs + wave matrix: `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`. Pattern: write Codex spec to `scratchpad/`
+  referencing the plan's task section, demand tests + live-verify, review diff, commit phase-tagged. Codex CANNOT
+  reach the :5434 DB (sandbox) → YOU run alembic + live generation checks for any DB/route task.
 - **Hot file `api/services/creative_generation.py`** — NEVER dispatch two of {B-04,B-06,B-07,B-11,B-13,A-03} at once.
 - Codex dispatch: `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c approval_policy=never [-C <dir>] - < spec.md`.
   Sibling-repo tasks need `-C /Users/atheeque/workspace/mimik-contracts`. Codex logs → `scratchpad/codex_*.log`.
