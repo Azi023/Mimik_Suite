@@ -4,7 +4,85 @@
 
 ---
 
-## ► LATEST (2026-07-21) — ✅✅ MIMIK SUITE IS LIVE IN PRODUCTION
+## ► LATEST (2026-07-22) — CREATIVE ENGINE v2: LOCAL PRODUCT DOES THE FULL LOOP (built via multi-agent orchestration)
+
+**State: the local product is USABLE end-to-end.** onboard client → **Generate** a creative (topic → Pexels stock
++ Gemini-vision negative-space → on-brand render with designer rules) → **edit in-product** (inline text + "Ask AI
+to change" → re-renders as non-destructive versions) → **Download editable SVG + PSD** → **edit client details +
+brand brief**. All live-verified this session. **Production (VPS) intentionally UNTOUCHED** — hold deploy until the
+local product is polished (operator's call).
+
+### ▶ RUN LOCALLY (exact)
+- `docker compose up -d` (Postgres :5434, Redis :6381; migrated to head).
+- **API** (:8000) — env overrides force LOCAL + keys (do NOT rely on .env's prod block; uvicorn is NOT --reload, so
+  **restart after any API change** or new routes 404):
+  ```
+  set -a; source <(grep -E '^(PEXELS_API_KEY|GEMINI_API_KEY|GEMINI_TEXT_MODEL)=' .env); set +a
+  DATABASE_URL='postgresql+asyncpg://mimik:mimik@localhost:5434/mimik_suite' APP_ENV=dev IMAGE_BACKEND_PRIMARY=none \
+  PEXELS_API_KEY="$PEXELS_API_KEY" GEMINI_API_KEY="$GEMINI_API_KEY" .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000
+  ```
+- **Web** (:3000): `cd web && NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev`.
+  ⚠ **Blank/500 `Cannot find module './NNN.js'` = stale Next cache** → `rm -rf web/.next` + restart (hit this session).
+- **Auth = dev-token** (no login): `web/.env.local` NEXT_PUBLIC_DEV_TOKEN (30-day owner for tenant `2781790d…`).
+  Real Supabase login NOT wired locally (deferred). 3 clients seeded (`scripts/seed_profiles.py`, idempotent).
+- ⚠ **venv is a 3.13/3.14 split** → use `.venv/bin/python -m pip` (bare `.venv/bin/pip` installs to 3.14).
+
+### ▶ WORKS vs NOT (for the QA pass)
+- ✅ Only **Glo2Go (photo)** generates real imagery (Pexels). **Simply Nikah (illustration) + Island Cart (product)
+  imagery is UNWIRED** → placeholder render. Wiring their sources (AI-illustration / product-cutout) = top engine gap.
+- 🐛 Editor bugs: badge light/dark word-map inverted; AI instruction overrides an explicit text edit.
+- ⚠ PSD text is RASTERIZED (SVG is the live-text master; PSD-live-text skipped as too complex). 2 PSD tests fail under
+  the venv split (not a code regression).
+
+### ▶ ARCHITECTURE CHANGES (new)
+`creative/art_direction.py` (LLM art-director, prepends rubric) · `creative/style_profile.py` (StyleProfile schema,
+3 profiles) · `creative/render/glo2go_templates.py`+`glo2go_layout.py` (profile-driven + L1–L4 rules) ·
+`creative/export/svg.py` (**layered editable SVG = the master**) + `psd.py` (layered PSD, forced `raw`) ·
+`creative/references/gather.py` (multi-source: Openverse/Unsplash/Pexels + Pinterest/Dribbble/Behance/Envato stubs) ·
+`creative/vision/text_region.py` (Gemini negative-space) · **`creative/knowledge/`** = the M5 self-improving design
+brain (`design_rules.json` + `feedback.py`: record_feedback / rules_as_prompt_block). **API:** `POST /clients/{id}/
+creatives:generate`, GET latest/preview, `/exports/svg?creative_id`, `/creatives/{id}/export.psd`, `POST /creatives/
+{id}/revise`, `PATCH /clients/{id}` + `/brands/{id}`. **Web:** Board Generate, ReviewPanel editor (inline+Ask-AI+
+versions+downloads), `/clients/[id]/edit`, onboarding autosave.
+
+### ▶ R&D FINDINGS
+- **Pivot:** AI-photoreal-people + fixed bottom band = REJECTED (client design languages differ wildly) → per-client
+  **Style Profiles** + varied layouts + medium-aware sourcing.
+- **References = a SOURCE problem:** Openverse returns junk; **Pexels is good for photo clients**; illustration/product
+  need generated/cutout (encoded in each profile's `image_sources` ranking). Unsplash/Pexels keys in .env.
+- **Self-improving design brain works:** creative-head feedback (L1–L5) → rules → art-director obeys next render.
+
+### ▶ SECURITY HANDOFF
+- **Tenant/IDOR verified:** PATCH client/brand filter by tenant_id at the data layer → 404 cross-tenant (live-probed);
+  `test_tenant_isolation.py` green. Client "Ask AI" text = DATA (guarded revision_note), never a system prompt (locked #3).
+- **Secrets:** all keys in `.env` only (Pexels/Unsplash/Gemini/Supabase); `.env` + `web/.env.local` gitignored; nothing
+  secret committed. Dev-token = bootstrap shortcut; wire real Supabase login for role/persona QA.
+
+### ▶ KEY DOCS
+`docs/STYLE_PROFILES.md` (3-client build spec) · `docs/DESIGN_RUBRIC.md` (self-improving design brain) ·
+`docs/BUILD_STATUS.md` (full delegation ledger) · `docs/PLAN_EDITOR_AND_COMMAND_CENTER.md` (editor + Command Center) ·
+architecture artifact: https://claude.ai/code/artifact/43501966-31fd-4b7f-b42f-e8c9cec25cac
+
+### ▶ ORCHESTRATION MODEL (keep using)
+Brain = Claude/Opus (plan+spec+review). Executors: **Codex** `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh
+-s workspace-write -c approval_policy=never` (primary, ~15 clean tasks); **agy** (Antigravity/Gemini 3.1 Pro,
+`agy -p "<spec>" --mode accept-edits --dangerously-skip-permissions --print-timeout 30m`) for big chunks — ⚠ leaves
+stray `patch*.py`, sweep them. Executors never commit; Claude reviews every diff. Codex/agy quota = separate from Claude's.
+
+### ▶ NEXT SESSION (fresh) — the plan the operator wants
+1. **Full QA pass** of the local product (functionalities, personas, flows) — `multi-persona-qa-reviewer` agent fits.
+2. **Use Fable 5 to plan** → refine `PLAN_EDITOR_AND_COMMAND_CENTER.md` into execution-ready specs for (a) the
+   **Command Center** (cockpit: Kanban + calendar/SLA + generation queue + command bar + admin → execute via agy) and
+   (b) the **real-time canvas editor** (full toolset: drag/move layers, live text, palette, "mark & tell AI", client-
+   bounded, versions). Goal: smooth execution.
+3. **Wire imagery for Simply Nikah (illustration) + Island Cart (product-cutout)** so all 3 clients generate.
+4. Fix the 2 editor bugs; wire real Supabase login for persona QA; then deploy to production.
+
+### ▶ COMMITS THIS SESSION (main): 7f9557b, 70c0704, e437e39, b1d0814, 33f39ba, 5bff094, 76c8cdd, 908d011.
+
+---
+
+## ► (2026-07-21) — MIMIK SUITE LIVE IN PRODUCTION
 
 **https://suite.mimikcreations.com (login) + https://api.suite.mimikcreations.com (API) — both HTTPS, valid
 Let's Encrypt certs, verified 200.** DB = Supabase EU (session pooler :5432, cert-verified TLS via bundled
