@@ -21,7 +21,16 @@ from api.db import repo
 from api.db.mappers import to_job
 from api.db.session import get_session
 from api.services.approval_flow import ApprovalFlowError, submit_approval
-from mimik_contracts import Actor, ActorRole, ApprovalAction, Job, JobStatus
+from mimik_contracts import (
+    Actor,
+    ActorRole,
+    ApprovalAction,
+    BoardCard,
+    BoardResponse,
+    CalendarEntry,
+    Job,
+    JobStatus,
+)
 
 router = APIRouter(tags=["ops"])
 
@@ -68,11 +77,11 @@ def _actor_role(role: str) -> ActorRole:
         return ActorRole.TEAM
 
 
-def _card(job: Job, now: datetime) -> dict:
+def _card(job: Job, now: datetime) -> BoardCard:
     """A board/calendar card: the serialized Job plus the computed at-risk flag. `to_job`
     already re-attaches UTC to naive datetimes (see mappers._utc), so is_at_risk never mixes
     naive/aware datetimes."""
-    return {"job": job, "at_risk": job.is_at_risk(now)}
+    return BoardCard(job=job, at_risk=job.is_at_risk(now))
 
 
 def _transition_allowed(current: JobStatus, target: JobStatus) -> bool:
@@ -89,11 +98,11 @@ class TransitionRequest(BaseModel):
     creative_doc_id: str | None = None
 
 
-@router.get("/ops/board")
+@router.get("/ops/board", response_model=BoardResponse)
 async def board(
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> BoardResponse:
     """The Kanban board: every job grouped by status into a stable column order. Each card is
     `{"job": <Job>, "at_risk": bool}`; every column key is present even when empty."""
     now = _now()
@@ -103,20 +112,20 @@ async def board(
         principal.client_id if principal.role == ActorRole.CLIENT.value else None
     )
     rows = await repo.list_jobs(session, tenant_id=principal.tenant_id, client_id=client_filter)
-    columns: dict[str, list[dict]] = {status.value: [] for status in _COLUMN_ORDER}
+    columns: dict[JobStatus, list[BoardCard]] = {status: [] for status in _COLUMN_ORDER}
     for row in rows:
         job = to_job(row)
-        columns[job.status.value].append(_card(job, now))
-    return {"columns": columns}
+        columns[job.status].append(_card(job, now))
+    return BoardResponse(columns=columns)
 
 
-@router.get("/ops/calendar")
+@router.get("/ops/calendar", response_model=list[CalendarEntry])
 async def calendar(
     start: datetime | None = None,
     end: datetime | None = None,
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_session),
-) -> list[dict]:
+) -> list[BoardCard]:
     """Jobs whose publish_date falls in [start, end]. Defaults to a 30-day window from now."""
     now = _now()
     if start is None:
@@ -134,13 +143,13 @@ async def calendar(
     return [_card(to_job(row), now) for row in rows]
 
 
-@router.post("/ops/jobs/{job_id}/transition")
+@router.post("/ops/jobs/{job_id}/transition", response_model=dict[str, object])
 async def transition(
     job_id: str,
     body: TransitionRequest,
     principal: Principal = Depends(require_role("owner", "ops", "designer", "team")),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, object]:
     """Move a card. Team roles only. →Approved converges on the shared approval procedure so the
     auto-archive side-effect fires; every other move validates the transition then sets status."""
     row = await repo.get_job(session, tenant_id=principal.tenant_id, job_id=job_id)

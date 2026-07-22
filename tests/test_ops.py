@@ -14,7 +14,10 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+from api.core.auth import Principal, get_principal
+from api.main import app
 from api.services import approval_flow
+from mimik_contracts import BoardCard, BoardResponse, CalendarEntry
 
 
 @pytest.fixture(autouse=True)
@@ -81,13 +84,32 @@ async def _add_creative(client: AsyncClient, owner: str, job_id: str) -> str:
     return resp.json()["id"]
 
 
+def test_ops_openapi_names_contract_response_models() -> None:
+    schema = app.openapi()
+    schemas = schema["components"]["schemas"]
+
+    assert {"BoardCard", "BoardResponse", "CalendarEntry"} <= schemas.keys()
+    board_schema = schema["paths"]["/ops/board"]["get"]["responses"]["200"]["content"]
+    assert board_schema["application/json"]["schema"]["$ref"].endswith("/BoardResponse")
+    calendar_schema = schema["paths"]["/ops/calendar"]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]
+    assert calendar_schema["items"]["$ref"].endswith("/CalendarEntry")
+
+
 async def test_board_groups_jobs_by_status_with_all_columns(client: AsyncClient) -> None:
     owner, _client_id, brand_id = await _bootstrap(client)
     draft_job = await _make_job(client, owner, brand_id, title="Draft one")
     review_job = await _make_job(client, owner, brand_id, title="In review")
     await _add_creative(client, owner, review_job)  # -> internal_review
 
-    board = (await client.get("/ops/board", headers=_auth(owner))).json()
+    response = await client.get("/ops/board", headers=_auth(owner))
+    assert response.status_code == 200, response.text
+    board = response.json()
+    validated = BoardResponse.model_validate(board)
+
+    assert validated.model_dump(mode="json") == board
+    assert set(board) == {"columns"}
     columns = board["columns"]
 
     # Every JobStatus is present as a stable column, even when empty.
@@ -105,8 +127,17 @@ async def test_board_groups_jobs_by_status_with_all_columns(client: AsyncClient)
     review_ids = [c["job"]["id"] for c in columns["internal_review"]]
     assert draft_job in draft_ids
     assert review_job in review_ids
-    # Cards carry an at_risk flag.
-    assert all("at_risk" in card for card in columns["draft"])
+    # Contract typing must not change the existing card wire keys.
+    assert all(
+        set(card) == {"job", "at_risk"}
+        for column in columns.values()
+        for card in column
+    )
+    assert all(
+        isinstance(BoardCard.model_validate(card), BoardCard)
+        for column in columns.values()
+        for card in column
+    )
 
 
 async def test_board_at_risk_flag_true_when_buffer_breached_and_false_once_approved(
@@ -156,10 +187,69 @@ async def test_calendar_returns_only_in_window_jobs(client: AsyncClient) -> None
     )
     assert resp.status_code == 200, resp.text
     cards = resp.json()
+    assert all(isinstance(CalendarEntry.model_validate(card), CalendarEntry) for card in cards)
     ids = [c["job"]["id"] for c in cards]
     assert in_window in ids
     assert out_window not in ids
     assert no_date not in ids  # no publish_date -> never on the calendar
+
+
+async def test_client_principal_sees_only_own_jobs_on_board_and_calendar(
+    client: AsyncClient,
+) -> None:
+    owner, client_a_id, brand_a_id = await _bootstrap(client)
+    client_b_id = (
+        await client.post("/clients", json={"name": "Client B"}, headers=_auth(owner))
+    ).json()["id"]
+    brand_b_id = (
+        await client.post(
+            "/brands",
+            json={"client_id": client_b_id, "name": "Brand B", "slug": "brand-b"},
+            headers=_auth(owner),
+        )
+    ).json()["id"]
+    now = datetime.now(timezone.utc)
+    publish_date = (now + timedelta(days=5)).isoformat()
+    job_a = await _make_job(
+        client, owner, brand_a_id, title="Client A job", publish_date=publish_date
+    )
+    job_b = await _make_job(
+        client, owner, brand_b_id, title="Client B job", publish_date=publish_date
+    )
+    tenant_id = (await client.get(f"/jobs/{job_a}", headers=_auth(owner))).json()[
+        "tenant_id"
+    ]
+
+    async def _client_a_principal() -> Principal:
+        return Principal(tenant_id=tenant_id, role="client", client_id=client_a_id)
+
+    app.dependency_overrides[get_principal] = _client_a_principal
+    try:
+        board_response = await client.get("/ops/board", headers=_auth(owner))
+        calendar_response = await client.get(
+            "/ops/calendar",
+            params={
+                "start": now.isoformat(),
+                "end": (now + timedelta(days=30)).isoformat(),
+            },
+            headers=_auth(owner),
+        )
+    finally:
+        app.dependency_overrides.pop(get_principal, None)
+
+    assert board_response.status_code == 200, board_response.text
+    board_ids = {
+        card["job"]["id"]
+        for column in board_response.json()["columns"].values()
+        for card in column
+    }
+    assert board_ids == {job_a}
+    assert job_b not in board_ids
+
+    assert calendar_response.status_code == 200, calendar_response.text
+    calendar_ids = {card["job"]["id"] for card in calendar_response.json()}
+    assert calendar_ids == {job_a}
+    assert job_b not in calendar_ids
 
 
 async def test_calendar_rejects_start_after_end(client: AsyncClient) -> None:
