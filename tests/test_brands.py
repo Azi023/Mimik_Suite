@@ -107,6 +107,46 @@ async def test_patch_brand_tokens_persists_layout(client: AsyncClient) -> None:
     assert fetched.json()["tokens"]["colors"][0]["hex"] == "#111111"
 
 
+async def test_patch_brand_brief_returns_updated_fields(client: AsyncClient) -> None:
+    token = await _new_tenant(client)
+    brand_id = await _new_brand(client, token)
+    original_tokens = {
+        "colors": [{"name": "Ink", "hex": "#111111", "usage": "Text"}],
+        "typography": {"heading_font": "Fraunces", "body_font": "Inter", "hierarchy": []},
+        "logo": {"ref": None, "clear_space": None, "min_size_px": 24, "assessment": "usable"},
+    }
+    seeded = await client.patch(
+        f"/brands/{brand_id}", json=original_tokens, headers=_auth(token)
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    updated = await client.patch(
+        f"/brands/{brand_id}",
+        json={
+            "niche": "Boutique skincare clinic",
+            "target_audience": "Professionals who research before booking",
+            "brand_voice": "Warm, precise, quietly confident",
+            "tone_keywords": ["warm", "expert", "clear"],
+            "imagery_style": "Natural light on tactile paper grounds",
+            "dos": ["Use specific outcomes"],
+            "donts": ["Use stock gradients"],
+            "tokens": {
+                "colors": [{"name": "Rose", "hex": "#C9828A", "usage": "Accent"}]
+            },
+        },
+        headers=_auth(token),
+    )
+
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["niche"] == "Boutique skincare clinic"
+    assert body["tone_keywords"] == ["warm", "expert", "clear"]
+    assert body["tokens"]["colors"][0]["hex"] == "#C9828A"
+    assert body["tokens"]["typography"]["heading_font"] == "Fraunces"
+    fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token))
+    assert fetched.json()["donts"] == ["Use stock gradients"]
+
+
 async def test_patch_brand_rejects_out_of_range_layout(client: AsyncClient) -> None:
     token = await _new_tenant(client)
     bid = await _new_brand(client, token)
@@ -126,3 +166,19 @@ async def test_patch_brand_tokens_idor(client: AsyncClient) -> None:
         f"/brands/{a_bid}", json={"colors": []}, headers=_auth(token_b)
     )
     assert resp.status_code == 404, "IDOR: tenant B edited tenant A's brand!"
+
+
+async def test_patch_brand_brief_idor(client: AsyncClient) -> None:
+    token_a = await _new_tenant(client, slug="agency-a")
+    token_b = await _new_tenant(client, slug="agency-b")
+    brand_id = await _new_brand(client, token_a)
+
+    leaked = await client.patch(
+        f"/brands/{brand_id}",
+        json={"brand_voice": "Tenant B's voice"},
+        headers=_auth(token_b),
+    )
+
+    assert leaked.status_code == 404, "IDOR: tenant B edited tenant A's brand brief!"
+    fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token_a))
+    assert fetched.json()["brand_voice"] is None

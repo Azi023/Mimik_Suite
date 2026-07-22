@@ -126,10 +126,11 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
                 <ul className="subbar-group__list">
                   {group.projects.map((project) => (
                     <li key={`${group.id}-${project.id}`}>
-                      <button
-                        type="button"
+                      <Link
+                        href={`/clients/${encodeURIComponent(project.id)}/edit`}
                         className={`project-row${project.active ? " project-row--active" : ""}`}
                         aria-current={project.active ? "true" : undefined}
+                        aria-label={`Edit ${project.name}`}
                       >
                         <span
                           className={`project-row__shape shape--${project.tone}`}
@@ -146,7 +147,7 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
                             {project.count}
                           </span>
                         )}
-                      </button>
+                      </Link>
                     </li>
                   ))}
                 </ul>

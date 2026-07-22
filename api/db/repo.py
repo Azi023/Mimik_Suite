@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -65,6 +65,23 @@ async def get_client(session: AsyncSession, *, tenant_id: str, client_id: str) -
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def update_client(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    client_id: str,
+    **fields: object,
+) -> ClientRow | None:
+    """Update one client without ever resolving it outside the caller's tenant."""
+    stmt = (
+        update(ClientRow)
+        .where(ClientRow.id == client_id, ClientRow.tenant_id == tenant_id)
+        .values(**fields)
+        .returning(ClientRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def list_clients(session: AsyncSession, *, tenant_id: str) -> list[ClientRow]:
     stmt = select(ClientRow).where(ClientRow.tenant_id == tenant_id).order_by(ClientRow.created_at)
     return list((await session.execute(stmt)).scalars())
@@ -91,6 +108,23 @@ async def create_brand(session: AsyncSession, *, tenant_id: str, **fields) -> Br
 
 async def get_brand(session: AsyncSession, *, tenant_id: str, brand_id: str) -> BrandRow | None:
     stmt = select(BrandRow).where(BrandRow.id == brand_id, BrandRow.tenant_id == tenant_id)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def update_brand(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    brand_id: str,
+    **fields: object,
+) -> BrandRow | None:
+    """Update one brand without ever resolving it outside the caller's tenant."""
+    stmt = (
+        update(BrandRow)
+        .where(BrandRow.id == brand_id, BrandRow.tenant_id == tenant_id)
+        .values(**fields)
+        .returning(BrandRow)
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 

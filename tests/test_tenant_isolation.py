@@ -42,6 +42,33 @@ async def test_client_crud_happy_path(client: AsyncClient) -> None:
     assert fetched.json()["name"] == "RCD Central"
 
 
+async def test_patch_client_returns_updated_fields(client: AsyncClient) -> None:
+    _, token = await _new_tenant(client, "Mimik", "mimik")
+    created = await client.post(
+        "/clients",
+        json={"name": "RCD Central", "industry": "healthcare"},
+        headers=_auth(token),
+    )
+    client_id = created.json()["id"]
+
+    updated = await client.patch(
+        f"/clients/{client_id}",
+        json={
+            "name": "RCD Studio",
+            "industry": "Healthcare and wellness",
+            "contact_email": "team@rcd.example",
+        },
+        headers=_auth(token),
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["name"] == "RCD Studio"
+    assert updated.json()["industry"] == "Healthcare and wellness"
+    assert updated.json()["contact_email"] == "team@rcd.example"
+    fetched = await client.get(f"/clients/{client_id}", headers=_auth(token))
+    assert fetched.json()["name"] == "RCD Studio"
+
+
 async def test_idor_client_read_blocked_across_tenants(client: AsyncClient) -> None:
     _, token_a = await _new_tenant(client, "Agency A", "a")
     _, token_b = await _new_tenant(client, "Agency B", "b")
@@ -59,6 +86,25 @@ async def test_idor_client_read_blocked_across_tenants(client: AsyncClient) -> N
     # Tenant B's listing must not include tenant A's data.
     b_list = await client.get("/clients", headers=_auth(token_b))
     assert b_list.json() == []
+
+
+async def test_idor_client_patch_blocked_across_tenants(client: AsyncClient) -> None:
+    _, token_a = await _new_tenant(client, "Agency A", "a")
+    _, token_b = await _new_tenant(client, "Agency B", "b")
+    created = await client.post(
+        "/clients", json={"name": "A's client"}, headers=_auth(token_a)
+    )
+    client_id = created.json()["id"]
+
+    leaked = await client.patch(
+        f"/clients/{client_id}",
+        json={"name": "Tenant B took over"},
+        headers=_auth(token_b),
+    )
+
+    assert leaked.status_code == 404, "IDOR: tenant B edited tenant A's client!"
+    fetched = await client.get(f"/clients/{client_id}", headers=_auth(token_a))
+    assert fetched.json()["name"] == "A's client"
 
 
 async def test_brand_cannot_attach_to_another_tenants_client(client: AsyncClient) -> None:

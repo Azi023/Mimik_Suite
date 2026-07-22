@@ -7,6 +7,7 @@ import type { ApiPillarPreset } from "@/lib/api";
 import { useUnsavedGuard } from "@/lib/hooks";
 import { ChipsInput } from "@/components/ChipsInput";
 import { CheckIcon } from "@/components/icons";
+import { OnboardingField as Field, OnboardingSectionTitle as SectionTitle } from "@/components/OnboardingFields";
 import {
   DRAFT_STORAGE_KEY,
   IMAGERY_MEDIA,
@@ -633,33 +634,6 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
 
 function StepBody({ children }: { children: React.ReactNode }): JSX.Element {
   return <div className="wiz__body">{children}</div>;
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }): JSX.Element {
-  return <h2 className="wiz-section-title">{children}</h2>;
-}
-
-function Field({
-  label,
-  hint,
-  required,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  required?: boolean;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <label className="wiz-field">
-      <span className="wiz-field__label">
-        {label}
-        {required === true && <span className="wiz-field__req"> *</span>}
-      </span>
-      {hint !== undefined && <span className="wiz-field__hint">{hint}</span>}
-      {children}
-    </label>
-  );
 }
 
 function ReviewGroup({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {

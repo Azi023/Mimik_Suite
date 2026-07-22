@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.auth import Principal, get_principal, is_client_in_scope, require_role
@@ -33,6 +33,14 @@ class CreateClient(BaseModel):
     website_url: str | None = None
     instagram: str | None = None
     notes: str | None = None
+
+
+class UpdateClient(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    industry: str | None = None
+    contact_email: EmailStr | None = None
 
 
 @router.post("", response_model=Client, status_code=201)
@@ -75,6 +83,35 @@ async def get_client(
     # so it cannot even confirm the other client exists (bounded portal, constraint #2).
     if principal.role == ActorRole.CLIENT.value and row.id != principal.client_id:
         raise HTTPException(status_code=404, detail="Client not found")
+    return to_client(row)
+
+
+@router.patch("/{client_id}", response_model=Client)
+async def update_client(
+    client_id: str,
+    body: UpdateClient,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> Client:
+    fields = body.model_dump(exclude_unset=True)
+    if fields.get("name") is None and "name" in fields:
+        raise HTTPException(status_code=422, detail="Client name cannot be null")
+    if fields:
+        row = await repo.update_client(
+            session,
+            tenant_id=principal.tenant_id,
+            client_id=client_id,
+            **fields,
+        )
+    else:
+        row = await repo.get_client(
+            session,
+            tenant_id=principal.tenant_id,
+            client_id=client_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    await session.commit()
     return to_client(row)
 
 

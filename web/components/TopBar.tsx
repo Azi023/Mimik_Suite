@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import Link from "next/link";
 import type { Client } from "@/lib/view-models";
 import { ThemeToggle } from "./ThemeToggle";
 import { ChevronDownIcon, PlusIcon } from "./icons";
@@ -46,7 +47,11 @@ export function TopBar({ activeClient, title = "Board", crumb }: TopBarProps): J
           <span>No clients yet</span>
         </button>
       ) : (
-        <button type="button" className="client-chip">
+        <Link
+          href={`/clients/${encodeURIComponent(activeClient.id)}/edit`}
+          className="client-chip"
+          aria-label={`Edit ${activeClient.name} client and brand brief`}
+        >
           <span className="client-chip__dot" aria-hidden="true" />
           <span>
             {activeClient.name} · {activeClient.vertical}
@@ -54,7 +59,7 @@ export function TopBar({ activeClient, title = "Board", crumb }: TopBarProps): J
           <span className="client-chip__caret" aria-hidden="true">
             <ChevronDownIcon size={12} />
           </span>
-        </button>
+        </Link>
       )}
 
       <ThemeToggle />

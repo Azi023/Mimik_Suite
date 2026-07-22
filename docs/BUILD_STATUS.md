@@ -83,7 +83,10 @@ _Codex output lands in `scratchpad/codex_run_*.log`; Claude reviews `git diff` b
 - **RULES** ✅ committed `33f39ba` (L1–L4 in glo2go templates + svg + art-director reads rubric).
 - **GEN** ✅ committed `5bff094` + **verified LIVE**: `POST /clients/{id}/creatives:generate` works end-to-end (topic→Pexels→vision→render→persist); generated a real Glo2Go creative through the product, downloadable .svg. **Studio is now USABLE** (Generate + Download on the Board).
 - **EDITOR** ▶ dispatched to **agy** (Antigravity/Gemini 3.1 Pro, first real agy run): v1 in-product editor — inline text edit + "Ask AI to change" (`POST /creatives/{id}/revise`, non-destructive versions) + layout toolbar. Claude reviews.
-- **Queued (wave 2, after editor — shares web files):** upload existing script-creatives into the Board; brand-brief + client-detail editing.
+- **EDITOR** ✅ committed `76c8cdd` + **verified LIVE**: `/revise` → "move panel right" repositioned panel + re-drafted copy as a new non-destructive version. Minor: badge word-map inverted; instruction overrides explicit edit (queued fix). Note: agy left stray `patch*.py` (cleaned).
+- **"Upload old creatives"** → moot: Board now populated by real *generated* creatives (Glo2Go + revised version live, editable); old script AI-photos were the rejected approach.
+- **CLIENT/BRAND EDIT** ▶ dispatched (Codex): PATCH client + brand-brief, tenant/IDOR-safe, in-product edit surface.
+- **Next:** Command Center (→ agy, needs full spec) → deploy.
 
 ---
 

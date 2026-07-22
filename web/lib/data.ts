@@ -7,6 +7,7 @@
  */
 
 import {
+  type ApiBrand,
   type ApiBoardCard,
   type ApiBoardResponse,
   type ApiClient,
@@ -15,7 +16,10 @@ import {
   type ApiJob,
   type ApiJobStatus,
   fetchBoard,
+  getBrand,
+  getClient,
   isApiConfigured,
+  listBriefs,
   listClients,
   listCreatives,
   listPillars,
@@ -46,6 +50,12 @@ export interface BoardData {
 export interface SidebarData {
   groups: SidebarGroup[];
   activeClient: Client | null;
+}
+
+/** Prefilled values for the client details + brand brief editor. */
+export interface ClientBrandEditData {
+  client: ApiClient;
+  brand: ApiBrand | null;
 }
 
 /* ---------------------------------------------------------------------------
@@ -298,8 +308,11 @@ function toActiveClient(client: ApiClient): Client {
 function toSidebarGroups(
   clients: ApiClient[],
   counts: ReadonlyMap<string, number>,
+  selectedClientId?: string,
 ): SidebarGroup[] {
-  const activeId = clients[0]?.id;
+  const activeId = clients.some((client) => client.id === selectedClientId)
+    ? selectedClientId
+    : clients[0]?.id;
   const all = clients.map((client) =>
     toSidebarProject(client, counts.get(client.id) ?? 0, client.id === activeId),
   );
@@ -310,8 +323,36 @@ function emptySidebarData(): SidebarData {
   return { groups: [], activeClient: null };
 }
 
+/** Load the selected client and the brand attached to its latest brief. */
+export async function getClientBrandEditData(
+  clientId: string,
+  sessionToken?: string,
+): Promise<ClientBrandEditData | null> {
+  if (!isApiConfigured(sessionToken)) {
+    return null;
+  }
+  try {
+    const [client, briefs] = await Promise.all([
+      getClient(clientId, sessionToken),
+      listBriefs(clientId, sessionToken),
+    ]);
+    const latestBrief = briefs[briefs.length - 1];
+    const brand =
+      latestBrief === undefined ? null : await getBrand(latestBrief.brand_id, sessionToken);
+    return { client, brand };
+  } catch (error) {
+    console.warn(
+      `[mimik-web] Client edit data unavailable; rendering a not-found state (${String(error)})`,
+    );
+    return null;
+  }
+}
+
 /** The sidebar + top-bar client chip's API-backed data entrypoint. */
-export async function getSidebarData(sessionToken?: string): Promise<SidebarData> {
+export async function getSidebarData(
+  sessionToken?: string,
+  selectedClientId?: string,
+): Promise<SidebarData> {
   if (!isApiConfigured(sessionToken)) {
     return emptySidebarData();
   }
@@ -324,9 +365,10 @@ export async function getSidebarData(sessionToken?: string): Promise<SidebarData
       return emptySidebarData();
     }
     const counts = jobCountsByClient(board);
+    const activeClient = clients.find((client) => client.id === selectedClientId) ?? clients[0];
     return {
-      groups: toSidebarGroups(clients, counts),
-      activeClient: toActiveClient(clients[0]),
+      groups: toSidebarGroups(clients, counts, selectedClientId),
+      activeClient: toActiveClient(activeClient),
     };
   } catch (error) {
     console.warn(

@@ -514,9 +514,49 @@ export function listClients(sessionToken?: string): Promise<ApiClient[]> {
   return apiGet<ApiClient[]>("/clients", sessionToken);
 }
 
+/** GET /clients/{id} — one tenant-scoped client. */
+export function getClient(clientId: string, sessionToken?: string): Promise<ApiClient> {
+  return apiGet<ApiClient>(`/clients/${encodeURIComponent(clientId)}`, sessionToken);
+}
+
+export interface UpdateClientBody {
+  name?: string;
+  industry?: string | null;
+  contact_email?: string | null;
+}
+
+/** PATCH /clients/{id} — update the editable client details. */
+export function updateClient(
+  clientId: string,
+  body: UpdateClientBody,
+  sessionToken?: string,
+): Promise<ApiClient> {
+  return apiPatch<ApiClient>(`/clients/${encodeURIComponent(clientId)}`, body, sessionToken);
+}
+
 /** GET /brands/{id}. */
 export function getBrand(brandId: string, sessionToken?: string): Promise<ApiBrand> {
   return apiGet<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, sessionToken);
+}
+
+export interface UpdateBrandBriefBody {
+  niche?: string | null;
+  target_audience?: string | null;
+  brand_voice?: string | null;
+  tone_keywords?: string[];
+  imagery_style?: string | null;
+  dos?: string[];
+  donts?: string[];
+  tokens?: { colors: ApiColorRole[] };
+}
+
+/** PATCH /brands/{id} — update brief fields and palette colors without replacing other tokens. */
+export function updateBrandBrief(
+  brandId: string,
+  body: UpdateBrandBriefBody,
+  sessionToken?: string,
+): Promise<ApiBrand> {
+  return apiPatch<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, body, sessionToken);
 }
 
 /** GET /jobs — optionally filtered to one client. */
