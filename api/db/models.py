@@ -194,6 +194,9 @@ class CreativeDocRow(Base):
     job_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
     manifest: Mapped[dict] = mapped_column(JSON, default=dict)
     version: Mapped[int] = mapped_column(default=1)
+    parent_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    revision_note: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

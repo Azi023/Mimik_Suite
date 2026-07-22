@@ -314,8 +314,34 @@ async def get_invitation_by_email(
 
 
 # --- CreativeDoc ---
-async def create_creative_doc(session: AsyncSession, *, tenant_id: str, **fields) -> CreativeDocRow:
-    row = CreativeDocRow(tenant_id=tenant_id, **fields)
+async def create_creative_doc(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    parent_id: str | None = None,
+    created_by: dict | None = None,
+    revision_note: str | None = None,
+    **fields,
+) -> CreativeDocRow:
+    if parent_id is not None:
+        stmt = select(CreativeDocRow).where(
+            CreativeDocRow.id == parent_id,
+            CreativeDocRow.tenant_id == tenant_id,
+        )
+        parent = (await session.execute(stmt)).scalar_one_or_none()
+        if parent is None:
+            raise ValueError(
+                f"Parent creative document {parent_id!r} was not found in tenant {tenant_id!r}"
+            )
+        fields["version"] = parent.version + 1
+
+    row = CreativeDocRow(
+        tenant_id=tenant_id,
+        parent_id=parent_id,
+        created_by=created_by,
+        revision_note=revision_note,
+        **fields,
+    )
     session.add(row)
     await session.flush()
     return row
@@ -337,6 +363,17 @@ async def list_creative_docs(
         select(CreativeDocRow)
         .where(CreativeDocRow.tenant_id == tenant_id, CreativeDocRow.job_id == job_id)
         .order_by(CreativeDocRow.created_at)
+    )
+    return list((await session.execute(stmt)).scalars())
+
+
+async def list_creative_versions(
+    session: AsyncSession, *, tenant_id: str, job_id: str
+) -> list[CreativeDocRow]:
+    stmt = (
+        select(CreativeDocRow)
+        .where(CreativeDocRow.tenant_id == tenant_id, CreativeDocRow.job_id == job_id)
+        .order_by(CreativeDocRow.version.asc())
     )
     return list((await session.execute(stmt)).scalars())
 
