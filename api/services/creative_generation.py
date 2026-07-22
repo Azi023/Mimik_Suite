@@ -21,6 +21,12 @@ from api.db import repo
 from api.db.mappers import to_brand, to_creative_doc
 from api.db.models import CreativeDocRow, JobRow
 from creative import art_direction
+from creative.adapters import (
+    ImageGenerationFailed,
+    ImageRequest,
+    PaidImageSpendNotApproved,
+    generate_with_fallback,
+)
 from creative.copy import l0 as copy_l0
 from creative.export import svg as svg_export
 from creative.pipeline import build_manifest
@@ -180,37 +186,91 @@ async def _source_image(
     *,
     brand: Brand,
     industry: str | None,
+    pillar: str,
     topic: str,
+    format_key: str,
     profile: StyleProfile | None,
     destination_dir: Path,
+    image_request: ImageRequest | None = None,
 ) -> tuple[Path, list[str], str]:
-    first_source = profile.image_sources[0] if profile and profile.image_sources else None
-    if first_source == ImageSource.LICENSED_STOCK:
-        niche = brand.niche or industry or brand.name
-        query = reference_gather.build_query(
-            niche=niche,
-            medium="photography",
-            keywords=[topic],
-        )
-        candidates = await reference_gather.gather_references(query, limit=1, source="pexels")
-        if not candidates:
-            raise RuntimeError("Pexels returned no imagery for this topic")
-        candidate = candidates[0]
-        image_path = await asyncio.to_thread(
-            _download_pexels_photo,
-            candidate.url,
-            destination_dir,
-        )
-        return image_path, [candidate.url], "licensed_stock"
+    sources = profile.image_sources if profile is not None else []
+    for source in sources:
+        if source == ImageSource.LICENSED_STOCK:
+            niche = brand.niche or industry or brand.name
+            query = reference_gather.build_query(
+                niche=niche,
+                medium="photography",
+                keywords=[topic],
+            )
+            candidates = await reference_gather.gather_references(
+                query,
+                limit=1,
+                source="pexels",
+            )
+            if not candidates:
+                logger.warning(
+                    "image source licensed_stock returned no candidates for profile=%s",
+                    profile.id,
+                )
+                continue
+            candidate = candidates[0]
+            image_path = await asyncio.to_thread(
+                _download_pexels_photo,
+                candidate.url,
+                destination_dir,
+            )
+            return image_path, [candidate.url], "licensed_stock"
 
-    # TODO: replace this brand-ground plate with AI illustration/product-cutout adapters
-    # once those media are operator-approved for first-class generation.
+        if source in {ImageSource.AI_ILLUSTRATION, ImageSource.AI_REALISTIC}:
+            try:
+                request = image_request
+                if request is None:
+                    request = await asyncio.to_thread(
+                        art_direction.build_image_request,
+                        brand,
+                        pillar,
+                        topic,
+                        PRESETS[format_key].label,
+                        PRESETS[format_key].width,
+                        PRESETS[format_key].height,
+                        template_key="centered_hero",
+                        profile_id=profile.id,
+                    )
+                result = await generate_with_fallback(request, purpose="hero")
+                if result is None:
+                    logger.warning(
+                        "image source %s unavailable for profile=%s: no backend configured",
+                        source.value,
+                        profile.id,
+                    )
+                    continue
+                destination = destination_dir / "source.png"
+                await asyncio.to_thread(shutil.copyfile, result.artifact_ref, destination)
+            except (
+                PaidImageSpendNotApproved,
+                ImageGenerationFailed,
+                OSError,
+                RuntimeError,
+            ) as exc:
+                logger.warning(
+                    "image source %s unavailable for profile=%s: %s",
+                    source.value,
+                    profile.id,
+                    exc,
+                )
+                continue
+            return destination, [], source.value
+
+        if source in {ImageSource.GENERATED_VECTOR, ImageSource.PRODUCT_CUTOUT}:
+            # TODO(engine): generated-vector library / product-cutout upload pipeline
+            continue
+
     ground = brand_color(brand, "ground", "#F5F6F8")
     return _solid_placeholder(destination_dir, ground), [], "brand_placeholder"
 
 
 async def _safe_text_region(image_path: Path, *, source_kind: str) -> str | None:
-    if source_kind != "licensed_stock":
+    if source_kind not in {"licensed_stock", "ai_realistic"}:
         return None
     try:
         result = await vision_text_region.find_text_region(str(image_path))
@@ -476,20 +536,6 @@ async def generate_client_creative(
     artifact_dir.mkdir(parents=True, exist_ok=False)
 
     try:
-        image_path, reference_urls, source_kind = await _source_image(
-            brand=brand,
-            industry=client.industry,
-            topic=topic,
-            profile=profile,
-            destination_dir=artifact_dir,
-        )
-        copy_block = await asyncio.to_thread(
-            copy_l0.draft_copy,
-            brand,
-            pillar,
-            topic,
-            body.format_key,
-        )
         art_request = await asyncio.to_thread(
             art_direction.build_image_request,
             brand,
@@ -501,6 +547,30 @@ async def generate_client_creative(
             template_key="centered_hero",
             profile_id=profile_id,
         )
+        image_path, reference_urls, source_kind = await _source_image(
+            brand=brand,
+            industry=client.industry,
+            pillar=pillar,
+            topic=topic,
+            format_key=body.format_key,
+            profile=profile,
+            destination_dir=artifact_dir,
+            image_request=art_request,
+        )
+        try:
+            copy_block = await asyncio.to_thread(
+                copy_l0.draft_copy,
+                brand,
+                pillar,
+                topic,
+                body.format_key,
+            )
+        except (copy_l0.CopyDraftError, OSError) as exc:
+            # The copy LLM (free Gemini tier) can 429/fail; don't fail the whole generation.
+            # Fall back to a deterministic draft from the topic so the creative still ships
+            # with real imagery + editable copy (a human refines it — assisted autonomy).
+            logger.warning("generate: copy draft failed (%s); using topic fallback", exc)
+            copy_block = CopyBlock(headline=topic, source_model="fallback")
         text_region = await _safe_text_region(image_path, source_kind=source_kind)
         l1_params = {
             **art_request.params,
@@ -579,6 +649,7 @@ async def generate_client_creative(
         shutil.rmtree(artifact_dir, ignore_errors=True)
         raise
     except (OSError, RuntimeError, ValueError) as exc:
+        logger.exception("generate_client_creative failed")
         await session.rollback()
         shutil.rmtree(artifact_dir, ignore_errors=True)
         raise HTTPException(status_code=502, detail="Creative generation failed") from exc

@@ -22,6 +22,7 @@ from mimik_contracts import Brand, ColorRole
 from creative.adapters.base import ImageRequest
 from creative.knowledge.feedback import rules_as_prompt_block
 from creative.prompting import default_generate, parse_json_reply
+from creative.style_profile import get_style_profile
 
 # Where each template lays its text, so the art-director keeps that zone calm for the overlay.
 _TEXT_ZONE_HINT: dict[str, str] = {
@@ -84,6 +85,20 @@ def _instruction(context: str, rules: str) -> str:
     )
 
 
+def _profile_constraints(profile_id: str) -> str:
+    try:
+        profile = get_style_profile(profile_id)
+    except ValueError:
+        return ""
+    guardrails = "\n".join(f"- {guardrail}" for guardrail in profile.hard_guardrails)
+    return (
+        f"PROFILE MEDIUM (mandatory): {profile.medium}\n"
+        "PROFILE HARD GUARDRAILS (mandatory for the finished creative; layout and "
+        "wordmark instructions are downstream compositor constraints, not content to render "
+        f"in this background plate):\n{guardrails}"
+    )
+
+
 def _fallback_prompt(
     brand: Brand,
     pillar_name: str,
@@ -119,8 +134,12 @@ def build_image_request(
     """Art-direct one background plate → ImageRequest. Uses the free Gemini text seam as the
     art director; falls back to a deterministic prompt on any text-model failure."""
     zone = _TEXT_ZONE_HINT.get(template_key, "the centre of the frame")
+    resolved_profile_id = profile_id or brand.slug
+    profile_constraints = _profile_constraints(resolved_profile_id)
     context = _context_block(brand, pillar_name, topic, fmt_label, zone)
-    rules = rules_as_prompt_block(profile_id or brand.slug)
+    if profile_constraints:
+        context = f"{context}\n{profile_constraints}"
+    rules = rules_as_prompt_block(resolved_profile_id)
     if generate is None:
         generate, _model = default_generate()
 
@@ -133,9 +152,16 @@ def build_image_request(
         notes = str(data.get("art_direction_notes") or "").strip()
         if len(prompt_text) < 40:  # too thin to be a real brief → fall back
             raise ValueError("image_prompt too short")
-    except (ValueError, KeyError, json.JSONDecodeError, RuntimeError):
+    except (ValueError, KeyError, json.JSONDecodeError, RuntimeError, OSError):
+        # OSError/urllib HTTPError covers a rate-limited (429) or unreachable text model —
+        # the docstring promises a fallback on ANY text-model failure, transport included.
         prompt_text = _fallback_prompt(brand, pillar_name, topic, zone, rules)
         notes = "deterministic fallback (text model unavailable or non-compliant)"
+
+    if profile_constraints:
+        prompt_text = f"{prompt_text}\n\n{profile_constraints}"
+    if not prompt_text.endswith(_NEGATIVES):
+        prompt_text = f"{prompt_text}\n\n{_NEGATIVES}"
 
     return ImageRequest(
         prompt=prompt_text,
