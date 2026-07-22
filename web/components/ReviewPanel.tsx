@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState, type JSX } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ApiError,
   type ApiRevisionZone,
@@ -77,6 +78,7 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
   const [pinKey, setPinKey] = useState(0);
   const [state, setState] = useState<SubmitState>("idle");
   const [submitError, setSubmitError] = useState<string>("");
+  const [previewFailed, setPreviewFailed] = useState(false);
 
   useLayoutEffect(() => {
     const tween = slideInPanel(panelRef.current);
@@ -180,10 +182,30 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
 
       <div
         className="review-panel__thumb"
-        role="img"
-        aria-label={`Creative preview: ${doc.thumbnailLabel}`}
       >
-        <span className="review-panel__thumb-label">{doc.thumbnailLabel}</span>
+        {previewFailed ? (
+          <span className="review-panel__thumb-label">{doc.thumbnailLabel}</span>
+        ) : (
+          <Image
+            className="review-panel__thumb-image"
+            src={doc.previewUrl}
+            alt={`Creative preview: ${doc.thumbnailLabel}`}
+            width={1080}
+            height={1080}
+            sizes="(max-width: 1100px) 100vw, 340px"
+            unoptimized
+            onError={(): void => setPreviewFailed(true)}
+          />
+        )}
+      </div>
+
+      <div className="review-panel__downloads" aria-label="Creative downloads">
+        <a className="btn btn--secondary btn--sm" href={doc.svgUrl} download>
+          Download SVG
+        </a>
+        <a className="btn btn--secondary btn--sm" href={doc.psdUrl} download>
+          Download PSD
+        </a>
       </div>
 
       {doc.jobId !== undefined && (

@@ -179,7 +179,7 @@ function toPillarChips(apiPillars: ApiContentPillar[]): Pillar[] {
 const LAYER_ORDER = ["L1_base", "L2_concept", "L3_scaffold", "L4_message", "L5_finish"] as const;
 
 /** Map a persisted CreativeDoc manifest into the review panel's layer-strip shape. */
-function toReviewDoc(doc: ApiCreativeDoc): CreativeDoc {
+export function toReviewDoc(doc: ApiCreativeDoc): CreativeDoc {
   const kinds = new Set(doc.manifest.layers.map((layer) => layer.kind));
   // Show the full L1..L5 strip; the active layer is L4 (message) when present, else the
   // last layer the manifest actually has.
@@ -197,6 +197,9 @@ function toReviewDoc(doc: ApiCreativeDoc): CreativeDoc {
     jobId: doc.job_id,
     creativeDocId: doc.id,
     thumbnailLabel: headline !== undefined ? headline.toUpperCase().slice(0, 24) : "PREVIEW",
+    previewUrl: `/api/creatives/${encodeURIComponent(doc.id)}/preview`,
+    svgUrl: `/api/creatives/${encodeURIComponent(doc.id)}/svg`,
+    psdUrl: `/api/creatives/${encodeURIComponent(doc.id)}/psd`,
     layers,
     note:
       activeIndex >= 0

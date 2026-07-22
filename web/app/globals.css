@@ -586,6 +586,53 @@ ul {
   margin-bottom: var(--sp-6);
 }
 
+.generate-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-5);
+}
+
+.generate-control__select,
+.generate-control__input {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.generate-control__select {
+  max-width: 220px;
+}
+
+.generate-control__input {
+  flex: 1 1 240px;
+  min-width: 180px;
+}
+
+.generate-control__select:focus-visible,
+.generate-control__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.generate-control__select:disabled,
+.generate-control__input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.generate-control__error {
+  flex-basis: 100%;
+  color: var(--dot-new);
+  font-size: 12px;
+}
+
 /* ---------------------------------------------------------------------------
    Pillar chips (filter row)
 --------------------------------------------------------------------------- */
@@ -967,18 +1014,37 @@ ul {
   display: flex;
   align-items: flex-end;
   aspect-ratio: 4 / 5;
-  padding: var(--sp-4);
+  padding: 0;
   border-radius: var(--r-md);
-  background: linear-gradient(150deg, var(--tag-blue) 0%, var(--tag-purple) 100%);
+  background: var(--surface-2);
   color: var(--accent-ink);
   flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.review-panel__thumb-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .review-panel__thumb-label {
+  margin: var(--sp-4);
   font-size: 15px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.review-panel__downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.review-panel__downloads .btn {
+  flex: 1 1 auto;
 }
 
 .review-panel__section {
@@ -1301,6 +1367,13 @@ ul {
 
   .board-view__main {
     padding: var(--sp-4) var(--sp-4) var(--sp-7);
+  }
+
+  .generate-control__select,
+  .generate-control__input,
+  .generate-control .btn {
+    width: 100%;
+    max-width: none;
   }
 
   .kanban {

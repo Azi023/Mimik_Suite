@@ -307,6 +307,24 @@ async def list_creative_docs(
     return list((await session.execute(stmt)).scalars())
 
 
+async def get_latest_creative_doc_for_client(
+    session: AsyncSession, *, tenant_id: str, client_id: str
+) -> CreativeDocRow | None:
+    """Newest creative whose Job belongs to one client, tenant-filtered in the query."""
+    stmt = (
+        select(CreativeDocRow)
+        .join(JobRow, JobRow.id == CreativeDocRow.job_id)
+        .where(
+            CreativeDocRow.tenant_id == tenant_id,
+            JobRow.tenant_id == tenant_id,
+            JobRow.client_id == client_id,
+        )
+        .order_by(CreativeDocRow.created_at.desc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 # --- Approval (audit trail; append-only) ---
 async def create_approval(session: AsyncSession, *, tenant_id: str, **fields) -> ApprovalRow:
     row = ApprovalRow(tenant_id=tenant_id, **fields)

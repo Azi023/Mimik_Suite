@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +16,25 @@ from api.core.auth import Principal, get_principal, require_role
 from api.db import repo
 from api.db.mappers import to_brand, to_creative_doc
 from api.db.session import get_session
+from api.services.creative_generation import (
+    brand_color,
+    creative_artifact_path,
+    get_scoped_creative,
+)
+from creative.export import psd as psd_export
 from creative.pipeline import build_manifest
-from mimik_contracts import ActorRole, BrandLayout, CopyBlock, CreativeDoc, JobStatus
+from mimik_contracts import (
+    ActorRole,
+    BrandLayout,
+    CopyBlock,
+    CreativeDoc,
+    CreativeManifest,
+    JobStatus,
+    LayerKind,
+)
 
 router = APIRouter(prefix="/jobs/{job_id}/creatives", tags=["creatives"])
+artifact_router = APIRouter(prefix="/creatives", tags=["creatives"])
 
 # Any URI scheme (http:, https:, file:, gopher:, ...). An artifact ref becomes a CSS `url(...)`
 # the headless compositor fetches at render time, so an EXTERNAL ref is an SSRF vector.
@@ -103,3 +119,73 @@ async def list_creatives(
         raise HTTPException(status_code=404, detail="Job not found")
     rows = await repo.list_creative_docs(session, tenant_id=principal.tenant_id, job_id=job_id)
     return [to_creative_doc(r) for r in rows]
+
+
+@artifact_router.get("/{creative_id}/preview")
+async def get_creative_preview(
+    creative_id: str,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> FileResponse:
+    scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    path = creative_artifact_path(scoped[0].id, "preview.png")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Creative preview not found")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Content-Disposition": "inline"},
+    )
+
+
+@artifact_router.get("/{creative_id}/export.psd")
+async def export_creative_psd(
+    creative_id: str,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    creative_row, _job = scoped
+    manifest = CreativeManifest.model_validate(creative_row.manifest)
+    copy_block = manifest.copy_block
+    image_layer = manifest.layer(LayerKind.L1_BASE)
+    if copy_block is None or image_layer is None or image_layer.artifact_ref is None:
+        raise HTTPException(status_code=422, detail="Creative cannot be exported as PSD")
+    brand_row = await repo.get_brand(
+        session,
+        tenant_id=principal.tenant_id,
+        brand_id=manifest.brand_id,
+    )
+    if brand_row is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    brand = to_brand(brand_row)
+    text_region = image_layer.recipe.params.get("text_region") or "bottom_right"
+    psd = await psd_export.render_creative_psd(
+        format_key=manifest.format_key,
+        image_ref=image_layer.artifact_ref,
+        headline=copy_block.headline,
+        sub=copy_block.subhead,
+        cta=copy_block.cta,
+        palette_ink=brand_color(brand, "primary", "#1A1D26"),
+        palette_ground=brand_color(brand, "ground", "#FFFFFF"),
+        badge_text=brand.name,
+        logo_ref=brand.tokens.logo.ref,
+        text_region=str(text_region),
+    )
+    return Response(
+        content=psd,
+        media_type="image/vnd.adobe.photoshop",
+        headers={"Content-Disposition": f'attachment; filename="{creative_id}.psd"'},
+    )

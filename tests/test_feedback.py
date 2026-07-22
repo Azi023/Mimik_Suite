@@ -32,7 +32,22 @@ def test_loads_current_rubric_seed(isolated_feedback_store: tuple[ModuleType, Pa
 
     rules = feedback.load_rules()
 
-    assert {rule.id for rule in rules} == {"C1", "C2", "T1", "T2", "B1", "B2", "P1", "G1", "G2"}
+    assert {
+        "C1",
+        "C2",
+        "T1",
+        "T2",
+        "B1",
+        "B2",
+        "P1",
+        "G1",
+        "G2",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+    } <= {rule.id for rule in rules}
     assert all(rule.active and rule.weight == 1.0 for rule in rules)
 
 

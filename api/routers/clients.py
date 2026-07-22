@@ -6,10 +6,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal, require_role
+from api.core.auth import Principal, get_principal, is_client_in_scope, require_role
 from api.db import repo
-from api.db.mappers import to_client
+from api.db.mappers import to_client, to_creative_doc
 from api.db.session import get_session
+from api.services.creative_generation import (
+    GenerateCreativeRequest,
+    GeneratedCreative,
+    generate_client_creative,
+    generated_creative_response,
+)
 from mimik_contracts import ActorRole, Client
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -70,3 +76,41 @@ async def get_client(
     if principal.role == ActorRole.CLIENT.value and row.id != principal.client_id:
         raise HTTPException(status_code=404, detail="Client not found")
     return to_client(row)
+
+
+@router.post("/{client_id}/creatives:generate", response_model=GeneratedCreative)
+async def generate_creative(
+    client_id: str,
+    body: GenerateCreativeRequest,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> GeneratedCreative:
+    return await generate_client_creative(
+        session,
+        principal=principal,
+        client_id=client_id,
+        body=body,
+    )
+
+
+@router.get("/{client_id}/creatives/latest", response_model=GeneratedCreative)
+async def get_latest_creative(
+    client_id: str,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> GeneratedCreative:
+    client = await repo.get_client(
+        session,
+        tenant_id=principal.tenant_id,
+        client_id=client_id,
+    )
+    if client is None or not is_client_in_scope(principal, client_id):
+        raise HTTPException(status_code=404, detail="Client not found")
+    row = await repo.get_latest_creative_doc_for_client(
+        session,
+        tenant_id=principal.tenant_id,
+        client_id=client_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    return generated_creative_response(to_creative_doc(row))

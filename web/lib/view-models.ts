@@ -61,6 +61,9 @@ export interface CreativeDoc {
   jobId: string;
   creativeDocId: string;
   thumbnailLabel: string;
+  previewUrl: string;
+  svgUrl: string;
+  psdUrl: string;
   layers: Layer[];
   note: string;
 }

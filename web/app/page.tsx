@@ -52,7 +52,15 @@ export default async function BoardPage(): Promise<JSX.Element> {
 
   return (
     <AppShell sidebar={sidebar} title="Board" crumb="This week · approvals">
-      <BoardView pillars={pillars} jobs={jobs} reviewDoc={reviewDoc} />
+      <BoardView
+        pillars={pillars}
+        jobs={jobs}
+        reviewDoc={reviewDoc}
+        clients={sidebar.groups.flatMap((group) =>
+          group.projects.map((project) => ({ id: project.id, name: project.name })),
+        )}
+        initialClientId={sidebar.activeClient?.id ?? null}
+      />
     </AppShell>
   );
 }

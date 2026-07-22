@@ -234,6 +234,14 @@ export interface ApiCreativeDoc {
   version: number;
 }
 
+/** POST /clients/{id}/creatives:generate response. */
+export interface ApiGeneratedCreative {
+  creative: ApiCreativeDoc;
+  preview_url: string;
+  svg_url: string;
+  psd_url: string;
+}
+
 /** mimik_contracts.enums.RevisionZone — WHERE on a creative a change request points. */
 export type ApiRevisionZone =
   | "headline"
@@ -351,6 +359,8 @@ const DEFAULT_BASE_URL = "http://localhost:8000";
 
 /** Per-request timeout — the board must fall back fast when the API is down. */
 const REQUEST_TIMEOUT_MS = 3000;
+/** Rendering and PSD assembly launch a compositor, so mutations/downloads get a real ceiling. */
+const CREATIVE_TIMEOUT_MS = 240000;
 
 /** API origin, from `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`). */
 export function getApiBaseUrl(): string {
@@ -418,7 +428,12 @@ async function apiGet<T>(path: string, sessionToken?: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function apiPost<T>(path: string, body: unknown, sessionToken?: string): Promise<T> {
+async function apiPost<T>(
+  path: string,
+  body: unknown,
+  sessionToken?: string,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -433,7 +448,7 @@ async function apiPost<T>(path: string, body: unknown, sessionToken?: string): P
     headers,
     body: JSON.stringify(body),
     cache: "no-store",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     throw new ApiError(response.status, `POST ${path} -> ${response.status}`);
@@ -524,6 +539,54 @@ export function listPillars(clientId?: string, sessionToken?: string): Promise<A
 /** GET /jobs/{id}/creatives — a job's creative versions, oldest first. */
 export function listCreatives(jobId: string, sessionToken?: string): Promise<ApiCreativeDoc[]> {
   return apiGet<ApiCreativeDoc[]>(`/jobs/${encodeURIComponent(jobId)}/creatives`, sessionToken);
+}
+
+export interface GenerateCreativeBody {
+  topic: string;
+  pillar?: string;
+  format_key?: string;
+}
+
+/** POST /clients/{id}/creatives:generate — run the real engine and persist its artifacts. */
+export function generateCreative(
+  clientId: string,
+  body: GenerateCreativeBody,
+  sessionToken?: string,
+): Promise<ApiGeneratedCreative> {
+  return apiPost<ApiGeneratedCreative>(
+    `/clients/${encodeURIComponent(clientId)}/creatives:generate`,
+    body,
+    sessionToken,
+    CREATIVE_TIMEOUT_MS,
+  );
+}
+
+export type CreativeArtifactKind = "preview" | "svg" | "psd";
+
+/** Authenticated raw artifact fetch used only by the same-origin Next route proxy. */
+export async function fetchCreativeArtifact(
+  creativeId: string,
+  artifact: CreativeArtifactKind,
+  sessionToken?: string,
+): Promise<Response> {
+  const path =
+    artifact === "svg"
+      ? `/exports/svg?creative_id=${encodeURIComponent(creativeId)}`
+      : artifact === "psd"
+        ? `/creatives/${encodeURIComponent(creativeId)}/export.psd`
+        : `/creatives/${encodeURIComponent(creativeId)}/preview`;
+  const headers: Record<string, string> = { Accept: "*/*" };
+  const token = resolveBearer(sessionToken);
+  if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(CREATIVE_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, `GET ${path} -> ${response.status}`);
+  }
+  return response;
 }
 
 /** POST /jobs/{id}/creatives body — mint a new creative version (the copy edit → new version path). */

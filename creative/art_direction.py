@@ -113,13 +113,14 @@ def build_image_request(
     height: int,
     *,
     template_key: str,
+    profile_id: str | None = None,
     generate: Callable[[str], str] | None = None,
 ) -> ImageRequest:
     """Art-direct one background plate → ImageRequest. Uses the free Gemini text seam as the
     art director; falls back to a deterministic prompt on any text-model failure."""
     zone = _TEXT_ZONE_HINT.get(template_key, "the centre of the frame")
     context = _context_block(brand, pillar_name, topic, fmt_label, zone)
-    rules = rules_as_prompt_block(brand.slug)
+    rules = rules_as_prompt_block(profile_id or brand.slug)
     if generate is None:
         generate, _model = default_generate()
 

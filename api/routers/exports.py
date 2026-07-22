@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.auth import Principal, get_principal
+from api.db.session import get_session
+from api.services.creative_generation import creative_artifact_path, get_scoped_creative
 from creative.export.svg import rasterize_svg_to_png, render_creative_svg
 
 
@@ -44,6 +48,29 @@ def _render_svg(body: ExportCreative) -> str:
 def _brand_slug(badge_text: str | None) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", (badge_text or "brand").lower()).strip("-")
     return slug or "brand"
+
+
+@router.get("/svg")
+async def download_stored_svg(
+    creative_id: str,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> FileResponse:
+    scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    path = creative_artifact_path(scoped[0].id, "creative.svg")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Creative SVG not found")
+    return FileResponse(
+        path,
+        media_type="image/svg+xml",
+        filename=f"{creative_id}.svg",
+    )
 
 
 @router.post("/svg")

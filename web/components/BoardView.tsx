@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState, type JSX } from "react";
+import { useMemo, useState, useTransition, type FormEvent, type JSX } from "react";
+import { useRouter } from "next/navigation";
+import { generateCreativeAction } from "@/app/actions";
 import type { CreativeDoc, Job, Pillar } from "@/lib/view-models";
 import { Board } from "./Board";
 import { ALL_PILLARS, PillarChips } from "./PillarChips";
@@ -14,6 +16,8 @@ interface BoardViewProps {
    * returned no creative or the request failed.
    */
   reviewDoc: CreativeDoc | null;
+  clients: ReadonlyArray<{ id: string; name: string }>;
+  initialClientId: string | null;
 }
 
 /**
@@ -22,10 +26,24 @@ interface BoardViewProps {
  * is open in the review panel. Data still flows in from the server component as
  * props (see app/page.tsx) — this only adds selection + filtering on top.
  */
-export function BoardView({ pillars, jobs, reviewDoc }: BoardViewProps): JSX.Element {
+export function BoardView({
+  pillars,
+  jobs,
+  reviewDoc,
+  clients,
+  initialClientId,
+}: BoardViewProps): JSX.Element {
+  const router = useRouter();
   const [activePillarId, setActivePillarId] = useState<string>(ALL_PILLARS);
   // null = nothing clicked yet → the review panel shows the server-resolved default doc.
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState(
+    initialClientId ?? clients[0]?.id ?? "",
+  );
+  const [topic, setTopic] = useState("");
+  const [generatedDoc, setGeneratedDoc] = useState<CreativeDoc | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [isGenerating, startGenerating] = useTransition();
 
   // Pillars filter by the label shown on the card: jobs carry a denormalized pillar
   // label (`Job.pillar`), while chips carry an id + label.
@@ -42,17 +60,85 @@ export function BoardView({ pillars, jobs, reviewDoc }: BoardViewProps): JSX.Ele
   // Never synthesize a creative for a selected job. If the server-resolved creative
   // does not belong to it, the review area renders its real empty state.
   const activeDoc = useMemo<CreativeDoc | null>(() => {
-    if (selectedJobId === null) return reviewDoc;
+    if (selectedJobId === null) return generatedDoc ?? reviewDoc;
+    if (generatedDoc?.jobId === selectedJobId) return generatedDoc;
     return reviewDoc?.jobId === selectedJobId ? reviewDoc : null;
-  }, [selectedJobId, reviewDoc]);
+  }, [generatedDoc, selectedJobId, reviewDoc]);
 
   function handleSelectJob(job: Job): void {
     setSelectedJobId(job.id);
   }
 
+  function handleGenerate(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    setGenerateError(null);
+    startGenerating(async (): Promise<void> => {
+      const result = await generateCreativeAction(
+        selectedClientId,
+        topic,
+        activePillarLabel ?? undefined,
+      );
+      if (!result.ok) {
+        setGenerateError(result.error);
+        return;
+      }
+      setGeneratedDoc(result.doc);
+      setSelectedJobId(result.doc.jobId);
+      setTopic("");
+      router.refresh();
+    });
+  }
+
   return (
     <div className="board-view">
       <div className="board-view__main">
+        <form className="generate-control" onSubmit={handleGenerate}>
+          <label className="visually-hidden" htmlFor="generate-client">
+            Client
+          </label>
+          <select
+            id="generate-client"
+            className="generate-control__select"
+            value={selectedClientId}
+            disabled={clients.length === 0 || isGenerating}
+            onChange={(event): void => setSelectedClientId(event.target.value)}
+          >
+            {clients.length === 0 ? (
+              <option value="">No clients yet</option>
+            ) : (
+              clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))
+            )}
+          </select>
+          <label className="visually-hidden" htmlFor="generate-topic">
+            Creative topic
+          </label>
+          <input
+            id="generate-topic"
+            className="generate-control__input"
+            value={topic}
+            maxLength={500}
+            placeholder="Topic, offer, or idea"
+            disabled={isGenerating}
+            onChange={(event): void => setTopic(event.target.value)}
+          />
+          <button
+            type="submit"
+            className="btn btn--primary"
+            disabled={selectedClientId === "" || topic.trim() === "" || isGenerating}
+          >
+            {isGenerating ? "Generating…" : "Generate"}
+          </button>
+          {generateError !== null && (
+            <p className="generate-control__error" role="status">
+              {generateError}
+            </p>
+          )}
+        </form>
+
         {pillars.length > 0 && (
           <section className="board-view__filters" aria-label="Content pillars">
             <h2 className="visually-hidden">Content pillars</h2>
