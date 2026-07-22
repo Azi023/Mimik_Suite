@@ -1,5 +1,13 @@
 # Mimik Suite — Completeness Assessment & Roadmap
 
+> ⚠️ **SUPERSEDED 2026-07-22 — historical snapshot, NOT current ground truth.** The gaps below
+> (frontend "~10%", "board + login only", "critical multi-tenant auth hole", "mock-fallback leaks
+> demo clients") are all RESOLVED: onboarding wizard, client/brand editor, brand-kit editor, tasks/
+> members/calendar/billing views, magic-link portal, and the in-product editor now exist; the mock
+> fallback was deleted; the IDOR class was fixed + is guarded by `tests/test_tenant_isolation.py`
+> (re-verified live this session). **Current ground truth = `HANDOFF.md` (top entry) + `docs/BUILD_STATUS.md`.**
+> Kept only for historical context.
+
 > Generated 2026-07-20 (business-logic-strategist survey of the codebase vs the product plan).
 > Backend ~85% of the plan; **frontend ~10%** (board + login only). One **critical** multi-tenant
 > auth hole. This is the ground truth for "how far is the whole suite."

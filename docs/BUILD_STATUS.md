@@ -113,3 +113,37 @@ real reference clients define the spread:
 
 **Q4 = not greenlit.** No M4 build yet. Next planning step: draft the 3 concrete Style Profiles as the build spec.
 **Codex model:** operator wants a specific model ("5.6 Sol", extra-high effort) — awaiting the exact `-m` model string; ran task 01 on codex default @ high.
+
+---
+
+## 2026-07-22 (session 2 — Opus orchestrator) — QA pass · Fable plan · editor-bug fixes · imagery/nav dispatch
+
+**Brain:** Opus (this terminal). Confirmed the local product runs (API :8000 health 200, web :3000 200, PG :5434 / Redis :6381 up).
+
+### Goals 1 & 2 — DONE
+- **Full QA pass** (`multi-persona-qa-reviewer`): 4 P0, 4 P1, several P2/P3. P0s: (1) **mobile nav dead** — hamburger has no onClick, sidebar hidden ≤860px → no nav on phone; (2) **near-blank output for Simply Nikah + Island Cart** (= Goal 3); (3)+(4) the two editor bugs (now fixed). QA **confirmed tenant/IDOR discipline is genuinely solid** (live-probed, no cross-tenant leak; JWT alg+typ pinned). Also flagged: badge inversion ALSO in `ReviewPanel.tsx` buttons; dead `web/components/OnboardingWizard.tsx` fork; sidebar search decoy input; stale `docs/COMPLETENESS_ASSESSMENT.md`.
+- **Fable-5 plan** → `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md` (code-grounded; Plan A Command Center = 13 tasks/agy, Plan B Canvas Editor = 14 tasks/Codex+Fable; 9 parallel-safe waves + file-conflict map). Its **B-01 == the editor-bug fixes already completed this session**.
+
+### Goal 4 — DONE + LIVE-VERIFIED · committed `f3a6ff7`
+| Fix | Detail | Verify |
+|---|---|---|
+| Bug 1 badge inverted | `"lighter"→0.0` (light/reversed badge), `"darker"→1.0` (plum) in BOTH the API keyword parser AND `ReviewPanel.tsx` Light/Dark buttons | live 201, params applied; `badge_theme(0.0)="light"`, `badge_theme(1.0)="plum"` |
+| Bug 2 AI clobbered edit | `body.edits` now applied AFTER the instruction redraft → explicit edit wins, layout still applies | live 201: sentinel headline survived + `panel_anchor=left` |
+| Robustness | `/revise` degrades to layout-only instead of 500 when copy LLM 429s (Gemini free tier IS 429ing) | live 201 under 429 |
+| Cleanup | removed dead `new_version` line; fixed latent `CopyBlock` F821 import; ruff+tsc clean, 9 tests green | — |
+
+### Goal 3 — DONE + LIVE-VERIFIED · committed `6d65556` (Codex-built, Claude-reviewed)
+- **Decisions:** Simply Nikah → paid AI-illustration (OpenRouter/OpenAI, used **sparingly**); Island Cart → Pexels now (product photos later).
+- `_source_image` → ordered **source resolver** (LICENSED_STOCK→Pexels; AI_ILLUSTRATION/AI_REALISTIC→paid adapter, gated; skip GENERATED_VECTOR/PRODUCT_CUTOUT→placeholder). Art-direction prompt now carries profile medium + modesty guardrails.
+- **Robustness (Claude-added):** generation no longer 500s under Gemini 429 — art-director fallback now catches OSError/HTTPError (was Value/Key/JSON/Runtime only); copy falls back to a deterministic topic CopyBlock; 502 handler now logs the real exception.
+- **Verdict:** LIVE — all 3 clients 200 under current 429s (Glo2Go/Island Cart → real Pexels photo; Simply Nikah → placeholder in dev). **One real OpenRouter validation render** of Simply Nikah = faceless flat-vector, mihrab framing, on-brand pink/plum — **modesty guardrail held**. 6 new tests + 18 total green; ruff clean; zero test spend; paid gate operator-controlled.
+
+### QA P0 mobile-nav + frontend — DONE + VERIFIED · committed `a289187` (Fable-built, Claude-reviewed)
+- **P0** hamburger → off-canvas `MobileNavDrawer` (reuses desktop `<Sidebar>` wholesale; scrim/Escape/link-close, focus trap, aria-modal). **P1** sidebar search now filters clients. **P1** dead `web/components/OnboardingWizard.tsx` fork deleted.
+- **Verdict:** tsc clean, no `any`, AppShell→client-component safe (all 19 call sites pass serializable props, no server-only imports). Sidebar renders twice (desktop+drawer) but has no static `id` → no duplicate-DOM issue.
+
+### Remaining QA P0/P1 (not yet done) — for next wave
+P1: ReviewPanel inline styles → design-system classes (B-10 covers this) · `.env` JWT_SECRET = published default locally (confirm PROD uses a real secret) · P2: portal `/portal/session` leaks raw PyJWT error string · ClientBrandEditor React key `${index}-${hex}` collision.
+
+### Program note
+Rolling out the Fable plan (`docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`) wave-by-wave with review gates (NOT all at once). **B-01 ✅ committed `f3a6ff7`.** **Goal-3 imagery ✅ committed `6d65556`** (extra task on the hot file, now landed). Remaining W1 = combined contracts (A-01+B-02) ∥ B-05 (svg layer_overrides). Hot-file `api/services/creative_generation.py` order: [B-01 ✅ · imagery ✅] → B-04 → B-06 → B-07 → B-11 → B-13 → A-03.
