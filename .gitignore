@@ -8,13 +8,6 @@
 credentials*
 *.secret
 .keys
-# Google service-account keys (Drive archive) — the JSON IS a credential
-secure repo/
-secure_repo/
-*service-account*.json
-*service_account*.json
-gen-lang-client-*.json
-gcp-*.json
 
 # Python
 __pycache__/
@@ -42,8 +35,18 @@ outputs/
 *.db
 uploads/
 storage/
-# Brand Asset Library files + browser session profiles (client assets / auth cookies)
+artifacts/
 var/
+
+# Google service-account keys (Drive archive) — the JSON IS a credential.
+# RESTORED 2026-07-22: an earlier uncommitted edit stripped these; a real
+# service-account key lives in `secure repo/` — never let it reach git.
+secure repo/
+secure_repo/
+*service-account*.json
+*service_account*.json
+gen-lang-client-*.json
+gcp-*.json
 
 # OS / editor
 .DS_Store
@@ -56,3 +59,4 @@ var/
 .claude/settings.local.json
 .claude/*.lock
 _archive/
+
