@@ -369,6 +369,58 @@ class ReviseCreativeRequest(BaseModel):
     instruction: str | None = None
     params: dict[str, object] | None = None
 
+
+def _actor_dict(principal: Principal) -> dict[str, str]:
+    return {
+        "id": principal.user_id or principal.tenant_id,
+        "role": principal.role,
+    }
+
+
+def _revision_note(body: ReviseCreativeRequest) -> str | None:
+    if body.instruction:
+        return body.instruction
+    if not body.edits:
+        return None
+    return "; ".join(f"{field}: {value}" for field, value in body.edits.items())
+
+
+def _set_rendered_artifacts(
+    manifest: CreativeManifest,
+    *,
+    svg_path: Path,
+    preview_path: Path,
+    profile_render_path: Path | None,
+) -> None:
+    artifact_params = {
+        "svg_ref": str(svg_path),
+        "preview_ref": str(preview_path),
+        **(
+            {"profile_render_ref": str(profile_render_path)}
+            if profile_render_path is not None
+            else {}
+        ),
+    }
+    l5_layer = manifest.layer(LayerKind.L5_FINISH)
+    if l5_layer is None:
+        manifest.layers.append(
+            Layer(
+                kind=LayerKind.L5_FINISH,
+                recipe=LayerRecipe(params=artifact_params),
+                artifact_ref=str(preview_path),
+            )
+        )
+        return
+
+    retained_params = {
+        key: value
+        for key, value in l5_layer.recipe.params.items()
+        if key not in {"svg_ref", "preview_ref", "profile_render_ref"}
+    }
+    l5_layer.recipe = LayerRecipe(params={**retained_params, **artifact_params})
+    l5_layer.artifact_ref = str(preview_path)
+
+
 async def revise_creative(
     session: AsyncSession,
     *,
@@ -464,20 +516,12 @@ async def revise_creative(
         )
 
         manifest.copy_block = copy_block
-        l5_layer = manifest.layer(LayerKind.L5_FINISH)
-        if l5_layer:
-            l5_layer.recipe = LayerRecipe(
-                params={
-                    "svg_ref": str(svg_path),
-                    "preview_ref": str(preview_path),
-                    **(
-                        {"profile_render_ref": str(profile_render_path)}
-                        if profile_render_path is not None
-                        else {}
-                    ),
-                }
-            )
-            l5_layer.artifact_ref = str(preview_path)
+        _set_rendered_artifacts(
+            manifest,
+            svg_path=svg_path,
+            preview_path=preview_path,
+            profile_render_path=profile_render_path,
+        )
 
         new_row = await repo.create_creative_doc(
             session,
@@ -485,10 +529,105 @@ async def revise_creative(
             id=new_creative_id,
             job_id=job.id,
             manifest=manifest.model_dump(mode="json"),
+            parent_id=creative_id,
+            created_by=_actor_dict(principal),
+            revision_note=_revision_note(body),
         )
         await session.commit()
     except Exception:
-        import shutil
+        await session.rollback()
+        shutil.rmtree(artifact_dir, ignore_errors=True)
+        raise
+
+    return generated_creative_response(to_creative_doc(new_row))
+
+
+async def revert_creative(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    creative_id: str,
+    to_creative_id: str,
+) -> GeneratedCreative:
+    current_scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    # The URL-path resource follows the IDOR convention (locked #2): out-of-scope/missing → 404
+    # (never leak existence), matching /versions, /revise, /preview.
+    if current_scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    # `to_creative_id` is a request-body param → 422 when it can't be resolved in scope.
+    target_scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=to_creative_id,
+    )
+    if target_scoped is None:
+        raise HTTPException(
+            status_code=422,
+            detail="to_creative_id must exist within the caller's tenant and scope",
+        )
+
+    current_row, current_job = current_scoped
+    target_row, target_job = target_scoped
+    if current_job.id != target_job.id:
+        raise HTTPException(
+            status_code=422,
+            detail="Creative versions must belong to the same job",
+        )
+
+    brand_row = await repo.get_brand(
+        session,
+        tenant_id=principal.tenant_id,
+        brand_id=current_job.brand_id,
+    )
+    if brand_row is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    brand = to_brand(brand_row)
+
+    manifest = CreativeManifest.model_validate(target_row.manifest)
+    copy_block = manifest.copy_block
+    if copy_block is None:
+        raise HTTPException(status_code=422, detail="No copy block in target manifest")
+    image_layer = manifest.layer(LayerKind.L1_BASE)
+    if not image_layer or not image_layer.recipe or not image_layer.artifact_ref:
+        raise HTTPException(status_code=422, detail="Target creative missing L1_BASE image layer")
+
+    render_params = image_layer.recipe.params
+    new_creative_id = str(uuid4())
+    artifact_dir = creative_artifact_path(new_creative_id, "preview.png").parent
+    artifact_dir.mkdir(parents=True, exist_ok=False)
+
+    try:
+        svg_path, preview_path, profile_render_path = await _render_creative_artifacts(
+            brand=brand,
+            profile_id=str(render_params.get("style_profile_id", "generic")),
+            copy_block=copy_block,
+            format_key=manifest.format_key,
+            image_path=Path(image_layer.artifact_ref),
+            artifact_dir=artifact_dir,
+            render_params=render_params,
+        )
+        _set_rendered_artifacts(
+            manifest,
+            svg_path=svg_path,
+            preview_path=preview_path,
+            profile_render_path=profile_render_path,
+        )
+        new_row = await repo.create_creative_doc(
+            session,
+            tenant_id=principal.tenant_id,
+            id=new_creative_id,
+            job_id=current_job.id,
+            manifest=manifest.model_dump(mode="json"),
+            parent_id=current_row.id,
+            created_by=_actor_dict(principal),
+            revision_note=f"revert to v{target_row.version}",
+        )
+        await session.commit()
+    except Exception:
         await session.rollback()
         shutil.rmtree(artifact_dir, ignore_errors=True)
         raise

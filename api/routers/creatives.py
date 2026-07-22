@@ -17,20 +17,27 @@ from api.db import repo
 from api.db.mappers import to_brand, to_creative_doc
 from api.db.session import get_session
 from api.services.creative_generation import (
+    GeneratedCreative,
+    ReviseCreativeRequest,
     brand_color,
     creative_artifact_path,
     get_scoped_creative,
+    revert_creative,
+    revise_creative,
 )
 from creative.export import psd as psd_export
 from creative.pipeline import build_manifest
 from mimik_contracts import (
+    Actor,
     ActorRole,
     BrandLayout,
     CopyBlock,
     CreativeDoc,
     CreativeManifest,
+    CreativeVersionInfo,
     JobStatus,
     LayerKind,
+    VersionHistory,
 )
 
 router = APIRouter(prefix="/jobs/{job_id}/creatives", tags=["creatives"])
@@ -65,6 +72,10 @@ class CreateCreative(BaseModel):
     _safe_artifact = field_validator("image_artifact")(
         staticmethod(_assert_safe_image_artifact)
     )
+
+
+class RevertCreativeRequest(BaseModel):
+    to_creative_id: str
 
 
 @router.post("", response_model=CreativeDoc, status_code=201)
@@ -119,12 +130,6 @@ async def list_creatives(
         raise HTTPException(status_code=404, detail="Job not found")
     rows = await repo.list_creative_docs(session, tenant_id=principal.tenant_id, job_id=job_id)
     return [to_creative_doc(r) for r in rows]
-
-
-
-
-from api.services.creative_generation import ReviseCreativeRequest, revise_creative, GeneratedCreative
-
 @artifact_router.post("/{creative_id}/revise", response_model=GeneratedCreative, status_code=201)
 async def revise_creative_endpoint(
     creative_id: str,
@@ -139,6 +144,63 @@ async def revise_creative_endpoint(
         body=body,
     )
     return result
+
+
+@artifact_router.get("/{creative_id}/versions", response_model=VersionHistory)
+async def list_creative_versions_endpoint(
+    creative_id: str,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> VersionHistory:
+    scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    _creative_row, job = scoped
+    rows = await repo.list_creative_versions(
+        session,
+        tenant_id=principal.tenant_id,
+        job_id=job.id,
+    )
+    return VersionHistory(
+        job_id=job.id,
+        versions=[
+            CreativeVersionInfo(
+                creative_id=row.id,
+                version=row.version,
+                parent_id=row.parent_id,
+                created_at=row.created_at,
+                created_by=(
+                    Actor.model_validate(row.created_by)
+                    if row.created_by is not None
+                    else None
+                ),
+                note=row.revision_note,
+                preview_url=f"/creatives/{row.id}/preview",
+                svg_url=f"/exports/svg?creative_id={row.id}",
+            )
+            for row in rows
+        ],
+    )
+
+
+@artifact_router.post("/{creative_id}/revert", response_model=GeneratedCreative, status_code=201)
+async def revert_creative_endpoint(
+    creative_id: str,
+    body: RevertCreativeRequest,
+    principal: Principal = Depends(require_role("owner", "ops", "designer", "team")),
+    session: AsyncSession = Depends(get_session),
+) -> GeneratedCreative:
+    return await revert_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+        to_creative_id=body.to_creative_id,
+    )
+
 
 @artifact_router.get("/{creative_id}/preview")
 async def get_creative_preview(
