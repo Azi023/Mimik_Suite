@@ -287,8 +287,11 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
           <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { panel_anchor: 'right' }})}>Right</button>
           <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { subject_zoom: 0.8 }})}>Smaller</button>
           <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { subject_zoom: 1.2 }})}>Larger</button>
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { badge_background_luminance: 1.0 }})}>Light</button>
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { badge_background_luminance: 0.0 }})}>Dark</button>
+          {/* badge_background_luminance = luminance of the ground BEHIND the badge: a LOW value
+              makes badge_theme() pick the light/reversed mark, a HIGH value the dark plum mark.
+              So a "Light" badge => dark ground (0.0), a "Dark" badge => light ground (1.0). */}
+          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { badge_background_luminance: 0.0 }})}>Light</button>
+          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { badge_background_luminance: 1.0 }})}>Dark</button>
         </div>
         
         <div style={{ display: 'flex', gap: '8px', overflowX: 'auto' }}>

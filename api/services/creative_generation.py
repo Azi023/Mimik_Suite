@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import urllib.error
 import urllib.request
@@ -29,6 +30,7 @@ from creative.style_profile import ImageSource, StyleProfile, get_style_profile
 from creative.vision import text_region as vision_text_region
 from mimik_contracts import (
     Brand,
+    CopyBlock,
     CreativeDoc,
     CreativeManifest,
     JobStatus,
@@ -38,6 +40,8 @@ from mimik_contracts import (
     PRESETS,
 )
 
+
+logger = logging.getLogger(__name__)
 
 CREATIVE_ARTIFACT_ROOT = Path("var/creatives")
 _MAX_STOCK_BYTES = 20 * 1024 * 1024
@@ -326,15 +330,6 @@ async def revise_creative(
     if copy_block is None:
         raise HTTPException(status_code=422, detail="No copy block in manifest")
 
-    if body.edits:
-        if "headline" in body.edits:
-            copy_block.headline = body.edits["headline"]
-        if "sub" in body.edits:
-            copy_block.subhead = body.edits["sub"]
-        if "cta" in body.edits:
-            copy_block.cta = body.edits["cta"]
-        copy_block.status = "edited"
-
     image_layer = manifest.layer(LayerKind.L1_BASE)
     if not image_layer or not image_layer.recipe or not image_layer.artifact_ref:
         raise HTTPException(status_code=422, detail="Creative missing L1_BASE image layer")
@@ -344,25 +339,52 @@ async def revise_creative(
 
     if body.instruction:
         text_lower = body.instruction.lower()
-        if "left" in text_lower: params["panel_anchor"] = "left"
-        elif "right" in text_lower: params["panel_anchor"] = "right"
-        elif "top" in text_lower: params["panel_anchor"] = "top"
-        elif "bottom" in text_lower: params["panel_anchor"] = "bottom"
-        
-        if "smaller" in text_lower: params["subject_zoom"] = 0.8
-        elif "larger" in text_lower: params["subject_zoom"] = 1.2
-        
-        if "lighter" in text_lower: params["badge_background_luminance"] = 1.0
-        elif "darker" in text_lower: params["badge_background_luminance"] = 0.0
+        for keyword in ("left", "right", "top", "bottom"):
+            if keyword in text_lower:
+                params["panel_anchor"] = keyword
+                break
 
-        copy_block = await asyncio.to_thread(
-            copy_l0.draft_copy,
-            brand,
-            str(l1_params.get("pillar", "General")),
-            str(l1_params.get("topic", "General")),
-            manifest.format_key,
-            revision_note=body.instruction,
-        )
+        if "smaller" in text_lower:
+            params["subject_zoom"] = 0.8
+        elif "larger" in text_lower:
+            params["subject_zoom"] = 1.2
+
+        # `badge_background_luminance` is the luminance of the ground BEHIND the badge:
+        # badge_theme() picks the light/reversed mark on a DARK ground (low value) and the
+        # dark plum mark on a LIGHT ground (high value). So "lighter" badge => dark ground
+        # (0.0), "darker" badge => light ground (1.0). Previously inverted (Bug 1).
+        if "lighter" in text_lower:
+            params["badge_background_luminance"] = 0.0
+        elif "darker" in text_lower:
+            params["badge_background_luminance"] = 1.0
+
+        # The instruction re-drafts the copy from the brief. An explicit inline text edit is
+        # a direct user command that must win, so `body.edits` is applied AFTER the redraft
+        # below (Bug 2: previously the redraft clobbered the explicit edit). The deterministic
+        # layout/badge params above are already set; if the copy LLM is unavailable (e.g. the
+        # free-tier 429) keep the current copy and still ship the layout change rather than 500.
+        try:
+            copy_block = await asyncio.to_thread(
+                copy_l0.draft_copy,
+                brand,
+                str(l1_params.get("pillar", "General")),
+                str(l1_params.get("topic", "General")),
+                manifest.format_key,
+                revision_note=body.instruction,
+            )
+        except (copy_l0.CopyDraftError, OSError) as exc:
+            logger.warning(
+                "revise: copy redraft failed (%s); applying layout-only change", exc
+            )
+
+    if body.edits:
+        if "headline" in body.edits:
+            copy_block.headline = body.edits["headline"]
+        if "sub" in body.edits:
+            copy_block.subhead = body.edits["sub"]
+        if "cta" in body.edits:
+            copy_block.cta = body.edits["cta"]
+        copy_block.status = "edited"
 
     l1_params.update(params)
 
@@ -396,8 +418,6 @@ async def revise_creative(
                 }
             )
             l5_layer.artifact_ref = str(preview_path)
-            
-        new_version = creative_row.version + 1 if hasattr(creative_row, "version") else 1 # Wait repo.py doesn't have version on creative_row. It relies on list_creative_docs length? Or just creates a new one
 
         new_row = await repo.create_creative_doc(
             session,
