@@ -121,6 +121,25 @@ async def list_creatives(
     return [to_creative_doc(r) for r in rows]
 
 
+
+
+from api.services.creative_generation import ReviseCreativeRequest, revise_creative, GeneratedCreative
+
+@artifact_router.post("/{creative_id}/revise", response_model=GeneratedCreative, status_code=201)
+async def revise_creative_endpoint(
+    creative_id: str,
+    body: ReviseCreativeRequest,
+    principal: Principal = Depends(require_role("owner", "ops", "designer", "team")),
+    session: AsyncSession = Depends(get_session),
+) -> GeneratedCreative:
+    result = await revise_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+        body=body,
+    )
+    return result
+
 @artifact_router.get("/{creative_id}/preview")
 async def get_creative_preview(
     creative_id: str,

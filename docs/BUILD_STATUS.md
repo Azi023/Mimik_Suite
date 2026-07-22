@@ -80,7 +80,10 @@ _Codex output lands in `scratchpad/codex_run_*.log`; Claude reviews `git diff` b
 - **Creative-head feedback captured** into the flywheel: L1 logo-contrast-on-dark, L2 smaller left/centered panel, L3 zoom-out subject, L4 grid alignment, L5 live-text-must-be-real (→ SVG is the live-text master; PSD live-text SKIPPED as too complex).
 - **Decisions:** PSD live-text = skipped. Codex/agy usage = separate pools from Claude quota, unmeterable via CLI, headroom OK.
 - **`docs/PLAN_EDITOR_AND_COMMAND_CENTER.md`** drafted — the in-product editor ("mark & tell AI", client-bounded, SVG-layer based) + Command Center (→ agy).
-- **RULES** ▶ dispatched (L1–L4 in glo2go templates + svg, rubric-aware). **GEN** (studio generate+download UI, real feature) queued NEXT — sequential (shares template files).
+- **RULES** ✅ committed `33f39ba` (L1–L4 in glo2go templates + svg + art-director reads rubric).
+- **GEN** ✅ committed `5bff094` + **verified LIVE**: `POST /clients/{id}/creatives:generate` works end-to-end (topic→Pexels→vision→render→persist); generated a real Glo2Go creative through the product, downloadable .svg. **Studio is now USABLE** (Generate + Download on the Board).
+- **EDITOR** ▶ dispatched to **agy** (Antigravity/Gemini 3.1 Pro, first real agy run): v1 in-product editor — inline text edit + "Ask AI to change" (`POST /creatives/{id}/revise`, non-destructive versions) + layout toolbar. Claude reviews.
+- **Queued (wave 2, after editor — shares web files):** upload existing script-creatives into the Board; brand-brief + client-detail editing.
 
 ---
 

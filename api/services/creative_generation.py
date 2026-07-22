@@ -30,6 +30,7 @@ from creative.vision import text_region as vision_text_region
 from mimik_contracts import (
     Brand,
     CreativeDoc,
+    CreativeManifest,
     JobStatus,
     Layer,
     LayerKind,
@@ -239,6 +240,181 @@ def creative_artifact_path(creative_id: str, filename: str) -> Path:
     return CREATIVE_ARTIFACT_ROOT / creative_id / filename
 
 
+
+async def _render_creative_artifacts(
+    *,
+    brand: Brand,
+    profile_id: str,
+    copy_block: CopyBlock,
+    format_key: str,
+    image_path: Path,
+    artifact_dir: Path,
+    render_params: dict,
+) -> tuple[Path, Path, Path | None]:
+    profile = _profile(profile_id)
+    text_region = render_params.get("text_region")
+    ink = brand_color(brand, "primary", _profile_color(profile, "ink") or "#1A1D26")
+    ground = brand_color(brand, "ground", _profile_color(profile, "ground") or "#FFFFFF")
+
+    profile_render_path: Path | None = None
+    if profile_id == "glo2go-aesthetics":
+        profile_png = await glo2go_templates.render_glo2go(
+            _GLO2GO_ARCHETYPE,
+            image_ref=str(image_path),
+            copy={
+                "headline": copy_block.headline,
+                "subhead": copy_block.subhead or "",
+                "cta": copy_block.cta or "",
+            },
+            format_key=format_key,
+            text_region=text_region,
+            panel_anchor=render_params.get("panel_anchor"),
+            text_alignment=render_params.get("text_alignment", "left"),
+            subject_zoom=render_params.get("subject_zoom", 1.0),
+            badge_background_luminance=render_params.get("badge_background_luminance"),
+        )
+        profile_render_path = artifact_dir / "glo2go-render.png"
+        profile_render_path.write_bytes(profile_png)
+
+    svg = svg_export.render_creative_svg(
+        format_key=format_key,
+        image_ref=str(image_path),
+        headline=copy_block.headline,
+        sub=copy_block.subhead,
+        cta=copy_block.cta,
+        palette_ink=ink,
+        palette_ground=ground,
+        badge_text=brand.name,
+        logo_ref=brand.tokens.logo.ref,
+        text_region=text_region,
+        panel_anchor=render_params.get("panel_anchor"),
+        text_alignment=render_params.get("text_alignment", "left"),
+        subject_zoom=render_params.get("subject_zoom", 1.0),
+        badge_background_luminance=render_params.get("badge_background_luminance"),
+    )
+    preview = await svg_export.rasterize_svg_to_png(svg, format_key)
+    svg_path = artifact_dir / "creative.svg"
+    preview_path = artifact_dir / "preview.png"
+    svg_path.write_text(svg, encoding="utf-8")
+    preview_path.write_bytes(preview)
+    return svg_path, preview_path, profile_render_path
+
+
+class ReviseCreativeRequest(BaseModel):
+    edits: dict[str, str] | None = None
+    instruction: str | None = None
+    params: dict[str, object] | None = None
+
+async def revise_creative(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    creative_id: str,
+    body: ReviseCreativeRequest,
+) -> GeneratedCreative:
+    scoped = await get_scoped_creative(session, principal=principal, creative_id=creative_id)
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    creative_row, job = scoped
+    brand_row = await repo.get_brand(
+        session, tenant_id=principal.tenant_id, brand_id=job.brand_id
+    )
+    brand = to_brand(brand_row)
+
+    manifest = CreativeManifest.model_validate(creative_row.manifest)
+    copy_block = manifest.copy_block
+    if copy_block is None:
+        raise HTTPException(status_code=422, detail="No copy block in manifest")
+
+    if body.edits:
+        if "headline" in body.edits:
+            copy_block.headline = body.edits["headline"]
+        if "sub" in body.edits:
+            copy_block.subhead = body.edits["sub"]
+        if "cta" in body.edits:
+            copy_block.cta = body.edits["cta"]
+        copy_block.status = "edited"
+
+    image_layer = manifest.layer(LayerKind.L1_BASE)
+    if not image_layer or not image_layer.recipe or not image_layer.artifact_ref:
+        raise HTTPException(status_code=422, detail="Creative missing L1_BASE image layer")
+
+    params = body.params or {}
+    l1_params = image_layer.recipe.params
+
+    if body.instruction:
+        text_lower = body.instruction.lower()
+        if "left" in text_lower: params["panel_anchor"] = "left"
+        elif "right" in text_lower: params["panel_anchor"] = "right"
+        elif "top" in text_lower: params["panel_anchor"] = "top"
+        elif "bottom" in text_lower: params["panel_anchor"] = "bottom"
+        
+        if "smaller" in text_lower: params["subject_zoom"] = 0.8
+        elif "larger" in text_lower: params["subject_zoom"] = 1.2
+        
+        if "lighter" in text_lower: params["badge_background_luminance"] = 1.0
+        elif "darker" in text_lower: params["badge_background_luminance"] = 0.0
+
+        copy_block = await asyncio.to_thread(
+            copy_l0.draft_copy,
+            brand,
+            str(l1_params.get("pillar", "General")),
+            str(l1_params.get("topic", "General")),
+            manifest.format_key,
+            revision_note=body.instruction,
+        )
+
+    l1_params.update(params)
+
+    new_creative_id = str(uuid4())
+    artifact_dir = creative_artifact_path(new_creative_id, "preview.png").parent
+    artifact_dir.mkdir(parents=True, exist_ok=False)
+
+    try:
+        svg_path, preview_path, profile_render_path = await _render_creative_artifacts(
+            brand=brand,
+            profile_id=str(l1_params.get("style_profile_id", "generic")),
+            copy_block=copy_block,
+            format_key=manifest.format_key,
+            image_path=Path(image_layer.artifact_ref),
+            artifact_dir=artifact_dir,
+            render_params=l1_params,
+        )
+
+        manifest.copy_block = copy_block
+        l5_layer = manifest.layer(LayerKind.L5_FINISH)
+        if l5_layer:
+            l5_layer.recipe = LayerRecipe(
+                params={
+                    "svg_ref": str(svg_path),
+                    "preview_ref": str(preview_path),
+                    **(
+                        {"profile_render_ref": str(profile_render_path)}
+                        if profile_render_path is not None
+                        else {}
+                    ),
+                }
+            )
+            l5_layer.artifact_ref = str(preview_path)
+            
+        new_version = creative_row.version + 1 if hasattr(creative_row, "version") else 1 # Wait repo.py doesn't have version on creative_row. It relies on list_creative_docs length? Or just creates a new one
+
+        new_row = await repo.create_creative_doc(
+            session,
+            tenant_id=principal.tenant_id,
+            id=new_creative_id,
+            job_id=job.id,
+            manifest=manifest.model_dump(mode="json"),
+        )
+        await session.commit()
+    except Exception:
+        import shutil
+        await session.rollback()
+        shutil.rmtree(artifact_dir, ignore_errors=True)
+        raise
+
+    return generated_creative_response(to_creative_doc(new_row))
+
 async def generate_client_creative(
     session: AsyncSession,
     *,
@@ -306,50 +482,24 @@ async def generate_client_creative(
             profile_id=profile_id,
         )
         text_region = await _safe_text_region(image_path, source_kind=source_kind)
-        ink = brand_color(
-            brand,
-            "primary",
-            _profile_color(profile, "ink") or "#1A1D26",
-        )
-        ground = brand_color(
-            brand,
-            "ground",
-            _profile_color(profile, "ground") or "#FFFFFF",
-        )
+        l1_params = {
+            **art_request.params,
+            "topic": topic,
+            "pillar": pillar,
+            "style_profile_id": profile_id,
+            "image_source": source_kind,
+            "text_region": text_region,
+        }
 
-        profile_render_path: Path | None = None
-        if profile_id == "glo2go-aesthetics":
-            profile_png = await glo2go_templates.render_glo2go(
-                _GLO2GO_ARCHETYPE,
-                image_ref=str(image_path),
-                copy={
-                    "headline": copy_block.headline,
-                    "subhead": copy_block.subhead or "",
-                    "cta": copy_block.cta or "",
-                },
-                format_key=body.format_key,
-                text_region=text_region,
-            )
-            profile_render_path = artifact_dir / "glo2go-render.png"
-            profile_render_path.write_bytes(profile_png)
-
-        svg = svg_export.render_creative_svg(
+        svg_path, preview_path, profile_render_path = await _render_creative_artifacts(
+            brand=brand,
+            profile_id=profile_id,
+            copy_block=copy_block,
             format_key=body.format_key,
-            image_ref=str(image_path),
-            headline=copy_block.headline,
-            sub=copy_block.subhead,
-            cta=copy_block.cta,
-            palette_ink=ink,
-            palette_ground=ground,
-            badge_text=brand.name,
-            logo_ref=brand.tokens.logo.ref,
-            text_region=text_region,
+            image_path=image_path,
+            artifact_dir=artifact_dir,
+            render_params=l1_params,
         )
-        preview = await svg_export.rasterize_svg_to_png(svg, body.format_key)
-        svg_path = artifact_dir / "creative.svg"
-        preview_path = artifact_dir / "preview.png"
-        svg_path.write_text(svg, encoding="utf-8")
-        preview_path.write_bytes(preview)
 
         manifest = build_manifest(
             brand,
@@ -365,14 +515,7 @@ async def generate_client_creative(
         image_layer.recipe = LayerRecipe(
             prompt=art_request.prompt,
             reference_urls=reference_urls,
-            params={
-                **art_request.params,
-                "topic": topic,
-                "pillar": pillar,
-                "style_profile_id": profile_id,
-                "image_source": source_kind,
-                "text_region": text_region,
-            },
+            params=l1_params,
         )
         manifest.layers.append(
             Layer(

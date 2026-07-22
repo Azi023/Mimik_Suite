@@ -561,6 +561,36 @@ export function generateCreative(
   );
 }
 
+
+
+export interface ReviseCreativeBody {
+  edits?: {
+    headline?: string;
+    sub?: string;
+    cta?: string;
+  };
+  instruction?: string;
+  params?: {
+    panel_anchor?: string;
+    text_alignment?: string;
+    subject_zoom?: number;
+    badge_background_luminance?: number;
+  };
+}
+
+export function reviseCreative(
+  creativeId: string,
+  body: ReviseCreativeBody,
+  sessionToken?: string,
+): Promise<ApiGeneratedCreative> {
+  return apiPost<ApiGeneratedCreative>(
+    `/creatives/${encodeURIComponent(creativeId)}/revise`,
+    body,
+    sessionToken,
+    CREATIVE_TIMEOUT_MS,
+  );
+}
+
 export type CreativeArtifactKind = "preview" | "svg" | "psd";
 
 /** Authenticated raw artifact fetch used only by the same-origin Next route proxy. */
