@@ -145,5 +145,19 @@ real reference clients define the spread:
 ### Remaining QA P0/P1 (not yet done) — for next wave
 P1: ReviewPanel inline styles → design-system classes (B-10 covers this) · `.env` JWT_SECRET = published default locally (confirm PROD uses a real secret) · P2: portal `/portal/session` leaks raw PyJWT error string · ClientBrandEditor React key `${index}-${hex}` collision.
 
-### Program note
-Rolling out the Fable plan (`docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`) wave-by-wave with review gates (NOT all at once). **B-01 ✅ committed `f3a6ff7`.** **Goal-3 imagery ✅ committed `6d65556`** (extra task on the hot file, now landed). Remaining W1 = combined contracts (A-01+B-02) ∥ B-05 (svg layer_overrides). Hot-file `api/services/creative_generation.py` order: [B-01 ✅ · imagery ✅] → B-04 → B-06 → B-07 → B-11 → B-13 → A-03.
+### Program note — Fable plan rollout (wave-by-wave, review-gated)
+Operator greenlit building the **Command Center + Canvas** program. Text quality: operator chose **route
+copy/art-direction through OpenRouter/OpenAI** (done — see below).
+
+**Wave 1 status:**
+| Task | What | Owner | Status |
+|---|---|---|---|
+| B-01 | editor-bug fixes (badge/edit/robustness) | Claude | ✅ `f3a6ff7` |
+| — | Goal-3 imagery (extra task on hot file) | Codex | ✅ `6d65556` |
+| TEXT | resilient provider chain Gemini→OpenRouter→OpenAI (`default_generate`) | Codex | ✅ `879ea7e` — LIVE-verified (real copy via OpenRouter under Gemini 429) |
+| A-01+B-02 | typed ops + canvas contracts (sibling repo) | Codex | ✅ `mimik-contracts@7fb1210` — 27 tests, cross-repo import OK |
+| B-05 | svg.py `layer_overrides` + data-editable/data-bbox | Codex | ⏳ in flight |
+
+**Hot-file `api/services/creative_generation.py` sequence** (never parallel): [B-01 ✅ · imagery ✅] → B-04 → B-06 → B-07 → B-11 → B-13 → A-03.
+**Next (W2):** B-03 (lineage migration) ∥ A-02 (typed /ops responses). Then W3: B-04→B-06→B-07 (strict, hot file) ∥ A-10 (admin). See the plan's wave matrix.
+**Ongoing paid spend:** text chain uses OpenRouter/OpenAI (cheap per call, operator-approved). Image gate (`MIMIK_ALLOW_PAID_IMAGES`) stays OFF by default; Simply Nikah illustration validated once (faceless/on-brand).
