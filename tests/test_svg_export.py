@@ -76,6 +76,8 @@ def test_render_creative_svg_emits_editable_named_layers(tmp_path: Path) -> None
     for layer in layers:
         layer_id = layer.attrib["id"]
         assert layer.attrib["data-layer"] == layer_id
+        assert layer.attrib["data-editable"] == "true"
+        assert len(layer.attrib["data-bbox"].split()) == 4
         assert layer.attrib[f"{{{INKSCAPE_NS}}}label"] == layer_id
 
     text_values = [

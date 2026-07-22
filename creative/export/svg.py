@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
@@ -36,6 +37,19 @@ _IMAGE_MIME_BY_SUFFIX = {
 _SYSTEM_FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 _DEFAULT_BADGE_TEXT = "G2G Aesthetics"
 _GLO2GO_PROFILE_ID = "glo2go-aesthetics"
+_EDITABLE_LAYER_IDS = frozenset(
+    {
+        "layer-background",
+        "layer-panel",
+        "layer-headline",
+        "layer-subhead",
+        "layer-cta",
+        "layer-badge",
+    }
+)
+_OVERRIDE_KEYS = frozenset({"dx", "dy", "scale", "visible", "fill"})
+_TEXT_FILL_LAYER_IDS = frozenset({"layer-headline", "layer-subhead"})
+_SHAPE_FILL_LAYER_IDS = frozenset({"layer-panel", "layer-cta", "layer-badge"})
 
 ElementTree.register_namespace("", _SVG_NS)
 ElementTree.register_namespace("inkscape", _INKSCAPE_NS)
@@ -173,7 +187,18 @@ def _composition(
     )
 
 
-def _layer(root: ElementTree.Element, layer_id: str) -> ElementTree.Element:
+def _set_layer_bbox(
+    layer: ElementTree.Element,
+    bbox: tuple[int, int, int, int],
+) -> None:
+    layer.set("data-bbox", " ".join(str(value) for value in bbox))
+
+
+def _layer(
+    root: ElementTree.Element,
+    layer_id: str,
+    bbox: tuple[int, int, int, int],
+) -> ElementTree.Element:
     return ElementTree.SubElement(
         root,
         _svg_tag("g"),
@@ -182,8 +207,130 @@ def _layer(root: ElementTree.Element, layer_id: str) -> ElementTree.Element:
             "data-layer": layer_id,
             f"{{{_INKSCAPE_NS}}}label": layer_id,
             f"{{{_INKSCAPE_NS}}}groupmode": "layer",
+            "data-editable": "true",
+            "data-bbox": " ".join(str(value) for value in bbox),
         },
     )
+
+
+def _override_value(
+    override: Mapping[object, object],
+    key: str,
+    default: object,
+) -> object:
+    return override[key] if key in override else default
+
+
+def _integer_override(
+    override: Mapping[object, object],
+    key: str,
+    *,
+    default: int,
+) -> int:
+    value = _override_value(override, key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"Layer override {key!r} must be an int")
+    return value
+
+
+def _scale_override(override: Mapping[object, object]) -> float:
+    value = _override_value(override, "scale", 1.0)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError("Layer override 'scale' must be a float")
+    scale = float(value)
+    if scale <= 0:
+        raise ValueError("Layer override 'scale' must be greater than zero")
+    return scale
+
+
+def _visible_override(override: Mapping[object, object]) -> bool:
+    value = _override_value(override, "visible", True)
+    if not isinstance(value, bool):
+        raise TypeError("Layer override 'visible' must be a bool")
+    return value
+
+
+def _fill_override(override: Mapping[object, object]) -> str | None:
+    value = _override_value(override, "fill", None)
+    if value is not None and not isinstance(value, str):
+        raise TypeError("Layer override 'fill' must be a string or None")
+    return value
+
+
+def _apply_fill_override(
+    layer: ElementTree.Element,
+    layer_id: str,
+    fill: str,
+) -> None:
+    if layer_id in _TEXT_FILL_LAYER_IDS:
+        target_tags = {_svg_tag("text"), _svg_tag("tspan")}
+    elif layer_id in _SHAPE_FILL_LAYER_IDS:
+        target_tags = {
+            _svg_tag("circle"),
+            _svg_tag("ellipse"),
+            _svg_tag("path"),
+            _svg_tag("polygon"),
+            _svg_tag("polyline"),
+            _svg_tag("rect"),
+        }
+    else:
+        return
+
+    for element in layer.iter():
+        if element.tag in target_tags and "fill" in element.attrib:
+            element.set("fill", fill)
+
+
+def _apply_layer_overrides(
+    layers: Mapping[str, ElementTree.Element],
+    bboxes: Mapping[str, tuple[int, int, int, int]],
+    layer_overrides: Mapping[str, object] | None,
+) -> None:
+    if layer_overrides is None:
+        return
+
+    unknown_layers = set(layer_overrides) - _EDITABLE_LAYER_IDS
+    if unknown_layers:
+        unknown = ", ".join(sorted(unknown_layers))
+        raise ValueError(f"Unknown editable layer override: {unknown}")
+
+    for layer_id, override_value in layer_overrides.items():
+        if not isinstance(override_value, Mapping):
+            raise TypeError(f"Override for {layer_id!r} must be a mapping")
+        unknown_keys = set(override_value) - _OVERRIDE_KEYS
+        if unknown_keys:
+            unknown = ", ".join(sorted(str(key) for key in unknown_keys))
+            raise ValueError(f"Unknown override field for {layer_id!r}: {unknown}")
+
+        layer = layers[layer_id]
+        dx = _integer_override(override_value, "dx", default=0)
+        dy = _integer_override(override_value, "dy", default=0)
+        scale = _scale_override(override_value)
+        transform_parts: list[str] = []
+        if dx or dy:
+            transform_parts.append(f"translate({dx},{dy})")
+        if scale != 1:
+            x, y, _width, _height = bboxes[layer_id]
+            transform_parts.extend(
+                (
+                    f"translate({x},{y})",
+                    f"scale({scale:g})",
+                    f"translate({-x},{-y})",
+                )
+            )
+        if transform_parts:
+            existing_transform = layer.attrib.get("transform")
+            if existing_transform:
+                transform_parts.append(existing_transform)
+            layer.set("transform", " ".join(transform_parts))
+
+        if not _visible_override(override_value):
+            layer.set("display", "none")
+            layer.set("data-hidden", "true")
+
+        fill = _fill_override(override_value)
+        if fill is not None:
+            _apply_fill_override(layer, layer_id, fill)
 
 
 def _add_wrapped_text(
@@ -258,6 +405,7 @@ def render_creative_svg(
     text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
     subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
     badge_background_luminance: float | None = None,
+    layer_overrides: Mapping[str, object] | None = None,
 ) -> str:
     """Return the Glo2Go hero as a complete SVG with named, editable layers."""
     if not headline.strip():
@@ -296,7 +444,13 @@ def render_creative_svg(
         },
     )
 
-    background = _layer(root, "layer-background")
+    background_bbox = (
+        comp.photo_x,
+        comp.photo_y,
+        comp.photo_width,
+        comp.photo_height,
+    )
+    background = _layer(root, "layer-background", background_bbox)
     background.set("data-subject-zoom", f"{subject_zoom:.2f}")
     ElementTree.SubElement(
         background,
@@ -311,7 +465,13 @@ def render_creative_svg(
         },
     )
 
-    panel = _layer(root, "layer-panel")
+    panel_bbox = (
+        comp.panel_x,
+        comp.panel_y,
+        comp.panel_width,
+        comp.panel_height,
+    )
+    panel = _layer(root, "layer-panel", panel_bbox)
     panel.set("data-panel-anchor", comp.panel_anchor)
     panel.set("data-text-alignment", comp.text_alignment)
     ElementTree.SubElement(
@@ -331,8 +491,17 @@ def render_creative_svg(
     )
 
     content_x = _content_x(comp)
+    content_box_x = comp.panel_x + comp.panel_padding
+    content_box_width = comp.panel_width - 2 * comp.panel_padding
     headline_baseline = comp.panel_y + comp.panel_padding + comp.headline_line_height
-    headline_layer = _layer(root, "layer-headline")
+    headline_height = len(comp.headline_lines) * comp.headline_line_height
+    headline_bbox = (
+        content_box_x,
+        headline_baseline - comp.headline_line_height,
+        content_box_width,
+        headline_height,
+    )
+    headline_layer = _layer(root, "layer-headline", headline_bbox)
     _add_wrapped_text(
         headline_layer,
         lines=comp.headline_lines,
@@ -344,9 +513,6 @@ def render_creative_svg(
         fill=palette_ink,
         text_alignment=comp.text_alignment,
     )
-
-    subhead_layer = _layer(root, "layer-subhead")
-    headline_height = len(comp.headline_lines) * comp.headline_line_height
     subhead_baseline = (
         comp.panel_y
         + comp.panel_padding
@@ -354,6 +520,13 @@ def render_creative_svg(
         + comp.grid_step
         + comp.body_line_height
     )
+    subhead_bbox = (
+        content_box_x,
+        subhead_baseline - comp.body_line_height,
+        content_box_width,
+        len(comp.subhead_lines) * comp.body_line_height,
+    )
+    subhead_layer = _layer(root, "layer-subhead", subhead_bbox)
     if comp.subhead_lines:
         _add_wrapped_text(
             subhead_layer,
@@ -366,12 +539,19 @@ def render_creative_svg(
             fill=palette_ink,
             text_alignment=comp.text_alignment,
         )
-
-    cta_layer = _layer(root, "layer-cta")
+    subhead_height = 0
+    if comp.subhead_lines:
+        subhead_height = comp.grid_step + len(comp.subhead_lines) * comp.body_line_height
+    cta_y = (
+        comp.panel_y
+        + comp.panel_padding
+        + headline_height
+        + subhead_height
+        + comp.grid_step
+    )
+    cta_bbox = (content_box_x, cta_y, 0, 0)
+    cta_layer = _layer(root, "layer-cta", cta_bbox)
     if cta and cta.strip():
-        subhead_height = 0
-        if comp.subhead_lines:
-            subhead_height = comp.grid_step + len(comp.subhead_lines) * comp.body_line_height
         cta_font_size = round(comp.body_size * 0.9)
         cta_padding_x = round(comp.body_size * 0.92)
         cta_height = comp.cta_height
@@ -380,13 +560,8 @@ def render_creative_svg(
             round(len(cta) * cta_font_size * 0.56 + 2 * cta_padding_x),
         )
         cta_x = _aligned_box_x(comp, cta_width)
-        cta_y = (
-            comp.panel_y
-            + comp.panel_padding
-            + headline_height
-            + subhead_height
-            + comp.grid_step
-        )
+        cta_bbox = (cta_x, cta_y, cta_width, cta_height)
+        _set_layer_bbox(cta_layer, cta_bbox)
         ElementTree.SubElement(
             cta_layer,
             _svg_tag("rect"),
@@ -415,7 +590,13 @@ def render_creative_svg(
         )
         cta_text.text = cta
 
-    badge_layer = _layer(root, "layer-badge")
+    badge_bbox = (
+        comp.badge_x,
+        comp.badge_y,
+        comp.badge_width,
+        comp.badge_height,
+    )
+    badge_layer = _layer(root, "layer-badge", badge_bbox)
     badge_layer.set("data-badge-theme", resolved_badge_theme)
     badge_fill = palette_ground if resolved_badge_theme == "light" else palette_ink
     badge_ink = palette_ink if resolved_badge_theme == "light" else palette_ground
@@ -461,6 +642,24 @@ def render_creative_svg(
             },
         )
         wordmark.text = badge_text or _DEFAULT_BADGE_TEXT
+
+    layers = {
+        "layer-background": background,
+        "layer-panel": panel,
+        "layer-headline": headline_layer,
+        "layer-subhead": subhead_layer,
+        "layer-cta": cta_layer,
+        "layer-badge": badge_layer,
+    }
+    bboxes = {
+        "layer-background": background_bbox,
+        "layer-panel": panel_bbox,
+        "layer-headline": headline_bbox,
+        "layer-subhead": subhead_bbox,
+        "layer-cta": cta_bbox,
+        "layer-badge": badge_bbox,
+    }
+    _apply_layer_overrides(layers, bboxes, layer_overrides)
 
     return ElementTree.tostring(root, encoding="unicode", xml_declaration=True)
 
