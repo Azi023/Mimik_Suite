@@ -39,11 +39,16 @@ gen-lang-client-*.json`). I RESTORED the ignore rules in the working tree (key i
 NOT commit `.gitignore` (you edited it deliberately — confirm intent). **Do not commit that key.** Also open QA:
 portal `/portal/session` leaks a raw PyJWT error; confirm PROD `JWT_SECRET` ≠ the published `.env.example` default.
 
-### ▶ IN FLIGHT / EXACT NEXT ACTION
-- **B-05** (svg.py `layer_overrides` + `data-editable`/`data-bbox`) dispatched to Codex — review its diff (parity
-  choice, per-layer transforms), run `pytest tests/test_layer_overrides.py tests/test_svg_export.py`, commit → **Wave 1 DONE.**
-- **Then W2:** B-03 (creative lineage migration on `creative_docs`) ∥ A-02 (typed `/ops` responses). **W3:** strict
-  hot-file sequence B-04→B-06→B-07 ∥ A-10 (admin UI). Full matrix + per-task specs: `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`.
+### ▶ EXACT NEXT ACTION — Wave 1 DONE (B-05 = `e8c5d79`); start W2
+- **Wave 1 complete:** B-01, imagery, text-chain, contracts (A-01+B-02), B-05 all committed + verified.
+- **W2 (parallel, disjoint):** **B-03** — creative lineage migration (`parent_id`/`created_by`/`revision_note` on
+  `creative_docs`; alembic up/down clean on local :5434; `repo.create_creative_doc` sets `version=parent+1`; new
+  `repo.list_creative_versions`; test `tests/test_creative_versions.py`) ∥ **A-02** — typed `/ops` responses
+  (`response_model=BoardResponse`/`list[BoardCard]` in `api/routers/ops.py`, identical JSON; keep the calendar
+  client-IDOR test green). Disjoint files → dispatch both to Codex in parallel.
+- **W3:** strict hot-file sequence B-04→B-06→B-07 (all edit `creative_generation.py` — NEVER parallel) ∥ A-10 (admin UI).
+- Per-task specs + full wave matrix: `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`. Write each Codex spec to `scratchpad/`,
+  reference the plan's task section, demand tests + live-verify, review the diff, then commit (phase-tagged).
 - **Hot file `api/services/creative_generation.py`** — NEVER dispatch two of {B-04,B-06,B-07,B-11,B-13,A-03} at once.
 - Codex dispatch: `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c approval_policy=never [-C <dir>] - < spec.md`.
   Sibling-repo tasks need `-C /Users/atheeque/workspace/mimik-contracts`. Codex logs → `scratchpad/codex_*.log`.
