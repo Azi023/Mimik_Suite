@@ -28,8 +28,16 @@ export interface ApiLayerOp {
   dx: number;
   /** Vertical offset in viewBox units. Default 0. */
   dy: number;
-  /** Uniform scale about the layer's bbox center. Default 1.0; > 0 and <= 3. */
+  /**
+   * Backward-compatible uniform scale. Mirrors both axes when equal, otherwise 1.
+   */
   scale: number;
+  /** Horizontal scale about the layer's bbox center. Default 1.0; > 0 and <= 3. */
+  scale_x: number;
+  /** Vertical scale about the layer's bbox center. Default 1.0; > 0 and <= 3. */
+  scale_y: number;
+  /** Rotation in degrees. Default 0; editor UI is deferred. */
+  rotation: number;
   /** Default true. */
   visible: boolean;
   /**

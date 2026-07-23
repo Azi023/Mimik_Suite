@@ -8,30 +8,38 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { CanvasLayerId } from "./canvas-types";
+import type { LayerBBox, LayerTransform } from "./editor-state";
 
-/** Per-layer local preview transform, in SVG viewBox units. */
-export interface LayerTransform {
-  dx: number;
-  dy: number;
-  scale: number;
-}
+export type ResizeHandle =
+  | "n"
+  | "ne"
+  | "e"
+  | "se"
+  | "s"
+  | "sw"
+  | "w"
+  | "nw";
 
-/** Contract clamp — LayerOp.scale must stay in (0, 3]. */
-const MIN_SCALE = 0.05;
+/** Contract clamp — each LayerOp scale axis stays within the editor range. */
+const MIN_SCALE = 0.1;
 const MAX_SCALE = 3;
 
 interface DragSession {
   layerId: CanvasLayerId;
-  mode: "move" | "scale";
+  mode: "move" | "resize";
   pointerId: number;
   startX: number;
   startY: number;
   /** The layer's transform when the drag began. */
   base: LayerTransform;
-  /** Untransformed bbox width (viewBox units) — the scale-mode denominator. */
-  bboxWidth: number;
+  /** Untransformed geometry used as the stable resize denominator. */
+  baseBox: LayerBBox | null;
+  /** Active resize direction, or null for move gestures. */
+  handle: ResizeHandle | null;
   /** Screen-px -> viewBox-units factor captured at drag start. */
   factor: number;
+  /** Element retaining pointer capture for the duration of the gesture. */
+  captureTarget: Element;
   /** False for a click; flips only after the pointer crosses the drag threshold. */
   moved: boolean;
 }
@@ -45,6 +53,48 @@ export function pointerMovedPastThreshold(
   currentY: number,
 ): boolean {
   return Math.hypot(currentX - startX, currentY - startY) >= MOVE_THRESHOLD_PX;
+}
+
+function clampScale(value: number): number {
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+}
+
+export function resizeLayerTransform(
+  baseBox: LayerBBox,
+  startTransform: LayerTransform,
+  handle: ResizeHandle,
+  deltaX: number,
+  deltaY: number,
+): LayerTransform {
+  const width = baseBox.w > 0 ? baseBox.w : 1;
+  const height = baseBox.h > 0 ? baseBox.h : 1;
+  let { dx, dy, scaleX, scaleY } = startTransform;
+
+  if (handle.includes("e")) {
+    scaleX = clampScale(startTransform.scaleX + deltaX / width);
+    dx =
+      startTransform.dx +
+      ((scaleX - startTransform.scaleX) * width) / 2;
+  } else if (handle.includes("w")) {
+    scaleX = clampScale(startTransform.scaleX - deltaX / width);
+    dx =
+      startTransform.dx -
+      ((scaleX - startTransform.scaleX) * width) / 2;
+  }
+
+  if (handle.includes("s")) {
+    scaleY = clampScale(startTransform.scaleY + deltaY / height);
+    dy =
+      startTransform.dy +
+      ((scaleY - startTransform.scaleY) * height) / 2;
+  } else if (handle.includes("n")) {
+    scaleY = clampScale(startTransform.scaleY - deltaY / height);
+    dy =
+      startTransform.dy -
+      ((scaleY - startTransform.scaleY) * height) / 2;
+  }
+
+  return { dx, dy, scaleX, scaleY };
 }
 
 export interface UseLayerDragArgs {
@@ -64,15 +114,17 @@ export interface UseLayerDragResult {
   /** Layer mid-drag, or null when idle. */
   draggingLayer: CanvasLayerId | null;
   beginMove: (layerId: CanvasLayerId, event: ReactPointerEvent<Element>) => void;
-  beginScale: (
+  beginResize: (
     layerId: CanvasLayerId,
+    handle: ResizeHandle,
     event: ReactPointerEvent<Element>,
-    bboxWidth: number,
+    baseBox: LayerBBox,
+    startTransform: LayerTransform,
   ) => void;
 }
 
 /**
- * Owns the pointer-drag / corner-scale math for the canvas stage. Screen-pixel
+ * Owns the pointer move / eight-handle resize math for the canvas stage. Screen-pixel
  * deltas are mapped back into viewBox units via `getScreenToViewBox`, and state
  * updates are rAF-coalesced so CanvasStage can update one provisional canonical
  * history op at 60fps. Nothing here owns document state or talks to the server.
@@ -123,13 +175,14 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
           dx: session.base.dx + ddx,
           dy: session.base.dy + ddy,
         };
-      } else {
-        // Corner handle: dragging away from the bbox center grows the layer.
-        const raw = session.base.scale + (ddx + ddy) / session.bboxWidth;
-        pendingRef.current = {
-          ...session.base,
-          scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, raw)),
-        };
+      } else if (session.baseBox !== null && session.handle !== null) {
+        pendingRef.current = resizeLayerTransform(
+          session.baseBox,
+          session.base,
+          session.handle,
+          ddx,
+          ddy,
+        );
       }
       if (frameRef.current === null) {
         frameRef.current = window.requestAnimationFrame(flushFrame);
@@ -149,6 +202,13 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     if (session.moved) {
       argsRef.current.onDragMove?.(session.layerId, settled);
     }
+    try {
+      if (session.captureTarget.hasPointerCapture(session.pointerId)) {
+        session.captureTarget.releasePointerCapture(session.pointerId);
+      }
+    } catch {
+      // The element may have detached while the gesture was active.
+    }
     sessionRef.current = null;
     pendingRef.current = null;
     abortRef.current?.abort();
@@ -162,22 +222,27 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
   const begin = useCallback(
     (
       layerId: CanvasLayerId,
-      mode: "move" | "scale",
+      mode: "move" | "resize",
       event: ReactPointerEvent<Element>,
-      bboxWidth: number,
+      base: LayerTransform,
+      baseBox: LayerBBox | null,
+      handle: ResizeHandle | null,
     ): void => {
       if (sessionRef.current !== null) return;
       event.preventDefault();
       event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
       sessionRef.current = {
         layerId,
         mode,
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        base: argsRef.current.getTransform(layerId),
-        bboxWidth: Math.max(bboxWidth, 1),
+        base,
+        baseBox,
+        handle,
         factor: argsRef.current.getScreenToViewBox(),
+        captureTarget: event.currentTarget,
         moved: false,
       };
       pendingRef.current = null;
@@ -200,18 +265,27 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
 
   const beginMove = useCallback(
     (layerId: CanvasLayerId, event: ReactPointerEvent<Element>): void => {
-      begin(layerId, "move", event, 1);
+      begin(
+        layerId,
+        "move",
+        event,
+        argsRef.current.getTransform(layerId),
+        null,
+        null,
+      );
     },
     [begin],
   );
 
-  const beginScale = useCallback(
+  const beginResize = useCallback(
     (
       layerId: CanvasLayerId,
+      handle: ResizeHandle,
       event: ReactPointerEvent<Element>,
-      bboxWidth: number,
+      baseBox: LayerBBox,
+      startTransform: LayerTransform,
     ): void => {
-      begin(layerId, "scale", event, bboxWidth);
+      begin(layerId, "resize", event, startTransform, baseBox, handle);
     },
     [begin],
   );
@@ -224,5 +298,5 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     };
   }, []);
 
-  return { draggingLayer, beginMove, beginScale };
+  return { draggingLayer, beginMove, beginResize };
 }

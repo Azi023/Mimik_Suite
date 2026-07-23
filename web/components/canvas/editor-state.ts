@@ -11,7 +11,8 @@ export type OpKind = "text" | "fill" | "visible" | "transform";
 export interface LayerTransform {
   dx: number;
   dy: number;
-  scale: number;
+  scaleX: number;
+  scaleY: number;
 }
 
 export interface LayerBBox {
@@ -78,7 +79,12 @@ export interface ApplyStateResult {
   overflow: Partial<Record<CanvasLayerId, boolean>>;
 }
 
-export const IDENTITY_TRANSFORM: LayerTransform = { dx: 0, dy: 0, scale: 1 };
+export const IDENTITY_TRANSFORM: LayerTransform = {
+  dx: 0,
+  dy: 0,
+  scaleX: 1,
+  scaleY: 1,
+};
 
 export const EDITOR_LAYER_IDS: readonly CanvasLayerId[] = [
   "layer-background",
@@ -214,7 +220,13 @@ export function toCanvasRevision(folded: FoldedState): ApiCanvasRevision {
       layer_id: layerId,
       dx: round(transform.dx, 2),
       dy: round(transform.dy, 2),
-      scale: round(transform.scale, 4),
+      scale: round(
+        transform.scaleX === transform.scaleY ? transform.scaleX : 1,
+        4,
+      ),
+      scale_x: round(transform.scaleX, 4),
+      scale_y: round(transform.scaleY, 4),
+      rotation: 0,
       visible: folded.visible[layerId] ?? true,
       fill_role: folded.fill[layerId] ?? null,
     });
@@ -229,15 +241,20 @@ export function transformedBBox(bbox: LayerBBox, transform: LayerTransform): Lay
   const cx = bbox.x + bbox.w / 2;
   const cy = bbox.y + bbox.h / 2;
   return {
-    x: transform.dx + cx + (bbox.x - cx) * transform.scale,
-    y: transform.dy + cy + (bbox.y - cy) * transform.scale,
-    w: bbox.w * transform.scale,
-    h: bbox.h * transform.scale,
+    x: transform.dx + cx + (bbox.x - cx) * transform.scaleX,
+    y: transform.dy + cy + (bbox.y - cy) * transform.scaleY,
+    w: bbox.w * transform.scaleX,
+    h: bbox.h * transform.scaleY,
   };
 }
 
 function isIdentity(transform: LayerTransform): boolean {
-  return transform.dx === 0 && transform.dy === 0 && transform.scale === 1;
+  return (
+    transform.dx === 0 &&
+    transform.dy === 0 &&
+    transform.scaleX === 1 &&
+    transform.scaleY === 1
+  );
 }
 
 export function layerTransformAttr(
@@ -250,7 +267,8 @@ export function layerTransformAttr(
   const cy = bbox.y + bbox.h / 2;
   const local =
     `translate(${transform.dx},${transform.dy}) ` +
-    `translate(${cx},${cy}) scale(${transform.scale}) translate(${-cx},${-cy})`;
+    `translate(${cx},${cy}) scale(${transform.scaleX},${transform.scaleY}) ` +
+    `translate(${-cx},${-cy})`;
   return baseTransform === "" ? local : `${local} ${baseTransform}`;
 }
 
@@ -259,7 +277,12 @@ function sameTransform(
   right: LayerTransform | undefined,
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
-  return left.dx === right.dx && left.dy === right.dy && left.scale === right.scale;
+  return (
+    left.dx === right.dx &&
+    left.dy === right.dy &&
+    left.scaleX === right.scaleX &&
+    left.scaleY === right.scaleY
+  );
 }
 
 function sameRecordValue<T>(

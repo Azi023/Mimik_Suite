@@ -43,7 +43,7 @@ import {
   type LayerBBox,
   type LayerTransform,
 } from "./editor-state";
-import { useLayerDrag } from "./useLayerDrag";
+import { useLayerDrag, type ResizeHandle } from "./useLayerDrag";
 import { Inspector } from "./Inspector";
 import { ZoomControls } from "./ZoomControls";
 
@@ -137,6 +137,26 @@ const MAX_TEXT_CHARS = 200;
 const TEXT_PREVIEW_DEBOUNCE_MS = 75;
 const FALLBACK_VIEWBOX: ViewBox = { x: 0, y: 0, w: 1080, h: 1080 };
 const EMPTY_HISTORY: EditHistory = { ops: [], redo: [] };
+const RESIZE_HANDLE_SIZE_PX = 11;
+const RESIZE_HANDLE_RADIUS_PX = 2;
+
+interface ResizeHandleDefinition {
+  handle: ResizeHandle;
+  xFactor: 0 | 0.5 | 1;
+  yFactor: 0 | 0.5 | 1;
+  cursor: "ew-resize" | "nesw-resize" | "ns-resize" | "nwse-resize";
+}
+
+const RESIZE_HANDLES: readonly ResizeHandleDefinition[] = [
+  { handle: "nw", xFactor: 0, yFactor: 0, cursor: "nwse-resize" },
+  { handle: "ne", xFactor: 1, yFactor: 0, cursor: "nesw-resize" },
+  { handle: "se", xFactor: 1, yFactor: 1, cursor: "nwse-resize" },
+  { handle: "sw", xFactor: 0, yFactor: 1, cursor: "nesw-resize" },
+  { handle: "n", xFactor: 0.5, yFactor: 0, cursor: "ns-resize" },
+  { handle: "e", xFactor: 1, yFactor: 0.5, cursor: "ew-resize" },
+  { handle: "s", xFactor: 0.5, yFactor: 1, cursor: "ns-resize" },
+  { handle: "w", xFactor: 0, yFactor: 0.5, cursor: "ew-resize" },
+];
 
 function parseBBox(raw: string | null): LayerBBox | null {
   if (raw === null) return null;
@@ -477,7 +497,7 @@ export function CanvasStage({
     [nextOperationId, setCanonicalHistory],
   );
 
-  const { draggingLayer, beginMove, beginScale } = useLayerDrag({
+  const { draggingLayer, beginMove, beginResize } = useLayerDrag({
     getScreenToViewBox,
     getTransform: getCanonicalTransform,
     onDragStart: (): void => {
@@ -987,7 +1007,9 @@ export function CanvasStage({
         )
       : null;
 
-  const unit = stageWidth > 0 ? viewBox.w / stageWidth : 1;
+  const visualZoom = zoom === "fit" ? 1 : zoom;
+  const unit =
+    stageWidth > 0 ? viewBox.w / (stageWidth * visualZoom) : 1;
   const pxPerUnit = stageWidth > 0 ? stageWidth / viewBox.w : 0;
 
   const editingLayer =
@@ -1273,28 +1295,42 @@ export function CanvasStage({
                           beginMove(selectedLayer.id, event)
                         }
                       />
-                      <rect
-                        x={selectedBox.x + selectedBox.w - 5.5 * unit}
-                        y={selectedBox.y + selectedBox.h - 5.5 * unit}
-                        width={11 * unit}
-                        height={11 * unit}
-                        rx={2 * unit}
-                        fill="var(--surface)"
-                        stroke="var(--accent)"
-                        strokeWidth={1.5 * unit}
-                        style={{
-                          pointerEvents: "all",
-                          touchAction: "none",
-                          cursor: "nwse-resize",
-                        }}
-                        onPointerDown={(event): void =>
-                          beginScale(
-                            selectedLayer.id,
-                            event,
-                            selectedBaseBox.w,
-                          )
-                        }
-                      />
+                      {RESIZE_HANDLES.map((resizeHandle) => (
+                        <rect
+                          key={resizeHandle.handle}
+                          data-resize-handle={resizeHandle.handle}
+                          x={
+                            selectedBox.x +
+                            selectedBox.w * resizeHandle.xFactor -
+                            (RESIZE_HANDLE_SIZE_PX * unit) / 2
+                          }
+                          y={
+                            selectedBox.y +
+                            selectedBox.h * resizeHandle.yFactor -
+                            (RESIZE_HANDLE_SIZE_PX * unit) / 2
+                          }
+                          width={RESIZE_HANDLE_SIZE_PX * unit}
+                          height={RESIZE_HANDLE_SIZE_PX * unit}
+                          rx={RESIZE_HANDLE_RADIUS_PX * unit}
+                          fill="var(--surface)"
+                          stroke="var(--accent)"
+                          strokeWidth={1.5 * unit}
+                          style={{
+                            pointerEvents: "all",
+                            touchAction: "none",
+                            cursor: resizeHandle.cursor,
+                          }}
+                          onPointerDown={(event): void =>
+                            beginResize(
+                              selectedLayer.id,
+                              resizeHandle.handle,
+                              event,
+                              selectedBaseBox,
+                              selectedTransform,
+                            )
+                          }
+                        />
+                      ))}
                     </svg>
                   )}
 
@@ -1324,7 +1360,7 @@ export function CanvasStage({
                             editingBox.h * pxPerUnit,
                             editingTextLayout.lineHeight *
                               pxPerUnit *
-                              editingTransform.scale *
+                              editingTransform.scaleY *
                               2,
                           )}px`,
                           minHeight: 0,
@@ -1332,13 +1368,13 @@ export function CanvasStage({
                           fontSize: `${Math.max(
                             editingTextLayout.fontSize *
                               pxPerUnit *
-                              editingTransform.scale,
+                              editingTransform.scaleY,
                             10,
                           )}px`,
                           lineHeight: `${Math.max(
                             editingTextLayout.lineHeight *
                               pxPerUnit *
-                              editingTransform.scale,
+                              editingTransform.scaleY,
                             12,
                           )}px`,
                           textAlign: textAlignForAnchor(
