@@ -114,6 +114,18 @@ interface TextEditing {
   before: EditHistory;
 }
 
+interface PanPoint {
+  x: number;
+  y: number;
+}
+
+interface PanBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
 const LAYER_LABEL: Record<CanvasLayerId, string> = {
   "layer-background": "Background",
   "layer-panel": "Panel",
@@ -147,6 +159,7 @@ const SAFE_AREA_INSET_RATIO = 0.05;
 const RULER_SIZE_PX = 20;
 const RULER_LABEL_SPACING_PX = 84;
 const RULER_MINOR_DIVISIONS = 5;
+const WHEEL_PAN_SETTLE_MS = 100;
 const NUDGE_DIRECTION: Readonly<
   Partial<Record<string, readonly [x: number, y: number]>>
 > = {
@@ -344,6 +357,36 @@ function formatRulerValue(value: number, majorStep: number): string {
   return Object.is(rounded, -0) ? "0" : String(rounded);
 }
 
+function panBounds(
+  viewportWidth: number,
+  viewportHeight: number,
+  boardWidth: number,
+  boardHeight: number,
+  zoom: number,
+): PanBounds {
+  const horizontalReach = Math.max(
+    (boardWidth * zoom - viewportWidth) / 2,
+    0,
+  );
+  const verticalReach = Math.max(
+    (boardHeight * zoom - viewportHeight) / 2,
+    0,
+  );
+  return {
+    minX: -horizontalReach,
+    maxX: horizontalReach,
+    minY: -verticalReach,
+    maxY: verticalReach,
+  };
+}
+
+function clampPan(point: PanPoint, bounds: PanBounds): PanPoint {
+  return {
+    x: Math.max(bounds.minX, Math.min(bounds.maxX, point.x)),
+    y: Math.max(bounds.minY, Math.min(bounds.maxY, point.y)),
+  };
+}
+
 /**
  * Bounded inline-SVG editor. EditHistory is the only artwork state: the DOM,
  * overlay geometry, visibility gates, pending count, and API payload all read
@@ -361,6 +404,7 @@ export function CanvasStage({
   busy,
 }: CanvasStageProps): JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const baseRef = useRef<EditorBaseState | null>(null);
@@ -373,18 +417,23 @@ export function CanvasStage({
   const showingOriginalRef = useRef(false);
   const operationCounterRef = useRef(0);
   const brandColorsRef = useRef<readonly ApiColorRole[]>(brandColors);
+  const wheelPanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomRef = useRef<number | "fit">("fit");
 
   const [zoom, setZoom] = useState<number | "fit">("fit");
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPanToolActive, setIsPanToolActive] = useState(false);
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [isWheelPanning, setIsWheelPanning] = useState(false);
   const [showRulers, setShowRulers] = useState(true);
   const [showSafeArea, setShowSafeArea] = useState(true);
   const [snapLines, setSnapLines] = useState<SnapLines | null>(null);
 
   const [mounted, setMounted] = useState(false);
   const [stageWidth, setStageWidth] = useState(0);
+  const [panGeometryVersion, setPanGeometryVersion] = useState(0);
   const [baseVersion, setBaseVersion] = useState(0);
   const [history, setHistory] = useState<EditHistory>(EMPTY_HISTORY);
   const [showingOriginal, setShowingOriginal] = useState(false);
@@ -409,11 +458,74 @@ export function CanvasStage({
   const layers = useMemo(() => parsed?.layers ?? [], [parsed]);
   const viewBox = parsed?.viewBox ?? FALLBACK_VIEWBOX;
   const folded = useMemo(() => fold(history.ops), [history.ops]);
+  const isPanModeActive = isPanToolActive || isSpaceDown;
 
   historyRef.current = history;
   foldedRef.current = folded;
   editingRef.current = editing;
   brandColorsRef.current = brandColors;
+  zoomRef.current = zoom;
+
+  const clampPanForZoom = useCallback(
+    (point: PanPoint, zoomValue: number | "fit"): PanPoint => {
+      const viewport = canvasWrapRef.current;
+      const board = hostRef.current;
+      if (viewport === null || board === null) {
+        return { x: 0, y: 0 };
+      }
+      return clampPan(
+        point,
+        panBounds(
+          viewport.clientWidth,
+          viewport.clientHeight,
+          board.offsetWidth,
+          board.offsetHeight,
+          zoomValue === "fit" ? 1 : zoomValue,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleWheel = useCallback(
+    (event: WheelEvent): void => {
+      event.preventDefault();
+      if (event.metaKey || event.ctrlKey) {
+        const delta = event.deltaY > 0 ? -0.1 : 0.1;
+        const current = zoomRef.current === "fit" ? 1 : zoomRef.current;
+        const nextZoom = Math.max(0.1, Math.min(5, current + delta));
+        zoomRef.current = nextZoom;
+        setZoom(nextZoom);
+        setPan((currentPan) => clampPanForZoom(currentPan, nextZoom));
+        return;
+      }
+
+      const deltaScale =
+        event.deltaMode === 1
+          ? 16
+          : event.deltaMode === 2
+            ? canvasWrapRef.current?.clientHeight ?? 1
+            : 1;
+      setIsWheelPanning(true);
+      if (wheelPanTimerRef.current !== null) {
+        clearTimeout(wheelPanTimerRef.current);
+      }
+      wheelPanTimerRef.current = setTimeout(() => {
+        wheelPanTimerRef.current = null;
+        setIsWheelPanning(false);
+      }, WHEEL_PAN_SETTLE_MS);
+      setPan((currentPan) =>
+        clampPanForZoom(
+          {
+            x: currentPan.x - event.deltaX * deltaScale,
+            y: currentPan.y - event.deltaY * deltaScale,
+          },
+          zoomRef.current,
+        ),
+      );
+    },
+    [clampPanForZoom],
+  );
 
   const setCanonicalHistory = useCallback((next: EditHistory): void => {
     historyRef.current = next;
@@ -702,15 +814,38 @@ export function CanvasStage({
 
   useEffect(() => {
     const host = hostRef.current;
-    if (host === null) return undefined;
+    const viewport = canvasWrapRef.current;
+    if (host === null || viewport === null) return undefined;
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry !== undefined) setStageWidth(entry.contentRect.width);
+      const hostEntry = entries.find((entry) => entry.target === host);
+      if (hostEntry !== undefined) {
+        setStageWidth(hostEntry.contentRect.width);
+      }
+      setPanGeometryVersion((version) => version + 1);
     });
     observer.observe(host);
-    setStageWidth(host.getBoundingClientRect().width);
+    observer.observe(viewport);
+    setStageWidth(host.offsetWidth);
+    setPanGeometryVersion((version) => version + 1);
     return (): void => observer.disconnect();
   }, [parsed]);
+
+  useEffect(() => {
+    setPan((current) => {
+      const next =
+        zoom === "fit"
+          ? { x: 0, y: 0 }
+          : clampPanForZoom(current, zoom);
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+  }, [clampPanForZoom, panGeometryVersion, zoom]);
+
+  useEffect(() => {
+    const viewport = canvasWrapRef.current;
+    if (viewport === null) return undefined;
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return (): void => viewport.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
 
   const onChangeRef = useRef(onChange);
   useEffect(() => {
@@ -749,6 +884,9 @@ export function CanvasStage({
     return (): void => {
       if (textPreviewTimerRef.current !== null) {
         clearTimeout(textPreviewTimerRef.current);
+      }
+      if (wheelPanTimerRef.current !== null) {
+        clearTimeout(wheelPanTimerRef.current);
       }
     };
   }, []);
@@ -974,53 +1112,85 @@ export function CanvasStage({
     if (event.key === " ") {
       event.preventDefault();
       setIsSpaceDown(false);
-      setIsPanning(false);
+      if (!isPanToolActive) setIsPanning(false);
     }
   }
 
-  function handleWheel(event: React.WheelEvent<HTMLDivElement>): void {
-    if (event.metaKey || event.ctrlKey) {
-      event.preventDefault();
-      const delta = event.deltaY > 0 ? -0.1 : 0.1;
-      setZoom(z => {
-        const current = z === "fit" ? 1 : z;
-        return Math.max(0.1, Math.min(5, current + delta));
-      });
-    }
-  }
-
-  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const panStartRef = useRef({
+    pointerId: null as number | null,
+    x: 0,
+    y: 0,
+    panX: 0,
+    panY: 0,
+  });
 
   function handlePanStart(event: React.PointerEvent<HTMLDivElement>): void {
-    if ((isSpaceDown || event.button === 1) && zoom !== "fit") {
-      event.preventDefault();
-      setIsPanning(true);
-      panStartRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
-      event.currentTarget.setPointerCapture(event.pointerId);
+    const primaryPan = isPanModeActive && event.button === 0;
+    if ((!primaryPan && event.button !== 1) || panStartRef.current.pointerId !== null) {
+      return;
     }
+    event.preventDefault();
+    stageRef.current?.focus({ preventScroll: true });
+    const startPan = clampPanForZoom(pan, zoom);
+    setPan(startPan);
+    setIsPanning(true);
+    panStartRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      panX: startPan.x,
+      panY: startPan.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function handlePanMove(event: React.PointerEvent<HTMLDivElement>): void {
-    if (isPanning && event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.preventDefault();
-      const dx = event.clientX - panStartRef.current.x;
-      const dy = event.clientY - panStartRef.current.y;
-      setPan({ x: panStartRef.current.panX + dx, y: panStartRef.current.panY + dy });
+    if (
+      !isPanning ||
+      panStartRef.current.pointerId !== event.pointerId ||
+      !event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      return;
     }
+    event.preventDefault();
+    const dx = event.clientX - panStartRef.current.x;
+    const dy = event.clientY - panStartRef.current.y;
+    setPan(
+      clampPanForZoom(
+        {
+          x: panStartRef.current.panX + dx,
+          y: panStartRef.current.panY + dy,
+        },
+        zoom,
+      ),
+    );
   }
 
   function handlePanEnd(event: React.PointerEvent<HTMLDivElement>): void {
-    if (isPanning) {
-      setIsPanning(false);
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
+    if (panStartRef.current.pointerId !== event.pointerId) return;
+    panStartRef.current.pointerId = null;
+    setIsPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
   }
 
   function handleZoomChange(newZoom: number | "fit"): void {
+    zoomRef.current = newZoom;
     setZoom(newZoom);
-    if (newZoom === "fit") setPan({ x: 0, y: 0 });
+    setPan((current) =>
+      newZoom === "fit"
+        ? { x: 0, y: 0 }
+        : clampPanForZoom(current, newZoom),
+    );
+  }
+
+  function handlePanToolToggle(): void {
+    if (!isPanToolActive && editingRef.current !== null) {
+      commitTextEdit();
+    }
+    if (!isPanToolActive) setHoveredId(null);
+    setIsPanToolActive((current) => !current);
   }
 
   function resetLayer(layerId: CanvasLayerId): void {
@@ -1101,6 +1271,7 @@ export function CanvasStage({
   function handleStageClick(
     event: ReactMouseEvent<HTMLDivElement>,
   ): void {
+    if (isPanModeActive) return;
     stageRef.current?.focus({ preventScroll: true });
     const layer = layerFromEventTarget(event.target);
     setSelectedId(layer === null ? null : layer.id);
@@ -1109,6 +1280,7 @@ export function CanvasStage({
   function handleStageDoubleClick(
     event: ReactMouseEvent<HTMLDivElement>,
   ): void {
+    if (isPanModeActive) return;
     const layer = layerFromEventTarget(event.target);
     if (layer !== null) openTextEditor(layer);
   }
@@ -1248,12 +1420,7 @@ export function CanvasStage({
           flexDirection: "column", 
           gap: "var(--sp-3)", 
           position: "relative",
-          cursor: isSpaceDown ? (isPanning ? "grabbing" : "grab") : "default"
         }}
-        onPointerDown={handlePanStart}
-        onPointerMove={handlePanMove}
-        onPointerUp={handlePanEnd}
-        onWheel={handleWheel}
       >
         <div className="creview__stage-head">
           <span className="creview__meta">Canvas</span>
@@ -1284,11 +1451,14 @@ export function CanvasStage({
             Before/After
           </button>
           <span className="creview__hint">
-            Click a layer · drag to move · double-click text to edit
+            {isPanToolActive
+              ? "Pan tool active · drag the canvas to move it"
+              : "Click a layer · drag to move · scroll to pan"}
           </span>
         </div>
 
         <div
+          ref={canvasWrapRef}
           className="creview__canvas-wrap"
           data-canvas-wrap=""
           style={{
@@ -1298,7 +1468,19 @@ export function CanvasStage({
             alignItems: "center",
             justifyContent: "center",
             position: "relative",
+            cursor: isPanModeActive
+              ? isPanning
+                ? "grabbing"
+                : "grab"
+              : "default",
+            touchAction: isPanModeActive ? "none" : "auto",
+            overscrollBehavior: "contain",
           }}
+          onPointerDown={handlePanStart}
+          onPointerMove={handlePanMove}
+          onPointerUp={handlePanEnd}
+          onPointerCancel={handlePanEnd}
+          onLostPointerCapture={handlePanEnd}
         >
           {showingOriginal && (
             <span className="creview__original-badge" role="status" style={{ zIndex: 10 }}>
@@ -1353,7 +1535,15 @@ export function CanvasStage({
               overflow: "visible",
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom === "fit" ? 1 : zoom})`,
               transformOrigin: "center",
-              transition: isPanning ? "none" : "transform 0.15s ease",
+              transition:
+                isPanning || isWheelPanning
+                  ? "none"
+                  : "transform 0.15s ease",
+              cursor: isPanModeActive
+                ? isPanning
+                  ? "grabbing"
+                  : "grab"
+                : "default",
             }}
           >
             {parsed === null ? (
@@ -1584,7 +1774,8 @@ export function CanvasStage({
                         role="button"
                         aria-label={`Select ${LAYER_LABEL[layer.id]}`}
                         style={{
-                          pointerEvents: visible && !isSpaceDown ? "all" : "none",
+                          pointerEvents:
+                            visible && !isPanModeActive ? "all" : "none",
                           touchAction: "none",
                           cursor: draggingLayer !== null ? "grabbing" : "grab",
                         }}
@@ -1595,6 +1786,7 @@ export function CanvasStage({
                           )
                         }
                         onPointerDown={(event): void => {
+                          if (event.button === 1) return;
                           stageRef.current?.focus({ preventScroll: true });
                           setSelectedId(layer.id);
                           beginMove(layer.id, event);
@@ -1640,7 +1832,9 @@ export function CanvasStage({
                   )}
                 </svg>
 
-                {hoveredLayer !== null && hoveredBox !== null && !isSpaceDown && (
+                {hoveredLayer !== null &&
+                  hoveredBox !== null &&
+                  !isPanModeActive && (
                   <svg
                     viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
                     aria-hidden="true"
@@ -1677,7 +1871,8 @@ export function CanvasStage({
 
                 {selectedLayer !== null &&
                   selectedBaseBox !== null &&
-                  selectedBox !== null && !isSpaceDown && (
+                  selectedBox !== null &&
+                  !isPanModeActive && (
                     <svg
                       viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
                       aria-hidden="true"
@@ -1706,9 +1901,10 @@ export function CanvasStage({
                             touchAction: "none",
                             cursor: draggingLayer !== null ? "grabbing" : "grab",
                           }}
-                          onPointerDown={(event): void =>
-                            beginMove(selectedLayer.id, event)
-                          }
+                          onPointerDown={(event): void => {
+                            if (event.button === 1) return;
+                            beginMove(selectedLayer.id, event);
+                          }}
                           onDoubleClick={(event): void => {
                             event.stopPropagation();
                             openTextEditor(selectedLayer);
@@ -1738,14 +1934,15 @@ export function CanvasStage({
                                 : "grab",
                           }}
                           aria-label="Rotate layer"
-                          onPointerDown={(event): void =>
+                          onPointerDown={(event): void => {
+                            if (event.button === 1) return;
                             beginRotate(
                               selectedLayer.id,
                               event,
                               selectedBaseBox,
                               selectedTransform,
-                            )
-                          }
+                            );
+                          }}
                         />
                         {RESIZE_HANDLES.map((resizeHandle) => (
                           <rect
@@ -1774,15 +1971,16 @@ export function CanvasStage({
                             }}
                             // Gate 4a resize deltas remain screen-axis based. Rotation is
                             // preserved, but resize directions are only exact at 0 degrees.
-                            onPointerDown={(event): void =>
+                            onPointerDown={(event): void => {
+                              if (event.button === 1) return;
                               beginResize(
                                 selectedLayer.id,
                                 resizeHandle.handle,
                                 event,
                                 selectedBaseBox,
                                 selectedTransform,
-                              )
-                            }
+                              );
+                            }}
                           />
                         ))}
                       </g>
@@ -1878,6 +2076,8 @@ export function CanvasStage({
            <ZoomControls
              zoom={zoom}
              onZoomChange={handleZoomChange}
+             isPanToolActive={isPanToolActive}
+             onTogglePanTool={handlePanToolToggle}
              creativeSize={{ w: viewBox.w, h: viewBox.h }}
              creativeFormat={Math.abs(viewBox.w / viewBox.h - 1) < 0.01 ? "Square / IG Post" : (Math.abs(viewBox.w / viewBox.h - 4/5) < 0.01 ? "IG Portrait" : (Math.abs(viewBox.w / viewBox.h - 9/16) < 0.01 ? "Story" : (viewBox.w > viewBox.h ? "Landscape" : "Portrait")))}
              isFullscreen={isFullscreen}
