@@ -131,6 +131,15 @@ interface PanBounds {
   maxY: number;
 }
 
+type GuideAxis = "x" | "y";
+
+interface GuideDrag {
+  axis: GuideAxis;
+  index: number;
+  initialValue: number | null;
+  pointerId: number;
+}
+
 const LAYER_LABEL: Record<CanvasLayerId, string> = {
   "layer-background": "Background",
   "layer-panel": "Panel",
@@ -164,6 +173,8 @@ const SAFE_AREA_INSET_RATIO = 0.05;
 const RULER_SIZE_PX = 20;
 const RULER_LABEL_SPACING_PX = 84;
 const RULER_MINOR_DIVISIONS = 5;
+const GUIDE_GRAB_BAND_PX = 10;
+const PAN_OVERSCROLL_RATIO = 0.4;
 const WHEEL_PAN_SETTLE_MS = 100;
 const NUDGE_DIRECTION: Readonly<
   Partial<Record<string, readonly [x: number, y: number]>>
@@ -387,11 +398,11 @@ function panBounds(
   const horizontalReach = Math.max(
     (boardWidth * zoom - viewportWidth) / 2,
     0,
-  );
+  ) + viewportWidth * PAN_OVERSCROLL_RATIO;
   const verticalReach = Math.max(
     (boardHeight * zoom - viewportHeight) / 2,
     0,
-  );
+  ) + viewportHeight * PAN_OVERSCROLL_RATIO;
   return {
     minX: -horizontalReach,
     maxX: horizontalReach,
@@ -439,6 +450,7 @@ export function CanvasStage({
   const brandColorsRef = useRef<readonly ApiColorRole[]>(brandColors);
   const wheelPanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomRef = useRef<number | "fit">("fit");
+  const guideDragRef = useRef<GuideDrag | null>(null);
 
   const [zoom, setZoom] = useState<number | "fit">("fit");
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -449,6 +461,9 @@ export function CanvasStage({
   const [isWheelPanning, setIsWheelPanning] = useState(false);
   const [showRulers, setShowRulers] = useState(true);
   const [showSafeArea, setShowSafeArea] = useState(true);
+  // Editor aids are deliberately outside EditHistory and creative revisions.
+  const [customXGuides, setCustomXGuides] = useState<number[]>([]);
+  const [customYGuides, setCustomYGuides] = useState<number[]>([]);
   const [snapLines, setSnapLines] = useState<SnapLines | null>(null);
 
   const [mounted, setMounted] = useState(false);
@@ -645,6 +660,123 @@ export function CanvasStage({
     return width > 0 ? viewBox.w / width : 1;
   }, [viewBox.w]);
 
+  const clientPointToViewBox = useCallback(
+    (clientX: number, clientY: number): PanPoint | null => {
+      const host = hostRef.current;
+      if (host === null) return null;
+      const rect = host.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      return {
+        x: viewBox.x + ((clientX - rect.left) / rect.width) * viewBox.w,
+        y: viewBox.y + ((clientY - rect.top) / rect.height) * viewBox.h,
+      };
+    },
+    [viewBox.h, viewBox.w, viewBox.x, viewBox.y],
+  );
+
+  function updateGuide(axis: GuideAxis, index: number, value: number): void {
+    const update = (current: number[]): number[] =>
+      current.map((guide, guideIndex) =>
+        guideIndex === index ? value : guide,
+      );
+    if (axis === "x") setCustomXGuides(update);
+    else setCustomYGuides(update);
+  }
+
+  function removeGuide(axis: GuideAxis, index: number): void {
+    const remove = (current: number[]): number[] =>
+      current.filter((_, guideIndex) => guideIndex !== index);
+    if (axis === "x") setCustomXGuides(remove);
+    else setCustomYGuides(remove);
+  }
+
+  function beginGuideDrag(
+    axis: GuideAxis,
+    existingIndex: number | null,
+    event: ReactPointerEvent<SVGElement>,
+  ): void {
+    if (event.button !== 0 || guideDragRef.current !== null) return;
+    const point = clientPointToViewBox(event.clientX, event.clientY);
+    if (point === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const value = axis === "x" ? point.x : point.y;
+    const guides = axis === "x" ? customXGuides : customYGuides;
+    const index = existingIndex ?? guides.length;
+    const initialValue =
+      existingIndex === null ? null : (guides[existingIndex] ?? value);
+    if (existingIndex === null) {
+      if (axis === "x") setCustomXGuides((current) => [...current, value]);
+      else setCustomYGuides((current) => [...current, value]);
+    }
+    guideDragRef.current = {
+      axis,
+      index,
+      initialValue,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleGuideDragMove(
+    event: ReactPointerEvent<SVGElement>,
+  ): void {
+    const drag = guideDragRef.current;
+    if (
+      drag === null ||
+      drag.pointerId !== event.pointerId ||
+      !event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      return;
+    }
+    const point = clientPointToViewBox(event.clientX, event.clientY);
+    if (point === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    updateGuide(drag.axis, drag.index, drag.axis === "x" ? point.x : point.y);
+  }
+
+  function finishGuideDrag(
+    event: ReactPointerEvent<SVGElement>,
+    cancelled: boolean,
+  ): void {
+    const drag = guideDragRef.current;
+    if (drag === null || drag.pointerId !== event.pointerId) return;
+    const point = clientPointToViewBox(event.clientX, event.clientY);
+    guideDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (cancelled || point === null) {
+      if (drag.initialValue === null) removeGuide(drag.axis, drag.index);
+      else updateGuide(drag.axis, drag.index, drag.initialValue);
+      return;
+    }
+
+    const rulerThickness = RULER_SIZE_PX * getScreenToViewBox();
+    const outsideCanvas =
+      point.x < viewBox.x ||
+      point.x > viewBox.x + viewBox.w ||
+      point.y < viewBox.y ||
+      point.y > viewBox.y + viewBox.h;
+    const overRuler =
+      point.x <= viewBox.x + rulerThickness ||
+      point.y <= viewBox.y + rulerThickness;
+    if (outsideCanvas || overRuler) {
+      removeGuide(drag.axis, drag.index);
+      return;
+    }
+    updateGuide(
+      drag.axis,
+      drag.index,
+      drag.axis === "x" ? point.x : point.y,
+    );
+  }
+
   const getCanonicalTransform = useCallback(
     (layerId: CanvasLayerId): LayerTransform =>
       fold(historyRef.current.ops).transform[layerId] ?? IDENTITY_TRANSFORM,
@@ -703,11 +835,13 @@ export function CanvasStage({
         viewBox.x + viewBox.w / 2,
         viewBox.x + inset,
         viewBox.x + viewBox.w - inset,
+        ...(showRulers ? customXGuides : []),
       ];
       const yGuides = [
         viewBox.y + viewBox.h / 2,
         viewBox.y + inset,
         viewBox.y + viewBox.h - inset,
+        ...(showRulers ? customYGuides : []),
       ];
 
       for (const layer of layers) {
@@ -734,7 +868,17 @@ export function CanvasStage({
         threshold,
       );
     },
-    [layerBox, layers, viewBox.h, viewBox.w, viewBox.x, viewBox.y],
+    [
+      customXGuides,
+      customYGuides,
+      layerBox,
+      layers,
+      showRulers,
+      viewBox.h,
+      viewBox.w,
+      viewBox.x,
+      viewBox.y,
+    ],
   );
 
   const { draggingLayer, beginMove, beginResize, beginRotate } = useLayerDrag({
@@ -856,10 +1000,7 @@ export function CanvasStage({
 
   useEffect(() => {
     setPan((current) => {
-      const next =
-        zoom === "fit"
-          ? { x: 0, y: 0 }
-          : clampPanForZoom(current, zoom);
+      const next = clampPanForZoom(current, zoom);
       return next.x === current.x && next.y === current.y ? current : next;
     });
   }, [clampPanForZoom, panGeometryVersion, zoom]);
@@ -1209,6 +1350,7 @@ export function CanvasStage({
   function handleZoomChange(newZoom: number | "fit"): void {
     zoomRef.current = newZoom;
     setZoom(newZoom);
+    // Fit remains the explicit way home after free-panning at any zoom.
     setPan((current) =>
       newZoom === "fit"
         ? { x: 0, y: 0 }
@@ -1487,7 +1629,7 @@ export function CanvasStage({
           <span className="creview__hint">
             {isPanToolActive
               ? "Pan tool active · drag the canvas to move it"
-              : "Click a layer · drag to move · scroll to pan"}
+              : "Click a layer · drag to move · scroll to pan · drag rulers for guides"}
           </span>
         </div>
 
@@ -1544,7 +1686,7 @@ export function CanvasStage({
               type="button"
               className="btn btn--ghost btn--sm"
               aria-pressed={showRulers}
-              title="Toggle canvas rulers"
+              title="Toggle canvas rulers and custom guides"
               onClick={(): void => setShowRulers((current) => !current)}
             >
               Rulers
@@ -1558,6 +1700,20 @@ export function CanvasStage({
             >
               Safe area
             </button>
+            {customXGuides.length + customYGuides.length > 0 && (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                title="Remove all custom guides"
+                onClick={(): void => {
+                  setCustomXGuides([]);
+                  setCustomYGuides([]);
+                  setSnapLines(null);
+                }}
+              >
+                Clear guides
+              </button>
+            )}
           </div>
           
           <div
@@ -1832,6 +1988,164 @@ export function CanvasStage({
                       />
                     );
                   })}
+                  {showRulers && (
+                    <g data-canvas-custom-guides="">
+                      {customXGuides.map((guide, index) => (
+                        <g key={`custom-x-${index}`}>
+                          <line
+                            data-custom-guide-axis="x"
+                            data-guide-index={index}
+                            x1={guide}
+                            y1={viewBox.y}
+                            x2={guide}
+                            y2={viewBox.y + viewBox.h}
+                            stroke="var(--accent)"
+                            strokeOpacity="0.88"
+                            strokeWidth={1.25 * unit}
+                            style={{ pointerEvents: "none" }}
+                          />
+                          <line
+                            data-custom-guide-grab-axis="x"
+                            data-guide-index={index}
+                            x1={guide}
+                            y1={viewBox.y + RULER_SIZE_PX * unit}
+                            x2={guide}
+                            y2={viewBox.y + viewBox.h}
+                            stroke="transparent"
+                            strokeWidth={GUIDE_GRAB_BAND_PX * unit}
+                            aria-label={`Move vertical guide ${index + 1}`}
+                            style={{
+                              pointerEvents: "stroke",
+                              touchAction: "none",
+                              cursor: "ew-resize",
+                            }}
+                            onPointerDown={(event): void =>
+                              beginGuideDrag("x", index, event)
+                            }
+                            onPointerMove={handleGuideDragMove}
+                            onPointerUp={(event): void =>
+                              finishGuideDrag(event, false)
+                            }
+                            onPointerCancel={(event): void =>
+                              finishGuideDrag(event, true)
+                            }
+                            onLostPointerCapture={(event): void =>
+                              finishGuideDrag(event, true)
+                            }
+                          />
+                        </g>
+                      ))}
+                      {customYGuides.map((guide, index) => (
+                        <g key={`custom-y-${index}`}>
+                          <line
+                            data-custom-guide-axis="y"
+                            data-guide-index={index}
+                            x1={viewBox.x}
+                            y1={guide}
+                            x2={viewBox.x + viewBox.w}
+                            y2={guide}
+                            stroke="var(--accent)"
+                            strokeOpacity="0.88"
+                            strokeWidth={1.25 * unit}
+                            style={{ pointerEvents: "none" }}
+                          />
+                          <line
+                            data-custom-guide-grab-axis="y"
+                            data-guide-index={index}
+                            x1={viewBox.x + RULER_SIZE_PX * unit}
+                            y1={guide}
+                            x2={viewBox.x + viewBox.w}
+                            y2={guide}
+                            stroke="transparent"
+                            strokeWidth={GUIDE_GRAB_BAND_PX * unit}
+                            aria-label={`Move horizontal guide ${index + 1}`}
+                            style={{
+                              pointerEvents: "stroke",
+                              touchAction: "none",
+                              cursor: "ns-resize",
+                            }}
+                            onPointerDown={(event): void =>
+                              beginGuideDrag("y", index, event)
+                            }
+                            onPointerMove={handleGuideDragMove}
+                            onPointerUp={(event): void =>
+                              finishGuideDrag(event, false)
+                            }
+                            onPointerCancel={(event): void =>
+                              finishGuideDrag(event, true)
+                            }
+                            onLostPointerCapture={(event): void =>
+                              finishGuideDrag(event, true)
+                            }
+                          />
+                        </g>
+                      ))}
+                    </g>
+                  )}
+                  {showRulers && (
+                    <g data-ruler-drag-zones="">
+                      <rect
+                        data-ruler-drag-axis="y"
+                        x={viewBox.x + RULER_SIZE_PX * unit}
+                        y={viewBox.y}
+                        width={Math.max(
+                          viewBox.w - RULER_SIZE_PX * unit,
+                          0,
+                        )}
+                        height={RULER_SIZE_PX * unit}
+                        fill="transparent"
+                        aria-label="Drag to create a horizontal guide"
+                        style={{
+                          pointerEvents: "all",
+                          touchAction: "none",
+                          cursor: "ns-resize",
+                        }}
+                        onPointerDown={(event): void =>
+                          beginGuideDrag("y", null, event)
+                        }
+                        onPointerMove={handleGuideDragMove}
+                        onPointerUp={(event): void =>
+                          finishGuideDrag(event, false)
+                        }
+                        onPointerCancel={(event): void =>
+                          finishGuideDrag(event, true)
+                        }
+                        onLostPointerCapture={(event): void =>
+                          finishGuideDrag(event, true)
+                        }
+                      />
+                      <rect
+                        data-ruler-drag-axis="x"
+                        x={viewBox.x}
+                        y={viewBox.y + RULER_SIZE_PX * unit}
+                        width={RULER_SIZE_PX * unit}
+                        height={Math.max(
+                          viewBox.h - RULER_SIZE_PX * unit,
+                          0,
+                        )}
+                        fill="transparent"
+                        aria-label="Drag to create a vertical guide"
+                        style={{
+                          pointerEvents: "all",
+                          touchAction: "none",
+                          cursor: "ew-resize",
+                        }}
+                        onPointerDown={(event): void =>
+                          beginGuideDrag("x", null, event)
+                        }
+                        onPointerMove={handleGuideDragMove}
+                        onPointerUp={(event): void =>
+                          finishGuideDrag(event, false)
+                        }
+                        onPointerCancel={(event): void =>
+                          finishGuideDrag(event, true)
+                        }
+                        onLostPointerCapture={(event): void =>
+                          finishGuideDrag(event, true)
+                        }
+                      />
+                    </g>
+                  )}
                   {snapLines !== null && (
                     <g
                       data-canvas-snap-lines=""
