@@ -4,7 +4,50 @@
 
 ---
 
-## ► LATEST (2026-07-23 pm4) — CANVAS EDITOR REBUILD: GATES 1-3 DONE + PLAYWRIGHT-PROVEN; G4 (all-sides resize) in flight
+## ► LATEST (2026-07-23 pm5) — EDITOR GATES 1-4a DONE + APPLY BUG FIXED; PM report + 3-persona audit prompt written; G4b + app-shell UX next
+
+**Editor rebuild (audit 13/40 → usable):** Gates 1 (`d592106`/`3eeb274`), 2 (`d911ac0`), 3 (`0b7812f`),
+4-contract (`e9640f8` sibling), 4a all-sides resize (`11baf99` be + `5fc85b4` fe) — ALL Playwright-proven.
+**Apply bug FIXED (`e38f534`):** resize could emit a scale axis outside the contract (0,3] → 422 "rejected
+as invalid"; now clamped at the `toCanvasRevision` payload boundary. Verified: aggressive resize → Apply 201.
+
+**NEW DOCS (deliverables for the operator + next session):**
+- `docs/PRODUCT_PM_REPORT.md` — top-to-bottom product report (what/why/end-goal/personas/loop/gaps/roadmap).
+- `docs/AUDIT_3PERSONA_PROMPT.md` — paste-into-Chrome-extension script: full-loop 3-persona audit
+  (new client → brand brief → generate → review → EDITOR every-feature → approve → deliver → portal),
+  judges each view, ranked P0-P3 + editor feature-completeness table.
+
+### ▶ OPERATOR FEEDBACK BACKLOG (2026-07-23 — real issues to fix next)
+- **App-shell UX:** nav rail is ICON-ONLY → add labels/expand-on-hover. Editor shows the "All clients"
+  sidebar it doesn't need → collapse app chrome by default in the editor (full-screen exists but isn't
+  default). Judge every view: show only what the task needs.
+- **Editor missing (Gate 4b):** rulers · margins/safe-area overlay · guides/snap · **rotation handle**
+  (contract+render READY, only UI) · layer tree · align/distribute · multi-select · keyboard shortcuts.
+- **Product decisions (need operator sign-off):** (a) **aspect-ratio/size switch** (1:1 / 4:5 / 9:16 story)
+  — NOT a resize; = re-compose/re-render the layout at new dimensions. (b) **custom colours** beyond the
+  brand palette — today recolor is brand-bounded (LOCKED, brand-safety); add a "brand + custom" mode without
+  breaking client-facing safety.
+- **"Why all clients always seen?"** — those are the OPERATOR's own agency clients (correct, not a leak);
+  a CLIENT principal only ever sees itself (enforced). The fix is only to hide the client list in the editor.
+
+### ▶ FRESH-SESSION KICKOFF (paste to start next session)
+"You are the BRAIN orchestrating Mimik Suite. Read HANDOFF.md (top entry) → docs/PRODUCT_PM_REPORT.md →
+docs/BUILD_STATUS.md. Confirm the product runs (API :8000 w/ paid TEXT keys, uvicorn NOT --reload; web
+`cd web && NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev`; if web 500s `rm -rf web/.next` + restart).
+Editor Gates 1-4a done + Apply fixed; verify recipe = drive the real app with Playwright
+(scratchpad/verify_editor.py etc.) — executors' tsc/tests are NOT enough. THIS SESSION: (1) app-shell UX pass
+(labeled/expandable nav; editor collapses client chrome by default; per-view contextual cleanup) — Fable +
+frontend-design; (2) Gate 4b: rotation handle → rulers/margins/guides/snap → layer tree → multi-select/
+shortcuts — Codex geometry + AGY big UI, Opus specs + Playwright-verifies each; (3) surface the two product
+decisions (aspect-ratio switch, custom-colour mode) for operator sign-off before building. Operating model:
+Opus plans/specs/reviews; Codex=logic/backend/geometry, AGY=big UI, Fable=design-polish; executors never
+commit; Opus commits after Playwright live-verify. Deploy HELD."
+
+### ▶ ALSO STILL OPEN (paused): W4 A-05 (⌘K), A-07/A-08/A-09/A-11/B-12, gates A-12/B-14.
+
+---
+
+## ► (2026-07-23 pm4) — CANVAS EDITOR REBUILD: GATES 1-3 DONE + PLAYWRIGHT-PROVEN; G4 (all-sides resize) in flight
 
 **All browser-verified with the Playwright recipe (drive the real app; executors' tsc/tests are NOT enough).**
 - **GATE 1** (`d592106` core + `3eeb274` client-context) — canonical `EditHistory→fold→applyState` state;
