@@ -7,6 +7,7 @@ import {
   type CreateCreativeBody,
   createCreativeVersion,
   mintMagicLink,
+  recordPreferenceSignal,
   submitApproval,
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
@@ -66,6 +67,7 @@ export interface MintLinkResult {
 
 export async function editCopyAction(
   jobId: string,
+  clientId: string,
   body: CreateCreativeBody,
 ): Promise<ReviewActionResult> {
   const token = await getSessionToken();
@@ -76,7 +78,26 @@ export async function editCopyAction(
     return { ok: false, error: "The headline can't be empty." };
   }
   try {
-    await createCreativeVersion(jobId, body, token);
+    const doc = await createCreativeVersion(jobId, body, token);
+    // Feed the learning loop. Minting a new version via the copy/layout editor is a hand-edit
+    // ("edit" signal). Unlike the canvas /revise and /approvals paths — which record their own
+    // signals server-side — the create-version endpoint records NONE, so this is the one review
+    // action that would otherwise be write-blind. Best-effort: a signal failure must never fail
+    // the save the user already completed, and must never double-count elsewhere.
+    try {
+      await recordPreferenceSignal(
+        clientId,
+        {
+          source: "edit",
+          creative_doc_id: doc.id,
+          job_id: jobId,
+          detail: "edited via copy/layout editor",
+        },
+        token,
+      );
+    } catch (signalError) {
+      console.warn(`[mimik-web] preference signal (edit) not recorded (${String(signalError)})`);
+    }
     revalidatePath(`/jobs/${jobId}/review`);
     return { ok: true };
   } catch (error) {

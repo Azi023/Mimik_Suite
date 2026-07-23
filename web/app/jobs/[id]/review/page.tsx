@@ -109,7 +109,7 @@ export default async function CreativeReviewPage({
         approvals={audit.approvals}
         deliveries={audit.deliveries}
         mintLink={mintMagicLinkAction.bind(null, job.id)}
-        editCopyAction={editCopyAction.bind(null, job.id)}
+        editCopyAction={editCopyAction.bind(null, job.id, job.client_id)}
       />
     </AppShell>
   );

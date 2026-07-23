@@ -834,6 +834,64 @@ export function transitionJob(
   );
 }
 
+/* ---------------------------------------------------------------------------
+   Command Center — the generation queue (the "generate" entry of the ops loop).
+--------------------------------------------------------------------------- */
+
+/** mimik_contracts.enums.TaskStatus — the queue item's lifecycle. */
+export type ApiTaskStatus = "open" | "in_progress" | "done";
+
+/** mimik_contracts.ops.GenerationQueueItem — one queued generation request. */
+export interface ApiGenerationQueueItem {
+  id: string;
+  job_id: string;
+  client_id: string;
+  topic: string;
+  pillar: string | null;
+  format_key: string;
+  status: ApiTaskStatus;
+  requested_by: ApiActor;
+  created_at: string;
+  error: string | null;
+}
+
+/** mimik_contracts.ops.QueueStats — the queue's aggregate counters. */
+export interface ApiQueueStats {
+  pending: number;
+  in_progress: number;
+  done_today: number;
+  failed_today: number;
+}
+
+/** POST /ops/queue body (api.routers.ops.EnqueueGenerationRequest). `pillar` is the pillar
+ *  NAME (free text, not an id); `format_key` must be a known preset or the API 422s. */
+export interface EnqueueGenerationBody {
+  client_id: string;
+  topic: string;
+  pillar?: string;
+  format_key?: string;
+}
+
+/** GET /ops/queue — the tenant's generation queue, newest-relevant first. Team-gated (403 for a
+ *  client principal). */
+export function fetchGenerationQueue(sessionToken?: string): Promise<ApiGenerationQueueItem[]> {
+  return apiGet<ApiGenerationQueueItem[]>("/ops/queue", sessionToken);
+}
+
+/** GET /ops/queue/stats — pending / in-progress / done-today / failed-today counters. Team-gated. */
+export function fetchQueueStats(sessionToken?: string): Promise<ApiQueueStats> {
+  return apiGet<ApiQueueStats>("/ops/queue/stats", sessionToken);
+}
+
+/** POST /ops/queue — enqueue a generation request. Team-gated (403 for a client principal); an
+ *  unknown format_key or blank topic 422s; a foreign/unknown client 404s. */
+export function enqueueGeneration(
+  body: EnqueueGenerationBody,
+  sessionToken?: string,
+): Promise<ApiGenerationQueueItem> {
+  return apiPost<ApiGenerationQueueItem>("/ops/queue", body, sessionToken);
+}
+
 /**
  * POST /approvals — record an approve / request-change / comment action on a creative.
  * `targets` are only valid with `action: "request_change"` (the API 422s otherwise).
@@ -1038,6 +1096,40 @@ export function getPreferenceProfile(
 ): Promise<ApiPreferenceProfile> {
   return apiGet<ApiPreferenceProfile>(
     `/clients/${encodeURIComponent(clientId)}/preferences/profile`,
+    sessionToken,
+  );
+}
+
+/** mimik_contracts.enums.PreferenceSource — where a learning-loop signal came from. */
+export type ApiPreferenceSource = "pick" | "edit" | "rejection" | "approval";
+
+/**
+ * POST /clients/{id}/preferences body (api.routers.preferences.RecordSignal). `detail` is a note
+ * ABOUT the signal (data, not an instruction); `attributes` are salient creative facts the ranker
+ * scores on. NOTE: approve / reject / canvas-revise already emit their own signals server-side
+ * (api/services/approval_flow.py + creative_generation.py) — call this ONLY from actions that do
+ * NOT, or the profile double-counts.
+ */
+export interface RecordPreferenceBody {
+  source: ApiPreferenceSource;
+  creative_doc_id?: string;
+  job_id?: string;
+  detail?: string;
+  reason_tag?: string;
+  weight?: number;
+  attributes?: Record<string, string>;
+}
+
+/** POST /clients/{id}/preferences — record one learning-loop signal for the client's taste profile.
+ *  Any authed principal (client-confined at the data layer); returns the persisted signal (201). */
+export function recordPreferenceSignal(
+  clientId: string,
+  body: RecordPreferenceBody,
+  sessionToken?: string,
+): Promise<ApiPreferenceSignal> {
+  return apiPost<ApiPreferenceSignal>(
+    `/clients/${encodeURIComponent(clientId)}/preferences`,
+    body,
     sessionToken,
   );
 }

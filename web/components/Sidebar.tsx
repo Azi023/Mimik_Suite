@@ -243,6 +243,10 @@ export function Sidebar({ groups, onCollapse, mobile = false }: SidebarProps): J
                 </button>
               );
             })}
+            <Link className={`rail-btn${pathname.startsWith("/command") ? " rail-btn--active" : ""}`} href="/command" aria-label="Command Center">
+              <span className="rail-btn__icon"><CommandGlyph /></span>
+              <span className="rail-btn__label">Command</span>
+            </Link>
             <Link className={`rail-btn${pathname.startsWith("/tasks") ? " rail-btn--active" : ""}`} href="/tasks" aria-label="Tasks">
               <span className="rail-btn__icon"><TasksGlyph /></span>
               <span className="rail-btn__label">Tasks</span>
@@ -363,6 +367,15 @@ export function Sidebar({ groups, onCollapse, mobile = false }: SidebarProps): J
       </aside>
       )}
     </div>
+  );
+}
+
+/** A lightning glyph for the Command Center rail entry (the "generate" queue). */
+function CommandGlyph(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }
 

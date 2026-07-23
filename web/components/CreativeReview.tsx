@@ -158,6 +158,37 @@ function formatWhen(iso: string): string {
   return d.toLocaleString("en-GB", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+/** The auto brand-QA verdict `run_live_qa` folds into the L5 (finish) layer params. */
+interface QaVerdictData {
+  passed: boolean;
+  /** Human-readable "check: detail" strings; empty on a pass. */
+  failures: string[];
+  needsScrim: boolean;
+}
+
+/**
+ * Pull the persisted brand-QA verdict out of a creative's L5 (finish) layer. `run_live_qa` writes
+ * `qa_passed` / `qa_failures` / `qa_needs_scrim` into `recipe.params` on render (there is no
+ * dedicated manifest QA field yet), so it rides the CreativeDoc already fetched for review — no
+ * extra endpoint. Returns null when QA never ran on this version (the key is absent).
+ */
+function readQaVerdict(doc: ApiCreativeDoc): QaVerdictData | null {
+  const l5 = doc.manifest.layers.find((layer) => layer.kind === "L5_finish");
+  const params = l5?.recipe.params;
+  if (params === undefined || !("qa_passed" in params)) {
+    return null;
+  }
+  const failuresRaw = params.qa_failures;
+  const failures = Array.isArray(failuresRaw)
+    ? failuresRaw.filter((f): f is string => typeof f === "string")
+    : [];
+  return {
+    passed: params.qa_passed === true,
+    failures,
+    needsScrim: params.qa_needs_scrim === true,
+  };
+}
+
 /* ---------------------------------------------------------------------------
    Component.
 --------------------------------------------------------------------------- */
@@ -244,6 +275,8 @@ export function CreativeReview({
 
   const aspect = FORMAT_ASPECT.get(job.format_key) ?? 1;
   const copy = doc?.manifest.copy_block ?? null;
+  // The auto brand-QA verdict for the version currently in view (null until QA has run on it).
+  const qa = doc !== undefined ? readQaVerdict(doc) : null;
 
   // Canvas ground: an image layer's artifact_ref if it's a real URL, else the primary brand colour.
   const groundColor = brand.tokens.colors[0]?.hex ?? "#e9eaee";
@@ -668,6 +701,8 @@ export function CreativeReview({
           <ReviewStatus status={job.status} />
         </header>
 
+        {qa !== null && <QaVerdict verdict={qa} />}
+
         {mintLink !== undefined && (
           <button
             type="button"
@@ -1029,6 +1064,35 @@ export function CreativeReview({
 /* ---------------------------------------------------------------------------
    Sub-views.
 --------------------------------------------------------------------------- */
+
+/**
+ * The auto brand-QA critic's verdict for the in-view version: a pass/fail chip and, on a fail, the
+ * list of failed checks (contrast / knockout / brand-floor etc.) so the operator sees what the
+ * critic caught before deciding. Data comes straight off the L5 manifest params (readQaVerdict).
+ */
+function QaVerdict({ verdict }: { verdict: QaVerdictData }): JSX.Element {
+  const { passed, failures, needsScrim } = verdict;
+  return (
+    <div className={`creview__qa creview__qa--${passed ? "pass" : "fail"}`} aria-label="Brand QA">
+      <div className="creview__qa-head">
+        <span className={`creview__qa-chip creview__qa-chip--${passed ? "pass" : "fail"}`}>
+          <span className="creview__qa-dot" aria-hidden="true" />
+          {passed ? "Brand QA passed" : "Brand QA failed"}
+        </span>
+        {needsScrim && <span className="creview__qa-scrim">needs scrim</span>}
+      </div>
+      {!passed && failures.length > 0 && (
+        <ul className="creview__qa-list">
+          {failures.map((failure, i) => (
+            <li key={i} className="creview__qa-item">
+              {failure}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function ReviewStatus({ status }: { status: ApiJobStatus }): JSX.Element {
   const tone =
