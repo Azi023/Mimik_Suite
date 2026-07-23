@@ -36,7 +36,7 @@ from creative.pipeline import build_manifest
 from creative.qa.checks import QAReport
 from creative.qa.live import LIVE_QA_BLOCKING, LiveQABlocked, run_live_qa
 from creative.references import gather as reference_gather
-from creative.render import glo2go_templates
+from creative.render import glo2go_templates, nikah_templates
 from creative.style_profile import ImageSource, StyleProfile, get_style_profile
 from creative.vision import text_region as vision_text_region
 from creative.revision.interpreter import interpret_ask
@@ -315,6 +315,58 @@ def creative_artifact_path(creative_id: str, filename: str) -> Path:
 
 
 
+_NIKAH_PROTECTION_KEYWORDS = (
+    "protect",
+    "safe",
+    "trust",
+    "secur",
+    "privacy",
+    "guardian",
+    "modest",
+    "haya",
+)
+
+
+def _suggest_nikah(copy_block: CopyBlock) -> tuple[str, str | None, str]:
+    """Pick a Simply Nikah archetype (+ highlight word + hero symbol) from the copy.
+
+    v1 selection: trust/protection themes → protection_symbol_hero (no highlight needed);
+    otherwise the signature highlighted_word_hero, reversing out the headline's trailing
+    phrase (kept verbatim so it stays a substring the template can locate)."""
+    headline = (copy_block.headline or "").strip()
+    lower = headline.lower()
+    if any(keyword in lower for keyword in _NIKAH_PROTECTION_KEYWORDS):
+        return "protection_symbol_hero", None, "shield_crescent"
+    words = headline.split()
+    if len(words) >= 2:
+        return "highlighted_word_hero", " ".join(words[-2:]), "hands_heart"
+    return "protection_symbol_hero", None, "shield_crescent"
+
+
+async def _render_nikah_artifacts(
+    *, copy_block: CopyBlock, format_key: str, brand: Brand
+) -> tuple[str, bytes]:
+    """Render a Simply Nikah creative through the vector engine (M-01). Returns (svg, png)
+    so live QA can read the semantic-layer geometry. SN never takes a photo."""
+    archetype, highlight, hero_symbol = _suggest_nikah(copy_block)
+    copy: dict[str, str] = {"headline": copy_block.headline}
+    if copy_block.subhead:
+        copy["sub"] = copy_block.subhead
+    if copy_block.cta:
+        copy["cta"] = copy_block.cta
+    if highlight is not None:
+        copy["highlight"] = highlight
+    svg = nikah_templates.build_nikah_svg(
+        archetype,
+        copy=copy,
+        format_key=format_key,
+        hero_symbol=hero_symbol,
+        logo_ref=brand.tokens.logo.ref,
+    )
+    preview = await svg_export.rasterize_svg_to_png(svg, format_key)
+    return svg, preview
+
+
 async def _render_creative_artifacts(
     *,
     brand: Brand,
@@ -332,6 +384,25 @@ async def _render_creative_artifacts(
     ground = brand_color(brand, "ground", _profile_color(profile, "ground") or "#FFFFFF")
 
     profile_render_path: Path | None = None
+    # Simply Nikah renders through the vector engine (M-01) — faceless flat-vector, no photo.
+    # Vector composition IS the master here, so this REPLACES the photo-based render_creative_svg.
+    # Defensive: any nikah render failure falls back to the generic path so live generation never
+    # breaks. On success QA sees the true source kind (generated_vector), not the placeholder tag.
+    nikah_render: tuple[str, bytes] | None = None
+    effective_source_kind = source_kind
+    if profile_id == "simply-nikah":
+        try:
+            nikah_render = await _render_nikah_artifacts(
+                copy_block=copy_block, format_key=format_key, brand=brand
+            )
+            effective_source_kind = "generated_vector"
+        except Exception as exc:  # noqa: BLE001 — never let a render fault break generation
+            logger.warning(
+                "nikah render failed for format=%s (%s); using generic fallback",
+                format_key,
+                exc,
+            )
+
     if profile_id == "glo2go-aesthetics":
         profile_png = await glo2go_templates.render_glo2go(
             _GLO2GO_ARCHETYPE,
@@ -351,23 +422,26 @@ async def _render_creative_artifacts(
         profile_render_path = artifact_dir / "glo2go-render.png"
         profile_render_path.write_bytes(profile_png)
 
-    svg = svg_export.render_creative_svg(
-        format_key=format_key,
-        image_ref=str(image_path),
-        headline=copy_block.headline,
-        sub=copy_block.subhead,
-        cta=copy_block.cta,
-        palette_ink=ink,
-        palette_ground=ground,
-        badge_text=brand.name,
-        logo_ref=brand.tokens.logo.ref,
-        text_region=text_region,
-        panel_anchor=render_params.get("panel_anchor"),
-        text_alignment=render_params.get("text_alignment", "left"),
-        subject_zoom=render_params.get("subject_zoom", 1.0),
-        badge_background_luminance=render_params.get("badge_background_luminance"),
-    )
-    preview = await svg_export.rasterize_svg_to_png(svg, format_key)
+    if nikah_render is not None:
+        svg, preview = nikah_render
+    else:
+        svg = svg_export.render_creative_svg(
+            format_key=format_key,
+            image_ref=str(image_path),
+            headline=copy_block.headline,
+            sub=copy_block.subhead,
+            cta=copy_block.cta,
+            palette_ink=ink,
+            palette_ground=ground,
+            badge_text=brand.name,
+            logo_ref=brand.tokens.logo.ref,
+            text_region=text_region,
+            panel_anchor=render_params.get("panel_anchor"),
+            text_alignment=render_params.get("text_alignment", "left"),
+            subject_zoom=render_params.get("subject_zoom", 1.0),
+            badge_background_luminance=render_params.get("badge_background_luminance"),
+        )
+        preview = await svg_export.rasterize_svg_to_png(svg, format_key)
     svg_path = artifact_dir / "creative.svg"
     preview_path = artifact_dir / "preview.png"
     svg_path.write_text(svg, encoding="utf-8")
@@ -383,7 +457,7 @@ async def _render_creative_artifacts(
         brand=brand,
         profile=profile,
         format_key=format_key,
-        source_kind=source_kind,
+        source_kind=effective_source_kind,
         expect_logo=brand.tokens.logo.ref is not None,
     )
     if not qa_report.passed:
@@ -391,7 +465,7 @@ async def _render_creative_artifacts(
             "live brand-QA failed for profile=%s format=%s source=%s: %s",
             profile_id,
             format_key,
-            source_kind,
+            effective_source_kind,
             "; ".join(qa_report.failures),
         )
         if LIVE_QA_BLOCKING:
