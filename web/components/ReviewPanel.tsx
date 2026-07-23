@@ -1,21 +1,26 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type JSX } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
   ApiError,
   type ApiRevisionZone,
+  type ApiVersionHistory,
   type ApprovalActionKind,
   type ApprovalTarget,
   isApiConfigured,
-  submitApproval,
+  listCreativeVersions,
+  revertCreative,
   reviseCreative,
+  submitApproval,
   type ReviseCreativeBody,
 } from "@/lib/api";
 import type { CreativeDoc } from "@/lib/view-models";
 import { toReviewDoc } from "@/lib/data";
 import { slideInPanel, staggerFadeUp } from "@/lib/motion";
+import type { ApiRegionAsk, ApiTextEdits } from "./canvas/canvas-types";
+import { VersionRail } from "./canvas/VersionRail";
 import { LayerStrip } from "./LayerStrip";
 import { StatusPill } from "./StatusPill";
 
@@ -58,6 +63,19 @@ const ZONE_LABEL: ReadonlyMap<ApiRevisionZone, string> = new Map(
 const MAX_PINS = 10;
 /** Contract cap on RevisionTarget.instruction length. */
 const MAX_INSTRUCTION_CHARS = 500;
+/** Contract cap on each TextEdits value. */
+const MAX_TEXT_EDIT_CHARS = 200;
+
+/** Region-ask zones for the compact "Ask AI" form (RegionAsk zone values). */
+const ASK_ZONES: ReadonlyArray<{ zone: ApiRegionAsk["zone"]; label: string }> = [
+  { zone: "other", label: "Anywhere" },
+  { zone: "headline", label: "Headline" },
+  { zone: "subhead", label: "Subhead" },
+  { zone: "cta", label: "CTA" },
+  { zone: "badge", label: "Badge" },
+  { zone: "background", label: "Background" },
+  { zone: "panel", label: "Panel" },
+];
 
 /**
  * Right detail panel (reference: the chat/detail pane) — white, rounded-left,
@@ -84,44 +102,106 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
   const [previewFailed, setPreviewFailed] = useState(false);
 
   const [activeDoc, setActiveDoc] = useState<CreativeDoc>(doc);
-  const [history, setHistory] = useState<CreativeDoc[]>([doc]);
-  
+
+  // Persisted version history (GET /creatives/{id}/versions) — the ONE shared record
+  // the full-page editor also reads. Null until the first fetch lands.
+  const [versions, setVersions] = useState<ApiVersionHistory | null>(null);
+  const [versionsFailed, setVersionsFailed] = useState(false);
+
   // Editor state
   const [editHeadline, setEditHeadline] = useState("");
   const [editSub, setEditSub] = useState("");
   const [editCta, setEditCta] = useState("");
+  const [askZone, setAskZone] = useState<ApiRegionAsk["zone"]>("other");
   const [aiInstruction, setAiInstruction] = useState("");
   const [revising, setRevising] = useState(false);
-  
+  const [reverting, setReverting] = useState(false);
+  const [editorError, setEditorError] = useState("");
+
   // Keep activeDoc in sync if prop changes
   useLayoutEffect(() => {
     setActiveDoc(doc);
-    setHistory([doc]);
   }, [doc]);
 
-  async function handleRevise(body: ReviseCreativeBody) {
+  const refreshVersions = useCallback(async (creativeId: string): Promise<void> => {
+    try {
+      const history = await listCreativeVersions(creativeId);
+      setVersions(history);
+      setVersionsFailed(false);
+    } catch (error) {
+      console.warn(`[mimik-web] version history fetch failed (${String(error)})`);
+      setVersionsFailed(true);
+    }
+  }, []);
+
+  useEffect((): void => {
+    if (!isApiConfigured()) {
+      setVersionsFailed(true);
+      return;
+    }
+    void refreshVersions(doc.creativeDocId);
+  }, [doc.creativeDocId, refreshVersions]);
+
+  async function handleRevise(body: ReviseCreativeBody): Promise<void> {
     if (!isApiConfigured()) {
       setState("offline");
       return;
     }
     setRevising(true);
+    setEditorError("");
     try {
       const result = await reviseCreative(activeDoc.creativeDocId, body);
-      const newDoc = toReviewDoc(result.creative);
-      setHistory(prev => [...prev, newDoc]);
-      setActiveDoc(newDoc);
+      setActiveDoc(toReviewDoc(result.creative));
       // Clear inputs
       setEditHeadline("");
       setEditSub("");
       setEditCta("");
       setAiInstruction("");
-    } catch (e) {
-      console.error(e);
-      setSubmitError("Revise failed");
-      setState("error");
+      setAskZone("other");
+      await refreshVersions(result.creative.id);
+    } catch (error) {
+      console.warn(`[mimik-web] revise failed (${String(error)})`);
+      setEditorError("Revise failed — your inputs are kept.");
     } finally {
       setRevising(false);
     }
+  }
+
+  async function handleRevert(toCreativeId: string): Promise<void> {
+    if (!isApiConfigured()) {
+      setState("offline");
+      return;
+    }
+    if (revising || reverting) return;
+    setReverting(true);
+    setEditorError("");
+    try {
+      const result = await revertCreative(activeDoc.creativeDocId, toCreativeId);
+      setActiveDoc(toReviewDoc(result.creative));
+      await refreshVersions(result.creative.id);
+    } catch (error) {
+      console.warn(`[mimik-web] revert failed (${String(error)})`);
+      setEditorError("Revert failed — try again.");
+    } finally {
+      setReverting(false);
+    }
+  }
+
+  /** Typed text_edits from the quick inputs — only touched slots are carried. */
+  function applyTextEdits(): void {
+    const textEdits: ApiTextEdits = {};
+    if (editHeadline.trim() !== "") textEdits.headline = editHeadline.trim();
+    if (editSub.trim() !== "") textEdits.subhead = editSub.trim();
+    if (editCta.trim() !== "") textEdits.cta = editCta.trim();
+    if (Object.keys(textEdits).length === 0) return;
+    void handleRevise({ text_edits: textEdits });
+  }
+
+  /** Typed RegionAsk — the panel has no canvas, so bbox is always null. */
+  function askAi(): void {
+    const instruction = aiInstruction.trim();
+    if (instruction === "") return;
+    void handleRevise({ ask: { zone: askZone, bbox: null, instruction } });
   }
 
 
@@ -265,43 +345,142 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
         <p className="review-panel__note">{activeDoc.note}</p>
       </div>
 
-      
+
       <div className="review-panel__section">
-        <h3 className="review-panel__label">Editor</h3>
-        {revising && <p className="review-panel__note">Revising...</p>}
-        
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-          <input className="pin-composer__input" placeholder="Headline" value={editHeadline} onChange={e => setEditHeadline(e.target.value)} />
-          <input className="pin-composer__input" placeholder="Subhead" value={editSub} onChange={e => setEditSub(e.target.value)} />
-          <input className="pin-composer__input" placeholder="CTA" value={editCta} onChange={e => setEditCta(e.target.value)} />
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ edits: { headline: editHeadline || undefined, sub: editSub || undefined, cta: editCta || undefined }})}>Apply text</button>
+        <div className="review-panel__head">
+          <h3 className="review-panel__label" id="quick-edit-label">
+            Editor
+          </h3>
+          <Link
+            href={`/creatives/${activeDoc.creativeDocId}/edit`}
+            className="review-panel__fullreview"
+          >
+            Open in editor ↗
+          </Link>
         </div>
-        
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', marginBottom: '16px' }}>
-          <input className="pin-composer__input" placeholder="Describe a change..." value={aiInstruction} onChange={e => setAiInstruction(e.target.value)} />
-          <button className="btn btn--primary btn--sm" disabled={revising || !aiInstruction} onClick={() => handleRevise({ instruction: aiInstruction })}>Ask AI</button>
+        {(revising || reverting) && (
+          <p className="review-panel__note" role="status">
+            {revising ? "Revising…" : "Reverting…"}
+          </p>
+        )}
+
+        <div className="pin-composer" aria-labelledby="quick-edit-label">
+          <input
+            className="pin-composer__input"
+            type="text"
+            value={editHeadline}
+            maxLength={MAX_TEXT_EDIT_CHARS}
+            placeholder="Headline"
+            aria-label="Headline"
+            onChange={(event): void => setEditHeadline(event.target.value)}
+          />
+          <input
+            className="pin-composer__input"
+            type="text"
+            value={editSub}
+            maxLength={MAX_TEXT_EDIT_CHARS}
+            placeholder="Subhead"
+            aria-label="Subhead"
+            onChange={(event): void => setEditSub(event.target.value)}
+          />
+          <input
+            className="pin-composer__input"
+            type="text"
+            value={editCta}
+            maxLength={MAX_TEXT_EDIT_CHARS}
+            placeholder="CTA"
+            aria-label="CTA"
+            onChange={(event): void => setEditCta(event.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            disabled={
+              revising ||
+              reverting ||
+              (editHeadline.trim() === "" && editSub.trim() === "" && editCta.trim() === "")
+            }
+            onClick={applyTextEdits}
+          >
+            Apply text
+          </button>
+
+          <div className="pin-composer__zones" role="group" aria-label="AI ask zone">
+            {ASK_ZONES.map(({ zone: chipZone, label }) => (
+              <button
+                key={chipZone}
+                type="button"
+                className={`zone-chip${askZone === chipZone ? " zone-chip--active" : ""}`}
+                aria-pressed={askZone === chipZone}
+                onClick={(): void => setAskZone(chipZone)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="pin-composer__row">
+            <input
+              className="pin-composer__input"
+              type="text"
+              value={aiInstruction}
+              maxLength={MAX_INSTRUCTION_CHARS}
+              placeholder="Describe a change…"
+              aria-label="AI instruction"
+              onChange={(event): void => setAiInstruction(event.target.value)}
+              onKeyDown={(event): void => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  askAi();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              disabled={revising || reverting || aiInstruction.trim() === ""}
+              onClick={askAi}
+            >
+              Ask AI
+            </button>
+          </div>
         </div>
-        
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '4px', flexWrap: 'wrap', marginBottom: '16px' }}>
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { panel_anchor: 'left' }})}>Left</button>
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { panel_anchor: 'right' }})}>Right</button>
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { subject_zoom: 0.8 }})}>Smaller</button>
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { subject_zoom: 1.2 }})}>Larger</button>
+
+        <div className="pin-composer__zones" role="group" aria-label="Layout presets">
+          <button className="btn btn--secondary btn--sm" type="button" disabled={revising || reverting} onClick={(): void => void handleRevise({ params: { panel_anchor: "left" } })}>Left</button>
+          <button className="btn btn--secondary btn--sm" type="button" disabled={revising || reverting} onClick={(): void => void handleRevise({ params: { panel_anchor: "right" } })}>Right</button>
+          <button className="btn btn--secondary btn--sm" type="button" disabled={revising || reverting} onClick={(): void => void handleRevise({ params: { subject_zoom: 0.8 } })}>Smaller</button>
+          <button className="btn btn--secondary btn--sm" type="button" disabled={revising || reverting} onClick={(): void => void handleRevise({ params: { subject_zoom: 1.2 } })}>Larger</button>
           {/* badge_background_luminance = luminance of the ground BEHIND the badge: a LOW value
               makes badge_theme() pick the light/reversed mark, a HIGH value the dark plum mark.
               So a "Light" badge => dark ground (0.0), a "Dark" badge => light ground (1.0). */}
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { badge_background_luminance: 0.0 }})}>Light</button>
-          <button className="btn btn--secondary btn--sm" disabled={revising} onClick={() => handleRevise({ params: { badge_background_luminance: 1.0 }})}>Dark</button>
+          <button className="btn btn--secondary btn--sm" type="button" disabled={revising || reverting} onClick={(): void => void handleRevise({ params: { badge_background_luminance: 0.0 } })}>Light</button>
+          <button className="btn btn--secondary btn--sm" type="button" disabled={revising || reverting} onClick={(): void => void handleRevise({ params: { badge_background_luminance: 1.0 } })}>Dark</button>
         </div>
-        
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto' }}>
-          {history.map((h, i) => (
-             <button key={h.creativeDocId} className={`btn btn--ghost btn--sm ${activeDoc.creativeDocId === h.creativeDocId ? 'active' : ''}`} onClick={() => setActiveDoc(h)}>
-               v{i + 1}
-             </button>
-          ))}
-        </div>
+
+        {editorError !== "" && (
+          <p className="review-panel__offline" role="status">
+            {editorError}
+          </p>
+        )}
       </div>
+
+      {versionsFailed || versions === null ? (
+        <div className="review-panel__section" aria-label="Version history">
+          <h3 className="review-panel__label">Versions</h3>
+          <p className="review-panel__note">
+            {versionsFailed
+              ? "Version history unavailable."
+              : "Loading version history…"}
+          </p>
+        </div>
+      ) : (
+        <VersionRail
+          versions={versions.versions}
+          currentId={activeDoc.creativeDocId}
+          onRevert={(toCreativeId): void => void handleRevert(toCreativeId)}
+          reverting={reverting || revising}
+        />
+      )}
 
       {composing && (
         <div className="pin-composer" ref={composerRef}>
