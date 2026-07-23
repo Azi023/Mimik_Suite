@@ -4,10 +4,14 @@ import { AppShell } from "@/components/AppShell";
 import { MembersView } from "@/components/MembersView";
 import {
   type ApiCapabilityMatrix,
+  type ApiClient,
   type ApiInvitation,
+  type ApiMe,
   type ApiUserAccount,
   getCapabilityMatrix,
+  getMe,
   listAccounts,
+  listClients,
   listInvitations,
 } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
@@ -42,16 +46,27 @@ export default async function MembersPage(): Promise<JSX.Element> {
 
   // Each read degrades independently — a missing endpoint or a scoped role (403) yields an empty
   // section, never a broken page. The capabilities endpoint is newest, so guard it hardest.
-  const [sidebar, accounts, invitations, capabilities] = await Promise.all([
+  // `clients` feeds the owner's client-scope editor (names, not raw ids); `me` gates editing —
+  // when /me is unreachable the screen stays read-only rather than guessing at privilege.
+  const [sidebar, accounts, invitations, capabilities, clients, me] = await Promise.all([
     getSidebarData(bearer),
     listAccounts(bearer).catch((): ApiUserAccount[] => []),
     listInvitations(bearer).catch((): ApiInvitation[] => []),
     getCapabilityMatrix(bearer).catch((): ApiCapabilityMatrix => ({})),
+    listClients(bearer).catch((): ApiClient[] => []),
+    getMe(bearer).catch((): ApiMe | null => null),
   ]);
+  const callerIsOwner = me !== null && me.role === "owner";
 
   return (
     <AppShell sidebar={sidebar} title="Members & roles">
-      <MembersView accounts={accounts} invitations={invitations} capabilities={capabilities} />
+      <MembersView
+        accounts={accounts}
+        invitations={invitations}
+        capabilities={capabilities}
+        clients={clients}
+        callerIsOwner={callerIsOwner}
+      />
     </AppShell>
   );
 }

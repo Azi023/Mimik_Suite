@@ -1,13 +1,22 @@
 "use client";
 
 import { useState, type JSX } from "react";
-import { inviteMember, revokeInvite, type InviteResult } from "@/app/members/actions";
-import type { ApiCapabilityMatrix, ApiInvitation, ApiUserAccount } from "@/lib/api";
+import {
+  inviteMember,
+  revokeInvite,
+  updateAccountAction,
+  type InviteResult,
+} from "@/app/members/actions";
+import type { ApiCapabilityMatrix, ApiClient, ApiInvitation, ApiUserAccount } from "@/lib/api";
 
 interface MembersViewProps {
   accounts: ApiUserAccount[];
   invitations: ApiInvitation[];
   capabilities: ApiCapabilityMatrix;
+  /** The tenant's clients — feeds the owner's per-client access editor (names, not ids). */
+  clients: ApiClient[];
+  /** True when the verified caller (`GET /me`) is the workspace owner — gates editing. */
+  callerIsOwner: boolean;
 }
 
 type Tab = "members" | "roles" | "invites";
@@ -50,7 +59,13 @@ function scopeLabel(scopes: string[] | undefined): string {
   return `${scopes.length} client${scopes.length === 1 ? "" : "s"}`;
 }
 
-export function MembersView({ accounts, invitations, capabilities }: MembersViewProps): JSX.Element {
+export function MembersView({
+  accounts,
+  invitations,
+  capabilities,
+  clients,
+  callerIsOwner,
+}: MembersViewProps): JSX.Element {
   const [tab, setTab] = useState<Tab>("members");
   const pending = invitations.filter((i) => i.status === "pending");
 
@@ -75,7 +90,9 @@ export function MembersView({ accounts, invitations, capabilities }: MembersView
         </TabButton>
       </nav>
 
-      {tab === "members" && <MembersTable accounts={accounts} />}
+      {tab === "members" && (
+        <MembersTable accounts={accounts} clients={clients} canEdit={callerIsOwner} />
+      )}
       {tab === "roles" && <RolesTable capabilities={capabilities} />}
       {tab === "invites" && <InvitesPanel pending={pending} />}
     </div>
@@ -109,7 +126,15 @@ function TabButton({
   );
 }
 
-function MembersTable({ accounts }: { accounts: ApiUserAccount[] }): JSX.Element {
+function MembersTable({
+  accounts,
+  clients,
+  canEdit,
+}: {
+  accounts: ApiUserAccount[];
+  clients: ApiClient[];
+  canEdit: boolean;
+}): JSX.Element {
   if (accounts.length === 0) {
     return <EmptyState title="No members yet" body="Invite a teammate to get started." />;
   }
@@ -122,35 +147,180 @@ function MembersTable({ accounts }: { accounts: ApiUserAccount[] }): JSX.Element
             <th>Role</th>
             <th>Access</th>
             <th>Status</th>
+            {canEdit && <th aria-label="Actions" />}
           </tr>
         </thead>
         <tbody>
           {accounts.map((a) => (
-            <tr key={a.id}>
-              <td>
-                <div className="cell-stack">
-                  <span className="cell-strong">{a.name ?? a.email ?? a.auth_subject}</span>
-                  {a.email !== null && a.name !== null && (
-                    <span className="cell-muted">{a.email}</span>
-                  )}
-                </div>
-              </td>
-              <td>
-                <span className={`role-pill role-pill--${a.role}`}>{roleLabel(a.role)}</span>
-              </td>
-              <td className="cell-muted">
-                {a.role === "client" ? "Own client" : scopeLabel(a.client_scopes)}
-              </td>
-              <td>
-                <span className={`status-dot status-dot--${a.active ? "on" : "off"}`}>
-                  {a.active ? "Active" : "Inactive"}
-                </span>
-              </td>
-            </tr>
+            <MemberRow key={a.id} account={a} clients={clients} canEdit={canEdit} />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * One member row. For an OWNER caller, team rows (admin/ops/designer — the same set the
+ * invite form offers) grow an Edit affordance that expands an inline editor: a role select
+ * plus a per-client access checklist (nothing checked = all clients). The backend enforces
+ * the actual rules; this row just surfaces its 403/404/422 answers inline.
+ */
+function MemberRow({
+  account,
+  clients,
+  canEdit,
+}: {
+  account: ApiUserAccount;
+  clients: ApiClient[];
+  canEdit: boolean;
+}): JSX.Element {
+  // Server-action revalidation refreshes props; `saved` covers the gap so a successful
+  // save reflects immediately in the row.
+  const [saved, setSaved] = useState<ApiUserAccount | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [draftRole, setDraftRole] = useState<string>(account.role);
+  const [draftScopes, setDraftScopes] = useState<string[]>(account.client_scopes ?? []);
+
+  const current = saved ?? account;
+  // Owner/client/system rows stay read-only — the role picker can't express them anyway.
+  const editable = canEdit && (INVITABLE_ROLES as readonly string[]).includes(current.role);
+
+  function openEditor(): void {
+    setDraftRole(current.role);
+    setDraftScopes(current.client_scopes ?? []);
+    setError(null);
+    setEditing(true);
+  }
+
+  function closeEditor(): void {
+    setEditing(false);
+    setError(null);
+  }
+
+  function toggleScope(clientId: string): void {
+    setDraftScopes((prev) =>
+      prev.includes(clientId) ? prev.filter((id) => id !== clientId) : [...prev, clientId],
+    );
+  }
+
+  async function onSave(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    const res = await updateAccountAction(current.id, {
+      role: draftRole,
+      client_scopes: draftScopes,
+    });
+    setBusy(false);
+    if (!res.ok || res.account === undefined) {
+      setError(res.error ?? "Could not save the changes. Try again.");
+      return;
+    }
+    setSaved(res.account);
+    setEditing(false);
+  }
+
+  return (
+    <>
+      <tr>
+        <td>
+          <div className="cell-stack">
+            <span className="cell-strong">{current.name ?? current.email ?? current.auth_subject}</span>
+            {current.email !== null && current.name !== null && (
+              <span className="cell-muted">{current.email}</span>
+            )}
+          </div>
+        </td>
+        <td>
+          <span className={`role-pill role-pill--${current.role}`}>{roleLabel(current.role)}</span>
+        </td>
+        <td className="cell-muted">
+          {current.role === "client" ? "Own client" : scopeLabel(current.client_scopes)}
+        </td>
+        <td>
+          <span className={`status-dot status-dot--${current.active ? "on" : "off"}`}>
+            {current.active ? "Active" : "Inactive"}
+          </span>
+        </td>
+        {canEdit && (
+          <td className="cell-actions">
+            {editable && (
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={editing ? closeEditor : openEditor}
+                disabled={busy}
+              >
+                {editing ? "Cancel" : "Edit"}
+              </button>
+            )}
+          </td>
+        )}
+      </tr>
+      {editing && (
+        <tr>
+          <td colSpan={5}>
+            <div className="invite-form">
+              <div className="invite-form__row">
+                <select
+                  className="input select"
+                  aria-label={`Role for ${current.name ?? current.email ?? current.auth_subject}`}
+                  value={draftRole}
+                  onChange={(e) => setDraftRole(e.target.value)}
+                  disabled={busy}
+                >
+                  {INVITABLE_ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {roleLabel(r)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="cell-stack">
+                <span className="invite-result__note">
+                  Client access · {draftScopes.length === 0 ? "All clients" : scopeLabel(draftScopes)} —
+                  leave everything unchecked for access to all clients.
+                </span>
+                {clients.length === 0 ? (
+                  <span className="cell-muted">
+                    No clients yet — this member will have access to all clients.
+                  </span>
+                ) : (
+                  <div className="cap-chips">
+                    {clients.map((c) => (
+                      <label key={c.id} className="cap-chip">
+                        <input
+                          type="checkbox"
+                          checked={draftScopes.includes(c.id)}
+                          onChange={() => toggleScope(c.id)}
+                          disabled={busy}
+                        />{" "}
+                        {c.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="invite-form__row">
+                <button type="button" className="btn-primary" onClick={onSave} disabled={busy}>
+                  {busy ? "Saving…" : "Save changes"}
+                </button>
+                <button type="button" className="btn-ghost" onClick={closeEditor} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+              {error !== null && (
+                <p className="invite-result__error" role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

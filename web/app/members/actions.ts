@@ -1,7 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createInvitation, revokeInvitation, ApiError } from "@/lib/api";
+import {
+  createInvitation,
+  revokeInvitation,
+  updateAccount,
+  ApiError,
+  type ApiUserAccount,
+} from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
 
 /**
@@ -41,6 +47,40 @@ export async function inviteMember(formData: FormData): Promise<InviteResult> {
       if (error.status === 422) return { ok: false, error: "That role is not recognized." };
     }
     return { ok: false, error: "Could not send the invite. Try again." };
+  }
+}
+
+export interface UpdateAccountResult {
+  ok: boolean;
+  /** The updated account on success — the row reflects it without waiting for the refresh. */
+  account?: ApiUserAccount;
+  error?: string;
+}
+
+/** Owner-only: change a member's role and/or per-client access (empty scopes = all clients). */
+export async function updateAccountAction(
+  accountId: string,
+  body: { role?: string; client_scopes?: string[] },
+): Promise<UpdateAccountResult> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return { ok: false, error: "Your session has expired — sign in again." };
+  }
+
+  try {
+    const account = await updateAccount(accountId, body, token);
+    revalidatePath("/members");
+    return { ok: true, account };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 403)
+        return { ok: false, error: "Only the workspace owner can change roles or access." };
+      if (error.status === 404)
+        return { ok: false, error: "Member not found — it may have been removed." };
+      if (error.status === 422)
+        return { ok: false, error: "That role or client selection isn't valid." };
+    }
+    return { ok: false, error: "Could not save the changes. Try again." };
   }
 }
 

@@ -1136,6 +1136,27 @@ export function listAccounts(sessionToken?: string): Promise<ApiUserAccount[]> {
   return apiGet<ApiUserAccount[]>("/admin/accounts", sessionToken);
 }
 
+/** PATCH /admin/accounts/{id} body — both fields optional; only provided fields update.
+ *  `client_scopes: []` = all clients; a non-empty list restricts to those client ids. */
+export interface UpdateAccountBody {
+  role?: string;
+  client_scopes?: string[];
+}
+
+/** PATCH /admin/accounts/{id} — owner-only role / per-client access update.
+ *  Non-owner → 403; cross-tenant target → 404; unknown role or foreign client id → 422. */
+export function updateAccount(
+  accountId: string,
+  body: UpdateAccountBody,
+  sessionToken?: string,
+): Promise<ApiUserAccount> {
+  return apiPatch<ApiUserAccount>(
+    `/admin/accounts/${encodeURIComponent(accountId)}`,
+    body,
+    sessionToken,
+  );
+}
+
 /** GET /invitations — the tenant's invitations (any status). */
 export function listInvitations(sessionToken?: string): Promise<ApiInvitation[]> {
   return apiGet<ApiInvitation[]>("/invitations", sessionToken);
