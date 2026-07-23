@@ -16,8 +16,6 @@ export interface LayerTransform {
   scale: number;
 }
 
-export const IDENTITY_TRANSFORM: LayerTransform = { dx: 0, dy: 0, scale: 1 };
-
 /** Contract clamp — LayerOp.scale must stay in (0, 3]. */
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 3;
@@ -34,18 +32,35 @@ interface DragSession {
   bboxWidth: number;
   /** Screen-px -> viewBox-units factor captured at drag start. */
   factor: number;
+  /** False for a click; flips only after the pointer crosses the drag threshold. */
+  moved: boolean;
+}
+
+const MOVE_THRESHOLD_PX = 3;
+
+export function pointerMovedPastThreshold(
+  startX: number,
+  startY: number,
+  currentX: number,
+  currentY: number,
+): boolean {
+  return Math.hypot(currentX - startX, currentY - startY) >= MOVE_THRESHOLD_PX;
 }
 
 export interface UseLayerDragArgs {
   /** Current screen-px -> viewBox-units factor (viewBox width / rendered width). */
   getScreenToViewBox: () => number;
+  /** Canonical folded transform when a pointer session begins. */
+  getTransform: (layerId: CanvasLayerId) => LayerTransform;
+  /** Fired when pointerdown begins a possible drag; no op exists yet. */
+  onDragStart?: (layerId: CanvasLayerId) => void;
+  /** rAF-coalesced live transform for the canonical provisional history op. */
+  onDragMove?: (layerId: CanvasLayerId, transform: LayerTransform) => void;
   /** Fired once per drag, on release, with the layer's settled transform. */
   onDragEnd?: (layerId: CanvasLayerId, transform: LayerTransform) => void;
 }
 
 export interface UseLayerDragResult {
-  /** Live per-layer transforms — a key exists once its layer has been dragged. */
-  transforms: Partial<Record<CanvasLayerId, LayerTransform>>;
   /** Layer mid-drag, or null when idle. */
   draggingLayer: CanvasLayerId | null;
   beginMove: (layerId: CanvasLayerId, event: ReactPointerEvent<Element>) => void;
@@ -59,25 +74,17 @@ export interface UseLayerDragResult {
 /**
  * Owns the pointer-drag / corner-scale math for the canvas stage. Screen-pixel
  * deltas are mapped back into viewBox units via `getScreenToViewBox`, and state
- * updates are rAF-coalesced so previews stay 60fps-smooth. Local preview only —
- * nothing here talks to the server.
+ * updates are rAF-coalesced so CanvasStage can update one provisional canonical
+ * history op at 60fps. Nothing here owns document state or talks to the server.
  */
 export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
-  const [transforms, setTransforms] = useState<
-    Partial<Record<CanvasLayerId, LayerTransform>>
-  >({});
   const [draggingLayer, setDraggingLayer] = useState<CanvasLayerId | null>(null);
 
-  // Refs mirror the latest props/state so window listeners never go stale.
+  // Ref mirrors the latest callbacks so window listeners never go stale.
   const argsRef = useRef(args);
   useEffect(() => {
     argsRef.current = args;
   }, [args]);
-
-  const transformsRef = useRef(transforms);
-  useEffect(() => {
-    transformsRef.current = transforms;
-  }, [transforms]);
 
   const sessionRef = useRef<DragSession | null>(null);
   const pendingRef = useRef<LayerTransform | null>(null);
@@ -89,13 +96,25 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     const session = sessionRef.current;
     const pending = pendingRef.current;
     if (session === null || pending === null) return;
-    setTransforms((prev) => ({ ...prev, [session.layerId]: pending }));
+    argsRef.current.onDragMove?.(session.layerId, pending);
   }, []);
 
   const handlePointerMove = useCallback(
     (event: PointerEvent): void => {
       const session = sessionRef.current;
       if (session === null || event.pointerId !== session.pointerId) return;
+      if (
+        !session.moved &&
+        !pointerMovedPastThreshold(
+          session.startX,
+          session.startY,
+          event.clientX,
+          event.clientY,
+        )
+      ) {
+        return;
+      }
+      session.moved = true;
       const ddx = (event.clientX - session.startX) * session.factor;
       const ddy = (event.clientY - session.startY) * session.factor;
       if (session.mode === "move") {
@@ -127,13 +146,17 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
       frameRef.current = null;
     }
     const settled = pendingRef.current ?? session.base;
+    if (session.moved) {
+      argsRef.current.onDragMove?.(session.layerId, settled);
+    }
     sessionRef.current = null;
     pendingRef.current = null;
     abortRef.current?.abort();
     abortRef.current = null;
-    setTransforms((prev) => ({ ...prev, [session.layerId]: settled }));
     setDraggingLayer(null);
-    argsRef.current.onDragEnd?.(session.layerId, settled);
+    if (session.moved) {
+      argsRef.current.onDragEnd?.(session.layerId, settled);
+    }
   }, []);
 
   const begin = useCallback(
@@ -152,12 +175,14 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        base: transformsRef.current[layerId] ?? IDENTITY_TRANSFORM,
+        base: argsRef.current.getTransform(layerId),
         bboxWidth: Math.max(bboxWidth, 1),
         factor: argsRef.current.getScreenToViewBox(),
+        moved: false,
       };
       pendingRef.current = null;
       setDraggingLayer(layerId);
+      argsRef.current.onDragStart?.(layerId);
       const controller = new AbortController();
       abortRef.current = controller;
       window.addEventListener("pointermove", handlePointerMove, {
@@ -191,7 +216,7 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     [begin],
   );
 
-  // Unmount: drop listeners + any queued frame.
+  // Unmount: drop listeners and the queued frame.
   useEffect(() => {
     return (): void => {
       abortRef.current?.abort();
@@ -199,5 +224,5 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     };
   }, []);
 
-  return { transforms, draggingLayer, beginMove, beginScale };
+  return { draggingLayer, beginMove, beginScale };
 }
