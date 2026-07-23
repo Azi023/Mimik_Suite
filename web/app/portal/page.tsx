@@ -43,6 +43,13 @@ export default async function PortalIndexPage(): Promise<JSX.Element> {
   }
   const bearer = sessionToken ?? undefined;
 
+  // When there is no real per-user client session, the portal renders via the DEV-ONLY owner
+  // token — so it shows the whole tenant, NOT one bounded client. Say so unmistakably: a real
+  // client (magic-link principal) is confined to its own client_id server-side (enforced at the
+  // data layer; see api/routers/jobs.py + the green tenant-isolation tests). This is the audit's
+  // "portal shows multiple clients" — a preview artifact, not a leak.
+  const isOperatorPreview = sessionToken === null && devFallbackAllowed();
+
   const jobs = await listJobs(undefined, bearer).catch((): ApiJob[] => []);
   // Surface actionable work first, then the rest by newest.
   const sorted = [...jobs].sort((a, b) => {
@@ -54,6 +61,25 @@ export default async function PortalIndexPage(): Promise<JSX.Element> {
 
   return (
     <PortalShell title="Your creatives">
+      {isOperatorPreview && (
+        <div
+          role="status"
+          style={{
+            marginBottom: "var(--sp-4)",
+            padding: "10px 14px",
+            borderRadius: "var(--r-md)",
+            border: "1px solid var(--warning, #b45309)",
+            background: "color-mix(in srgb, var(--warning, #b45309) 12%, transparent)",
+            color: "var(--ink)",
+            fontSize: "13px",
+            lineHeight: 1.4,
+          }}
+        >
+          <strong>Operator preview</strong> — you’re viewing this portal as your team, so every
+          client’s work is shown. A real client signs in via magic link and only ever sees their
+          own creatives (enforced server-side).
+        </div>
+      )}
       {sorted.length === 0 ? (
         <div className="empty-state">
           <p className="empty-state__title">Nothing to review yet</p>
