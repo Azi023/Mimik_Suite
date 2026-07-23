@@ -87,6 +87,44 @@ async def list_accounts(
     return [to_user_account(r) for r in rows]
 
 
+class AccountUpdate(BaseModel):
+    role: str | None = None
+    client_scopes: list[str] | None = None
+
+
+@router.patch("/accounts/{account_id}", response_model=UserAccount)
+async def update_account(
+    account_id: str,
+    body: AccountUpdate,
+    principal: Principal = Depends(require_role("owner")),
+    session: AsyncSession = Depends(get_session),
+) -> UserAccount:
+    if body.role is not None and body.role not in _ROLE_VALUES:
+        raise HTTPException(status_code=422, detail=f"Unknown role: {body.role}")
+
+    if body.client_scopes is not None:
+        for cid in body.client_scopes:
+            client = await repo.get_client(
+                session, tenant_id=principal.tenant_id, client_id=cid
+            )
+            if client is None:
+                raise HTTPException(status_code=422, detail=f"Client not found: {cid}")
+
+    row = await repo.update_user_account(
+        session,
+        tenant_id=principal.tenant_id,
+        account_id=account_id,
+        role=body.role,
+        client_scopes=body.client_scopes,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    await session.commit()
+    return to_user_account(row)
+
+
+
 @router.get("/capabilities")
 async def get_capabilities(
     principal: Principal = Depends(require_role("owner", "admin", "super_admin")),

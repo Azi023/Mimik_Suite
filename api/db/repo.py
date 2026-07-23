@@ -264,6 +264,33 @@ async def get_user_account(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def update_user_account(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    account_id: str,
+    role: str | None = None,
+    client_scopes: list[str] | None = None,
+) -> UserAccountRow | None:
+    """Update role and/or client_scopes for an account without ever resolving it outside the caller's tenant."""
+    update_data = {}
+    if role is not None:
+        update_data["role"] = role
+    if client_scopes is not None:
+        update_data["client_scopes"] = client_scopes
+
+    if not update_data:
+        return await get_user_account(session, tenant_id=tenant_id, account_id=account_id)
+
+    stmt = (
+        update(UserAccountRow)
+        .where(UserAccountRow.id == account_id, UserAccountRow.tenant_id == tenant_id)
+        .values(**update_data)
+        .returning(UserAccountRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def list_user_accounts(session: AsyncSession, *, tenant_id: str) -> list[UserAccountRow]:
     stmt = (
         select(UserAccountRow)
