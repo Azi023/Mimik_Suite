@@ -496,7 +496,7 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
       <div className="creview__canvas-wrap">
         <div
           className="creview__canvas creview__canvas--locked"
-          style={{ width: "min(100%, 620px)", overflow: "visible" }}
+          style={{ width: "100%", maxWidth: "620px", marginInline: "auto", overflow: "visible" }}
         >
           {parsed === null ? (
             <div
@@ -522,6 +522,59 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
                 // Sanitized above: scripts/foreignObject stripped, on* removed.
                 dangerouslySetInnerHTML={{ __html: parsed.markup }}
               />
+
+              {/*
+               * Interaction overlay — one transparent hit-rect per layer over
+               * its CURRENT transformed bbox. The injected SVG only hit-tests
+               * painted pixels (text glyphs are nearly unclickable; the
+               * full-bleed background image swallows the rest), so selection
+               * and dragging happen HERE. Layers are in paint order, so the
+               * topmost layer's rect wins overlapping hits. Pointerdown both
+               * selects and starts a move — a press with no movement is a
+               * plain click-select.
+               */}
+              <svg
+                viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  pointerEvents: "none",
+                  overflow: "visible",
+                }}
+              >
+                {layers.map((layer) => {
+                  const override = overrides[layer.id] ?? DEFAULT_OVERRIDE;
+                  const box = transformedBBox(
+                    layer.bbox,
+                    transforms[layer.id] ?? IDENTITY_TRANSFORM,
+                  );
+                  return (
+                    <rect
+                      key={layer.id}
+                      x={box.x}
+                      y={box.y}
+                      width={box.w}
+                      height={box.h}
+                      fill="transparent"
+                      role="button"
+                      aria-label={`Select ${LAYER_LABEL[layer.id]}`}
+                      style={{
+                        // Hidden layers aren't grabbable.
+                        pointerEvents: override.visible ? "all" : "none",
+                        touchAction: "none",
+                        cursor: draggingLayer !== null ? "grabbing" : "grab",
+                      }}
+                      onPointerDown={(event): void => {
+                        setSelectedId(layer.id);
+                        beginMove(layer.id, event);
+                      }}
+                      onDoubleClick={(): void => openTextEditor(layer)}
+                    />
+                  );
+                })}
+              </svg>
 
               {selectedLayer !== null && selectedBox !== null && (
                 <svg
