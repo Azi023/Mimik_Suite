@@ -21,6 +21,9 @@ interface OrderedVersion {
   ordinal: number;
 }
 
+const REVERT_NOTE_PATTERN = /^revert to v(\d+)$/i;
+const INTERNAL_LAYER_NOTE_PATTERN = /^layer ops:\s*\d+$/i;
+
 function compareStableStrings(left: string, right: string): number {
   if (left < right) return -1;
   if (left > right) return 1;
@@ -74,8 +77,62 @@ function orderVersions(
     .reverse();
 }
 
+function actorLabel(version: ApiCreativeVersionInfo): string | null {
+  if (version.created_by === null) return null;
+  const name = version.created_by.name?.trim();
+  if (name !== undefined && name !== "") return name;
+  const role = version.created_by.role.trim().replaceAll("_", " ");
+  return role === "" ? null : role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function publicOrdinalByStoredVersion(
+  ordered: readonly OrderedVersion[],
+): ReadonlyMap<number, number> {
+  const ordinals = new Map<number, number>();
+  for (const { version, ordinal } of ordered) {
+    if (!ordinals.has(version.version)) ordinals.set(version.version, ordinal);
+  }
+  return ordinals;
+}
+
+function actionSummary(
+  version: ApiCreativeVersionInfo,
+  ordinal: number,
+  publicOrdinals: ReadonlyMap<number, number>,
+): string {
+  if (ordinal === 1) return "Original";
+  const revertMatch = version.note?.trim().match(REVERT_NOTE_PATTERN);
+  if (revertMatch !== null && revertMatch !== undefined) {
+    const storedTarget = Number.parseInt(revertMatch[1] ?? "", 10);
+    const publicTarget = publicOrdinals.get(storedTarget);
+    return publicTarget === undefined
+      ? "Reverted"
+      : `Reverted to v${publicTarget}`;
+  }
+  return "Edited";
+}
+
+function versionNote(version: ApiCreativeVersionInfo): string | null {
+  const note = version.note?.trim();
+  if (
+    note === undefined ||
+    note === "" ||
+    REVERT_NOTE_PATTERN.test(note) ||
+    INTERNAL_LAYER_NOTE_PATTERN.test(note)
+  ) {
+    return null;
+  }
+  return note;
+}
+
 /** Preview thumb via the same-origin proxy (cookies stay httpOnly, bearer added server-side). */
-function VersionThumb({ version }: { version: ApiCreativeVersionInfo }): JSX.Element {
+function VersionThumb({
+  version,
+  ordinal,
+}: {
+  version: ApiCreativeVersionInfo;
+  ordinal: number;
+}): JSX.Element {
   const [failed, setFailed] = useState(false);
   return (
     <span
@@ -96,7 +153,7 @@ function VersionThumb({ version }: { version: ApiCreativeVersionInfo }): JSX.Ele
       }}
     >
       {failed ? (
-        <>v{version.version}</>
+        <>v{ordinal}</>
       ) : (
         <Image
           src={`/api/creatives/${encodeURIComponent(version.creative_id)}/preview`}
@@ -114,8 +171,8 @@ function VersionThumb({ version }: { version: ApiCreativeVersionInfo }): JSX.Ele
 
 /**
  * The persisted version history rail (B-09): newest-first rows with a stable
- * oldest-to-newest ordinal, timestamp, stored version metadata, note, author,
- * and a preview thumb — with Revert on every version that isn't the current head.
+ * public ordinal, timestamp, action, author, and preview thumb — with Revert
+ * on every version that isn't the current head.
  */
 export function VersionRail({
   versions,
@@ -124,6 +181,7 @@ export function VersionRail({
   reverting,
 }: VersionRailProps): JSX.Element {
   const ordered = orderVersions(versions);
+  const publicOrdinals = publicOrdinalByStoredVersion(ordered);
   const canonicalCurrentId = canonicalCreativeHead(versions)?.creative_id ?? currentId;
 
   return (
@@ -140,9 +198,13 @@ export function VersionRail({
         <ul className="creview__thread">
           {ordered.map(({ version, ordinal }) => {
             const isCurrent = version.creative_id === canonicalCurrentId;
+            const author = actorLabel(version);
+            const action = actionSummary(version, ordinal, publicOrdinals);
+            const note = versionNote(version);
+            const when = formatWhen(version.created_at);
             return (
               <li key={version.creative_id} className="creview__event">
-                <VersionThumb version={version} />
+                <VersionThumb version={version} ordinal={ordinal} />
                 <span
                   style={{
                     flex: "1 1 auto",
@@ -154,23 +216,24 @@ export function VersionRail({
                 >
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
                     <span className="creview__event-who">
-                      Version {ordinal} ·{" "}
-                      <time dateTime={version.created_at}>
-                        {formatWhen(version.created_at)}
-                      </time>
+                      v{ordinal}
+                      {when !== "" && (
+                        <>
+                          {" "}·{" "}
+                          <time dateTime={version.created_at}>{when}</time>
+                        </>
+                      )}
                     </span>
                     {isCurrent && (
                       <span className="creview__vchip-latest">current</span>
                     )}
                   </span>
                   <span className="creview__event-text">
-                    Stored v{version.version}
-                    {version.created_by !== null && (
-                      <> · {version.created_by.name ?? version.created_by.role}</>
-                    )}
+                    {action}
+                    {author !== null && <> · {author}</>}
                   </span>
-                  {version.note !== null && version.note !== "" && (
-                    <span className="creview__event-note">{version.note}</span>
+                  {note !== null && (
+                    <span className="creview__event-note">{note}</span>
                   )}
                 </span>
                 {!isCurrent && (

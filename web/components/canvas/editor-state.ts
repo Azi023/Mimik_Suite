@@ -73,6 +73,10 @@ export interface BaseLayerCapture {
   bbox: LayerBBox;
   baseTransform: string;
   baseStyle: string | null;
+  baseDisplay?: string | null;
+  baseVisibility?: string | null;
+  baseHidden?: boolean;
+  baseVisible?: boolean;
   baseTextHTML: string | null;
   baseFill: string | null;
   initialText: string | null;
@@ -100,6 +104,11 @@ export interface EditorBaseState {
 export interface ApplyStateResult {
   dirty: CanvasLayerId[];
   overflow: Partial<Record<CanvasLayerId, boolean>>;
+}
+
+export interface OperationBaseState {
+  fillRole?: string | null;
+  visible?: boolean;
 }
 
 export const IDENTITY_TRANSFORM: LayerTransform = {
@@ -143,7 +152,41 @@ const TEXT_EDIT_KEY: Partial<Record<CanvasLayerId, keyof ApiTextEdits>> = {
   "layer-cta": "cta",
 };
 
-export function appendOp(history: EditHistory, operation: DocOp): EditHistory {
+function operationReturnsToBase(
+  operation: DocOp,
+  base: OperationBaseState,
+): boolean {
+  if (operation.kind === "visible") {
+    return (
+      operation.visible !== undefined &&
+      operation.visible === (base.visible ?? true)
+    );
+  }
+  if (operation.kind === "fill") {
+    return (
+      operation.fillRole === null ||
+      (operation.fillRole !== undefined &&
+        base.fillRole !== undefined &&
+        operation.fillRole === base.fillRole)
+    );
+  }
+  return false;
+}
+
+export function appendOp(
+  history: EditHistory,
+  operation: DocOp,
+  base: OperationBaseState = {},
+): EditHistory {
+  if (operationReturnsToBase(operation, base)) {
+    return {
+      ops: history.ops.filter(
+        (pending) =>
+          pending.layer !== operation.layer || pending.kind !== operation.kind,
+      ),
+      redo: [],
+    };
+  }
   return { ops: [...history.ops, operation], redo: [] };
 }
 
@@ -539,6 +582,56 @@ function restoreAttribute(
   else element.setAttribute(name, baseValue);
 }
 
+function restoreOptionalAttribute(
+  element: Element,
+  name: string,
+  baseValue: string | null | undefined,
+): void {
+  if (baseValue !== undefined) restoreAttribute(element, name, baseValue);
+}
+
+function isHiddenVisibility(value: string | null): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "hidden" || normalized === "collapse";
+}
+
+export function isSvgLayerVisible(node: SVGGElement): boolean {
+  return (
+    !node.hasAttribute("hidden") &&
+    node.getAttribute("display")?.trim().toLowerCase() !== "none" &&
+    !isHiddenVisibility(node.getAttribute("visibility")) &&
+    node.style.display.trim().toLowerCase() !== "none" &&
+    !isHiddenVisibility(node.style.visibility)
+  );
+}
+
+function restoreBaseVisibility(
+  node: SVGGElement,
+  layerBase: BaseLayerState,
+): void {
+  restoreAttribute(node, "style", layerBase.baseStyle);
+  restoreOptionalAttribute(node, "display", layerBase.baseDisplay);
+  restoreOptionalAttribute(node, "visibility", layerBase.baseVisibility);
+  if (layerBase.baseHidden === true) node.setAttribute("hidden", "");
+  else if (layerBase.baseHidden === false) node.removeAttribute("hidden");
+}
+
+function forceLayerVisible(node: SVGGElement): void {
+  if (node.style.display.trim().toLowerCase() === "none") {
+    node.style.removeProperty("display");
+  }
+  if (isHiddenVisibility(node.style.visibility)) {
+    node.style.removeProperty("visibility");
+  }
+  if (node.getAttribute("display")?.trim().toLowerCase() === "none") {
+    node.removeAttribute("display");
+  }
+  if (isHiddenVisibility(node.getAttribute("visibility"))) {
+    node.removeAttribute("visibility");
+  }
+  node.removeAttribute("hidden");
+}
+
 function measureText(textElement: SVGTextElement, fallback: number): number {
   try {
     return textElement.getComputedTextLength();
@@ -632,10 +725,11 @@ export function applyState(
     );
     restoreAttribute(node, "transform", transformAttr === "" ? null : transformAttr);
 
+    restoreBaseVisibility(node, layerBase);
     if (folded.visible[layerId] === false) {
       node.style.display = "none";
-    } else {
-      restoreAttribute(node, "style", layerBase.baseStyle);
+    } else if (folded.visible[layerId] === true) {
+      forceLayerVisible(node);
     }
 
     const recolorSelector = RECOLOR_TARGET[layerId];

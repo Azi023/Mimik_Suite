@@ -30,6 +30,7 @@ import {
   canUndo,
   createEditorBaseState,
   fold,
+  isSvgLayerVisible,
   orientedBoxOf,
   redo as redoHistory,
   removeOp as removeHistoryOp,
@@ -96,6 +97,10 @@ interface CanvasLayerInfo {
   initialText: string | null;
   baseTransform: string;
   baseStyle: string | null;
+  baseDisplay: string | null;
+  baseVisibility: string | null;
+  baseHidden: boolean;
+  baseVisible: boolean;
   baseTextHTML: string | null;
   baseFill: string | null;
 }
@@ -204,6 +209,17 @@ function parseBBox(raw: string | null): LayerBBox | null {
   return { x, y, w, h };
 }
 
+function matchingFillRole(
+  baseFill: string | null,
+  brandColors: readonly ApiColorRole[],
+): string | undefined {
+  if (baseFill === null) return undefined;
+  const normalizedBaseFill = baseFill.trim().toLowerCase();
+  return brandColors.find(
+    (color) => color.hex.trim().toLowerCase() === normalizedBaseFill,
+  )?.name;
+}
+
 /**
  * Sanitize once, capture every pristine value before injection, and avoid
  * touching the background layer's large base64 payload after this parse.
@@ -288,6 +304,10 @@ function parseSvg(svgText: string): ParsedSvg | null {
       initialText,
       baseTransform: node.getAttribute("transform") ?? "",
       baseStyle: node.getAttribute("style"),
+      baseDisplay: node.getAttribute("display"),
+      baseVisibility: node.getAttribute("visibility"),
+      baseHidden: node.hasAttribute("hidden"),
+      baseVisible: isSvgLayerVisible(node),
       baseTextHTML: textElement?.innerHTML ?? null,
       baseFill: recolorTarget?.getAttribute("fill") ?? null,
     });
@@ -775,6 +795,10 @@ export function CanvasStage({
         bbox,
         baseTransform: layer.baseTransform,
         baseStyle: layer.baseStyle,
+        baseDisplay: layer.baseDisplay,
+        baseVisibility: layer.baseVisibility,
+        baseHidden: layer.baseHidden,
+        baseVisible: layer.baseVisible,
         baseTextHTML: layer.baseTextHTML,
         baseFill: layer.baseFill,
         initialText: layer.initialText,
@@ -892,7 +916,14 @@ export function CanvasStage({
   }, []);
 
   function addOperation(operation: DocOp): void {
-    const next = appendOp(historyRef.current, operation);
+    const layerBase = baseRef.current?.layers[operation.layer];
+    const next = appendOp(historyRef.current, operation, {
+      visible: layerBase?.baseVisible ?? true,
+      fillRole: matchingFillRole(
+        layerBase?.baseFill ?? null,
+        baseRef.current?.brandColors ?? [],
+      ),
+    });
     setCanonicalHistory(next);
   }
 
@@ -1236,7 +1267,10 @@ export function CanvasStage({
   }
 
   function toggleVisible(id: CanvasLayerId): void {
-    const current = fold(historyRef.current.ops).visible[id] ?? true;
+    const current =
+      fold(historyRef.current.ops).visible[id] ??
+      baseRef.current?.layers[id]?.baseVisible ??
+      true;
     addOperation({
       id: nextOperationId(),
       layer: id,
