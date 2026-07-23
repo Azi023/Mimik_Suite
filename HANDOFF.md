@@ -39,24 +39,28 @@ gen-lang-client-*.json`). I RESTORED the ignore rules in the working tree (key i
 NOT commit `.gitignore` (you edited it deliberately — confirm intent). **Do not commit that key.** Also open QA:
 portal `/portal/session` leaks a raw PyJWT error; confirm PROD `JWT_SECRET` ≠ the published `.env.example` default.
 
-### ▶ EXACT NEXT ACTION — Wave 1 + Wave 2 DONE; start W3
+### ▶ EXACT NEXT ACTION — W1 + W2 + W3-hot-sequence DONE; finish A-10 then W4+
 - **Wave 1 ✅:** B-01, imagery, text-chain, contracts (A-01+B-02 = `mimik-contracts@7fb1210`), B-05 (`e8c5d79`).
-- **Wave 2 ✅:** A-02 typed /ops (`de225f3`) · B-03 creative lineage (`afd5a33` — migration `c7e90f4a1b32`,
-  round-tripped on live :5434, generation still 200 on new schema).
-- **Local DB is now at head `c7e90f4a1b32`** (lineage columns applied). API run cmd unchanged.
-- **W3 — the hard wave. Strict hot-file sequence on `api/services/creative_generation.py` (NEVER parallel):**
-  1. **B-04** — versions + revert API (`GET /creatives/{id}/versions`, `POST /creatives/{id}/revert`); wire the
-     B-03 lineage kwargs into `revise_creative`'s create call. Touches `creatives.py` + `creative_generation.py`.
-  2. **B-06** — `revise_creative` speaks the typed `CanvasRevision` (contract already exists); `layer_ops` →
-     resolve `fill_role` against brand tokens → persist as L5 `layer_overrides` → `render_creative_svg(layer_overrides=)`
-     (B-05 is ready). Keep a BC shim for the old `{edits,instruction,params}` body.
-  3. **B-07** — guarded instruction interpreter (`creative/revision/interpreter.py`): keyword table FIRST, LLM behind
-     `REVISE_LLM=1`; **instruction is DATA in a fenced slot, injection degrades to keywords (locked #3) — review this
-     one hard.**
-  - ∥ **A-10** (admin UI + maybe `PATCH /admin/accounts`) — disjoint from the B-sequence; frontend piece runs on FABLE (#9).
-- Per-task specs + wave matrix: `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`. Pattern: write Codex spec to `scratchpad/`
-  referencing the plan's task section, demand tests + live-verify, review diff, commit phase-tagged. Codex CANNOT
-  reach the :5434 DB (sandbox) → YOU run alembic + live generation checks for any DB/route task.
+- **Wave 2 ✅:** A-02 typed /ops (`de225f3`) · B-03 creative lineage (`afd5a33`, migration `c7e90f4a1b32`).
+- **Wave 3 hot-file sequence ✅ (all on `creative_generation.py`, live-verified):**
+  - **B-04** (`80d7d3b`) — versions + revert API; revise persists lineage. IDOR: URL-path creative → 404, body id → 422.
+  - **B-06** (`ab24b98`) — revise speaks typed `CanvasRevision`; `layer_ops`→brand-bounded `layer_overrides`
+    (unknown `fill_role`→422); BC shim for the legacy web body; overrides inherit across versions.
+  - **B-07** (`5b30958`) — guarded interpreter `creative/revision/interpreter.py`. Default (no `REVISE_LLM`) =
+    deterministic keywords, ZERO LLM surface. LLM path (`REVISE_LLM=1`) fences instruction as data + allowlists
+    output. **Live adversarial injection test passed** (attack → 201, zero disallowed keys, benign part still applied).
+- **⚠ EXECUTOR: Codex quota EXHAUSTED until Jul 28** → switched to **agy** (`agy -p "$(cat spec.md)" --mode
+  accept-edits --dangerously-skip-permissions --print-timeout 30m`; sweep stray `patch*.py` after — none appeared so far).
+- **IN FLIGHT:** A-10 **backend** (`PATCH /admin/accounts/{id}` role+client_scopes, owner-only, cross-tenant→404,
+  cross-tenant scope→422 + test) on agy. Review the tenant-scope hard, then commit.
+- **A-10 frontend (NOT DONE)** — members UI (role picker from `GET /admin/capabilities` + client_scopes editor,
+  `web/app/members/page.tsx` + `MembersView.tsx` + a `PATCH` helper in `web/lib/api.ts`). Runs on a **Fable agent** (#9).
+- **Then W4+** (per plan wave matrix): A-03 queue service (now safe on the hot file) ∥ B-08 canvas web stage (Fable).
+  Plan A Command Center surfaces (A-06 board drag, A-07 calendar, A-08 queue, A-09 ⌘K cmd bar) + Plan B web
+  (B-08/09/10 canvas editor) are the high-value remaining UI. See `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`.
+- **Pattern:** write spec to `scratchpad/` referencing the plan's task section; demand tests + live-verify; the
+  executor (agy) CANNOT reach the :5434 DB → YOU run alembic + live API checks for any DB/route task; review diff;
+  commit phase-tagged. Hot file `creative_generation.py` now settled for B — future B-11/B-13 still serialize on it.
 - **Hot file `api/services/creative_generation.py`** — NEVER dispatch two of {B-04,B-06,B-07,B-11,B-13,A-03} at once.
 - Codex dispatch: `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c approval_policy=never [-C <dir>] - < spec.md`.
   Sibling-repo tasks need `-C /Users/atheeque/workspace/mimik-contracts`. Codex logs → `scratchpad/codex_*.log`.
