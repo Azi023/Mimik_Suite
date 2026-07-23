@@ -44,6 +44,8 @@ import {
   type LayerTransform,
 } from "./editor-state";
 import { useLayerDrag } from "./useLayerDrag";
+import { Inspector } from "./Inspector";
+import { ZoomControls } from "./ZoomControls";
 
 export interface CanvasStageProps {
   /** Raw SVG master text (B-09 fetches via fetchCreativeSvg and passes in). */
@@ -56,6 +58,10 @@ export interface CanvasStageProps {
   onHistoryChange?: (snapshot: CanvasStageSnapshot) => void;
   /** Small imperative bridge for toolbar actions while history stays stage-owned. */
   controlsRef?: Ref<CanvasStageHandle>;
+  askText?: string;
+  onAskTextChange?: (text: string) => void;
+  onAddAsk?: (layerId: CanvasLayerId) => void;
+  busy?: boolean;
 }
 
 export interface CanvasStageSnapshot {
@@ -271,30 +277,7 @@ function textAlignForAnchor(
   return "left";
 }
 
-interface EyeIconProps {
-  open: boolean;
-  size?: number;
-}
 
-function EyeIcon({ open, size = 13 }: EyeIconProps): JSX.Element {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-      <circle cx="12" cy="12" r="3" />
-      {!open && <line x1="4" y1="20" x2="20" y2="4" />}
-    </svg>
-  );
-}
 
 /**
  * Bounded inline-SVG editor. EditHistory is the only artwork state: the DOM,
@@ -307,6 +290,10 @@ export function CanvasStage({
   onChange,
   onHistoryChange,
   controlsRef,
+  askText,
+  onAskTextChange,
+  onAddAsk,
+  busy,
 }: CanvasStageProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -320,6 +307,12 @@ export function CanvasStage({
   const showingOriginalRef = useRef(false);
   const operationCounterRef = useRef(0);
   const brandColorsRef = useRef<readonly ApiColorRole[]>(brandColors);
+
+  const [zoom, setZoom] = useState<number | "fit">("fit");
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSpaceDown, setIsSpaceDown] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
 
   const [mounted, setMounted] = useState(false);
   const [stageWidth, setStageWidth] = useState(0);
@@ -789,12 +782,27 @@ export function CanvasStage({
   ): void {
     if (
       event.defaultPrevented ||
-      isTextEntryTarget(event.target) ||
-      (!event.metaKey && !event.ctrlKey)
+      isTextEntryTarget(event.target)
     ) {
       return;
     }
     const key = event.key.toLowerCase();
+    
+    if (!event.metaKey && !event.ctrlKey) {
+      if (key === "f") {
+        event.preventDefault();
+        setIsFullscreen(f => !f);
+      } else if (key === "escape") {
+        if (isFullscreen) {
+          event.preventDefault();
+          setIsFullscreen(false);
+        }
+      } else if (event.key === " ") {
+        event.preventDefault();
+        setIsSpaceDown(true);
+      }
+      return;
+    }
     const wantsUndo = key === "z" && !event.shiftKey;
     const wantsRedo = (key === "z" && event.shiftKey) || key === "y";
     if (!wantsUndo && !wantsRedo) return;
@@ -802,6 +810,68 @@ export function CanvasStage({
     if (wantsRedo) performRedo();
     else performUndo();
   }
+
+  function handleEditorKeyUp(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (isTextEntryTarget(event.target)) return;
+    if (event.key === " ") {
+      event.preventDefault();
+      setIsSpaceDown(false);
+      setIsPanning(false);
+    }
+  }
+
+  function handleWheel(event: React.WheelEvent<HTMLDivElement>): void {
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -0.1 : 0.1;
+      setZoom(z => {
+        const current = z === "fit" ? 1 : z;
+        return Math.max(0.1, Math.min(5, current + delta));
+      });
+    }
+  }
+
+  const panStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  function handlePanStart(event: React.PointerEvent<HTMLDivElement>): void {
+    if ((isSpaceDown || event.button === 1) && zoom !== "fit") {
+      event.preventDefault();
+      setIsPanning(true);
+      panStartRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  }
+
+  function handlePanMove(event: React.PointerEvent<HTMLDivElement>): void {
+    if (isPanning && event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.preventDefault();
+      const dx = event.clientX - panStartRef.current.x;
+      const dy = event.clientY - panStartRef.current.y;
+      setPan({ x: panStartRef.current.panX + dx, y: panStartRef.current.panY + dy });
+    }
+  }
+
+  function handlePanEnd(event: React.PointerEvent<HTMLDivElement>): void {
+    if (isPanning) {
+      setIsPanning(false);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    }
+  }
+
+  function handleZoomChange(newZoom: number | "fit"): void {
+    setZoom(newZoom);
+    if (newZoom === "fit") setPan({ x: 0, y: 0 });
+  }
+
+  function resetLayer(layerId: CanvasLayerId): void {
+    transitionHistory((current) => {
+      const nextOps = current.ops.filter((op) => op.layer !== layerId);
+      return { ops: nextOps, redo: current.redo };
+    });
+  }
+
 
   function handleBeforePointerDown(
     event: ReactPointerEvent<HTMLButtonElement>,
@@ -939,14 +1009,7 @@ export function CanvasStage({
       ? null
       : (baseRef.current?.layers[editing.layerId]?.textLayout ?? null);
 
-  const selectedFillRole =
-    selectedLayer === null ? undefined : folded.fill[selectedLayer.id];
-  const selectedIsText =
-    selectedLayer !== null && TEXT_EDIT_KEY[selectedLayer.id] !== undefined;
-  const showSwatches =
-    selectedLayer !== null &&
-    RECOLORABLE.has(selectedLayer.id) &&
-    brandColors.length > 0;
+
   const overflowingLayers = layers.filter(
     (layer) => overflow[layer.id] === true,
   );
@@ -957,138 +1020,113 @@ export function CanvasStage({
       aria-label="Creative canvas"
       tabIndex={0}
       onKeyDown={handleEditorKeyDown}
+      onKeyUp={handleEditorKeyUp}
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        gap: "var(--sp-4)",
+        ...(isFullscreen ? {
+          position: "fixed",
+          inset: 0,
+          zIndex: 50,
+          background: "var(--canvas)",
+          padding: "var(--sp-4)"
+        } : {})
+      }}
     >
-      <div className="creview__stage-head">
-        <span className="creview__meta">Canvas</span>
-        <span className="creview__meta creview__meta--muted">
-          {hoveredLayer !== null
-            ? `${LAYER_LABEL[hoveredLayer.id]} target`
-            : selectedLayer === null
-              ? "No layer selected"
-              : LAYER_LABEL[selectedLayer.id]}
-        </span>
-        <span className="creview__meta creview__meta--muted">
-          {history.ops.length} pending
-        </span>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm creview__compare"
-          aria-pressed={showingOriginal}
-          title="Hold to show the original creative"
-          disabled={editing !== null || draggingLayer !== null}
-          onPointerDown={handleBeforePointerDown}
-          onPointerUp={handleBeforePointerEnd}
-          onPointerCancel={handleBeforePointerEnd}
-          onLostPointerCapture={restoreOriginalPreview}
-          onKeyDown={handleBeforeKeyDown}
-          onKeyUp={handleBeforeKeyUp}
-          onBlur={restoreOriginalPreview}
-        >
-          Before/After
-        </button>
-        <span className="creview__hint">
-          Click a layer · drag to move · double-click text to edit
-        </span>
-      </div>
-
-      <div className="creview__canvas-wrap">
-        {showingOriginal && (
-          <span className="creview__original-badge" role="status">
-            Showing original
+      <div 
+        style={{ 
+          flex: 1, 
+          minWidth: 0, 
+          display: "flex", 
+          flexDirection: "column", 
+          gap: "var(--sp-3)", 
+          position: "relative",
+          cursor: isSpaceDown ? (isPanning ? "grabbing" : "grab") : "default"
+        }}
+        onPointerDown={handlePanStart}
+        onPointerMove={handlePanMove}
+        onPointerUp={handlePanEnd}
+        onWheel={handleWheel}
+      >
+        <div className="creview__stage-head">
+          <span className="creview__meta">Canvas</span>
+          <span className="creview__meta creview__meta--muted">
+            {hoveredLayer !== null
+              ? `${LAYER_LABEL[hoveredLayer.id]} target`
+              : selectedLayer === null
+                ? "No layer selected"
+                : LAYER_LABEL[selectedLayer.id]}
           </span>
-        )}
-        <div
-          className="creview__canvas creview__canvas--locked"
-          style={{
-            width: "100%",
-            maxWidth: "620px",
-            marginInline: "auto",
-            overflow: "visible",
-          }}
-        >
-          {parsed === null ? (
-            <div
-              style={{
-                aspectRatio: "1 / 1",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "var(--surface-2)",
-                borderRadius: "var(--r-md)",
-                color: "var(--muted)",
-                fontSize: "13px",
-              }}
-            >
-              {mounted ? "Creative master unavailable" : "Loading canvas…"}
-            </div>
-          ) : (
-            <>
-              <div
-                ref={hostRef}
-                onClick={handleStageClick}
-                onDoubleClick={handleStageDoubleClick}
-                // SVG injected imperatively in the effect above (sanitized at parse) so React
-                // never re-materializes it and wipes applyState's live edits.
-              />
+          <span className="creview__meta creview__meta--muted">
+            {history.ops.length} pending
+          </span>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm creview__compare"
+            aria-pressed={showingOriginal}
+            title="Hold to show the original creative"
+            disabled={editing !== null || draggingLayer !== null}
+            onPointerDown={handleBeforePointerDown}
+            onPointerUp={handleBeforePointerEnd}
+            onPointerCancel={handleBeforePointerEnd}
+            onLostPointerCapture={restoreOriginalPreview}
+            onKeyDown={handleBeforeKeyDown}
+            onKeyUp={handleBeforeKeyUp}
+            onBlur={restoreOriginalPreview}
+          >
+            Before/After
+          </button>
+          <span className="creview__hint">
+            Click a layer · drag to move · double-click text to edit
+          </span>
+        </div>
 
-              <svg
-                viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
+        <div className="creview__canvas-wrap" style={{ flex: 1, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+          {showingOriginal && (
+            <span className="creview__original-badge" role="status" style={{ zIndex: 10 }}>
+              Showing original
+            </span>
+          )}
+          
+          <div
+            className="creview__canvas creview__canvas--locked"
+            style={{
+              width: "100%",
+              maxWidth: zoom === "fit" ? "620px" : `${viewBox.w}px`,
+              marginInline: "auto",
+              overflow: "visible",
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom === "fit" ? 1 : zoom})`,
+              transformOrigin: "center",
+              transition: isPanning ? "none" : "transform 0.15s ease",
+            }}
+          >
+            {parsed === null ? (
+              <div
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  pointerEvents: "none",
-                  overflow: "visible",
+                  aspectRatio: "1 / 1",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "var(--surface-2)",
+                  borderRadius: "var(--r-md)",
+                  color: "var(--muted)",
+                  fontSize: "13px",
                 }}
               >
-                {layers.map((layer) => {
-                  const base = layerBox(layer);
-                  if (base === null) return null;
-                  const box = transformedBBox(
-                    base,
-                    folded.transform[layer.id] ?? IDENTITY_TRANSFORM,
-                  );
-                  const visible = folded.visible[layer.id] !== false;
-                  return (
-                    <rect
-                      key={layer.id}
-                      x={box.x}
-                      y={box.y}
-                      width={box.w}
-                      height={box.h}
-                      fill="transparent"
-                      role="button"
-                      aria-label={`Select ${LAYER_LABEL[layer.id]}`}
-                      style={{
-                        pointerEvents: visible ? "all" : "none",
-                        touchAction: "none",
-                        cursor:
-                          draggingLayer !== null ? "grabbing" : "grab",
-                      }}
-                      onPointerEnter={(): void => setHoveredId(layer.id)}
-                      onPointerLeave={(): void =>
-                        setHoveredId((current) =>
-                          current === layer.id ? null : current,
-                        )
-                      }
-                      onPointerDown={(event): void => {
-                        setSelectedId(layer.id);
-                        beginMove(layer.id, event);
-                      }}
-                      onDoubleClick={(event): void => {
-                        event.stopPropagation();
-                        openTextEditor(layer);
-                      }}
-                    />
-                  );
-                })}
-              </svg>
-
-              {hoveredLayer !== null && hoveredBox !== null && (
+                {mounted ? "Creative master unavailable" : "Loading canvas…"}
+              </div>
+            ) : (
+              <>
+                <div
+                  ref={hostRef}
+                  onClick={handleStageClick}
+                  onDoubleClick={handleStageDoubleClick}
+                />
+                
+                {/* Overlay SVG */}
                 <svg
                   viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
-                  aria-hidden="true"
                   style={{
                     position: "absolute",
                     inset: 0,
@@ -1098,31 +1136,49 @@ export function CanvasStage({
                     overflow: "visible",
                   }}
                 >
-                  <rect
-                    x={hoveredBox.x}
-                    y={hoveredBox.y}
-                    width={hoveredBox.w}
-                    height={hoveredBox.h}
-                    fill="transparent"
-                    stroke="var(--accent)"
-                    strokeOpacity="0.5"
-                    strokeWidth={1.25 * unit}
-                  />
-                  <text
-                    x={hoveredBox.x + 5 * unit}
-                    y={hoveredBox.y - 7 * unit}
-                    fill="var(--ink)"
-                    fontSize={11 * unit}
-                    fontWeight="600"
-                  >
-                    {LAYER_LABEL[hoveredLayer.id]}
-                  </text>
+                  {layers.map((layer) => {
+                    const base = layerBox(layer);
+                    if (base === null) return null;
+                    const box = transformedBBox(
+                      base,
+                      folded.transform[layer.id] ?? IDENTITY_TRANSFORM,
+                    );
+                    const visible = folded.visible[layer.id] !== false;
+                    return (
+                      <rect
+                        key={layer.id}
+                        x={box.x}
+                        y={box.y}
+                        width={box.w}
+                        height={box.h}
+                        fill="transparent"
+                        role="button"
+                        aria-label={`Select ${LAYER_LABEL[layer.id]}`}
+                        style={{
+                          pointerEvents: visible && !isSpaceDown ? "all" : "none",
+                          touchAction: "none",
+                          cursor: draggingLayer !== null ? "grabbing" : "grab",
+                        }}
+                        onPointerEnter={(): void => setHoveredId(layer.id)}
+                        onPointerLeave={(): void =>
+                          setHoveredId((current) =>
+                            current === layer.id ? null : current,
+                          )
+                        }
+                        onPointerDown={(event): void => {
+                          setSelectedId(layer.id);
+                          beginMove(layer.id, event);
+                        }}
+                        onDoubleClick={(event): void => {
+                          event.stopPropagation();
+                          openTextEditor(layer);
+                        }}
+                      />
+                    );
+                  })}
                 </svg>
-              )}
 
-              {selectedLayer !== null &&
-                selectedBaseBox !== null &&
-                selectedBox !== null && (
+                {hoveredLayer !== null && hoveredBox !== null && !isSpaceDown && (
                   <svg
                     viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
                     aria-hidden="true"
@@ -1136,264 +1192,229 @@ export function CanvasStage({
                     }}
                   >
                     <rect
-                      x={selectedBox.x}
-                      y={selectedBox.y}
-                      width={selectedBox.w}
-                      height={selectedBox.h}
+                      x={hoveredBox.x}
+                      y={hoveredBox.y}
+                      width={hoveredBox.w}
+                      height={hoveredBox.h}
                       fill="transparent"
                       stroke="var(--accent)"
-                      strokeWidth={1.5 * unit}
-                      style={{
-                        pointerEvents: "all",
-                        touchAction: "none",
-                        cursor:
-                          draggingLayer !== null ? "grabbing" : "grab",
-                      }}
-                      onPointerDown={(event): void =>
-                        beginMove(selectedLayer.id, event)
-                      }
-                      onDoubleClick={(event): void => {
-                        event.stopPropagation();
-                        openTextEditor(selectedLayer);
-                      }}
+                      strokeOpacity="0.5"
+                      strokeWidth={1.25 * unit}
                     />
-                    <line
-                      x1={selectedBox.x + selectedBox.w / 2}
-                      y1={selectedBox.y}
-                      x2={selectedBox.x + selectedBox.w / 2}
-                      y2={selectedBox.y - 14 * unit}
-                      stroke="var(--accent)"
-                      strokeWidth={1.5 * unit}
-                    />
-                    <circle
-                      cx={selectedBox.x + selectedBox.w / 2}
-                      cy={selectedBox.y - 20 * unit}
-                      r={6.5 * unit}
-                      fill="var(--accent)"
-                      stroke="var(--surface)"
-                      strokeWidth={1.5 * unit}
-                      style={{
-                        pointerEvents: "all",
-                        touchAction: "none",
-                        cursor:
-                          draggingLayer !== null ? "grabbing" : "grab",
-                      }}
-                      onPointerDown={(event): void =>
-                        beginMove(selectedLayer.id, event)
-                      }
-                    />
-                    <rect
-                      x={selectedBox.x + selectedBox.w - 5.5 * unit}
-                      y={selectedBox.y + selectedBox.h - 5.5 * unit}
-                      width={11 * unit}
-                      height={11 * unit}
-                      rx={2 * unit}
-                      fill="var(--surface)"
-                      stroke="var(--accent)"
-                      strokeWidth={1.5 * unit}
-                      style={{
-                        pointerEvents: "all",
-                        touchAction: "none",
-                        cursor: "nwse-resize",
-                      }}
-                      onPointerDown={(event): void =>
-                        beginScale(
-                          selectedLayer.id,
-                          event,
-                          selectedBaseBox.w,
-                        )
-                      }
-                    />
+                    <text
+                      x={hoveredBox.x + 5 * unit}
+                      y={hoveredBox.y - 7 * unit}
+                      fill="var(--ink)"
+                      fontSize={11 * unit}
+                      fontWeight="600"
+                    >
+                      {LAYER_LABEL[hoveredLayer.id]}
+                    </text>
                   </svg>
                 )}
 
-              {editing !== null &&
-                editingBox !== null &&
-                editingTextLayout !== null && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: `${(editingBox.x - viewBox.x) * pxPerUnit}px`,
-                      top: `${(editingBox.y - viewBox.y) * pxPerUnit}px`,
-                      width: `${Math.max(editingBox.w * pxPerUnit, 1)}px`,
-                      zIndex: 3,
-                    }}
-                  >
-                    <textarea
-                      ref={textareaRef}
-                      className="creview__input"
-                      value={editing.value}
-                      maxLength={MAX_TEXT_CHARS}
-                      rows={2}
-                      aria-label={`Edit ${LAYER_LABEL[editing.layerId]} text`}
+                {selectedLayer !== null &&
+                  selectedBaseBox !== null &&
+                  selectedBox !== null && !isSpaceDown && (
+                    <svg
+                      viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
+                      aria-hidden="true"
                       style={{
-                        boxSizing: "border-box",
+                        position: "absolute",
+                        inset: 0,
                         width: "100%",
-                        height: `${Math.max(
-                          editingBox.h * pxPerUnit,
-                          editingTextLayout.lineHeight *
-                            pxPerUnit *
-                            editingTransform.scale *
-                            2,
-                        )}px`,
-                        minHeight: 0,
-                        resize: "none",
-                        fontSize: `${Math.max(
-                          editingTextLayout.fontSize *
-                            pxPerUnit *
-                            editingTransform.scale,
-                          10,
-                        )}px`,
-                        lineHeight: `${Math.max(
-                          editingTextLayout.lineHeight *
-                            pxPerUnit *
-                            editingTransform.scale,
-                          12,
-                        )}px`,
-                        textAlign: textAlignForAnchor(
-                          editingTextLayout.textAnchor,
-                        ),
-                        boxShadow: "var(--shadow-pop)",
-                      }}
-                      onChange={(event): void =>
-                        handleTextChange(event.target.value)
-                      }
-                      onBlur={commitTextEdit}
-                      onKeyDown={handleEditKeyDown}
-                    />
-                    <span
-                      style={{
-                        display: "block",
-                        marginTop: "4px",
-                        padding: "3px 6px",
-                        borderRadius: "var(--r-xs)",
-                        color: "var(--muted)",
-                        background: "var(--surface)",
-                        boxShadow: "var(--shadow-pop)",
-                        fontSize: "11px",
-                        lineHeight: 1.35,
+                        height: "100%",
+                        pointerEvents: "none",
+                        overflow: "visible",
                       }}
                     >
-                      Enter adds a line · ⌘/Ctrl+Enter applies · Esc cancels
-                    </span>
-                  </div>
-                )}
-            </>
-          )}
-        </div>
-      </div>
+                      <rect
+                        x={selectedBox.x}
+                        y={selectedBox.y}
+                        width={selectedBox.w}
+                        height={selectedBox.h}
+                        fill="transparent"
+                        stroke="var(--accent)"
+                        strokeWidth={1.5 * unit}
+                        style={{
+                          pointerEvents: "all",
+                          touchAction: "none",
+                          cursor: draggingLayer !== null ? "grabbing" : "grab",
+                        }}
+                        onPointerDown={(event): void =>
+                          beginMove(selectedLayer.id, event)
+                        }
+                        onDoubleClick={(event): void => {
+                          event.stopPropagation();
+                          openTextEditor(selectedLayer);
+                        }}
+                      />
+                      <line
+                        x1={selectedBox.x + selectedBox.w / 2}
+                        y1={selectedBox.y}
+                        x2={selectedBox.x + selectedBox.w / 2}
+                        y2={selectedBox.y - 14 * unit}
+                        stroke="var(--accent)"
+                        strokeWidth={1.5 * unit}
+                      />
+                      <circle
+                        cx={selectedBox.x + selectedBox.w / 2}
+                        cy={selectedBox.y - 20 * unit}
+                        r={6.5 * unit}
+                        fill="var(--accent)"
+                        stroke="var(--surface)"
+                        strokeWidth={1.5 * unit}
+                        style={{
+                          pointerEvents: "all",
+                          touchAction: "none",
+                          cursor: draggingLayer !== null ? "grabbing" : "grab",
+                        }}
+                        onPointerDown={(event): void =>
+                          beginMove(selectedLayer.id, event)
+                        }
+                      />
+                      <rect
+                        x={selectedBox.x + selectedBox.w - 5.5 * unit}
+                        y={selectedBox.y + selectedBox.h - 5.5 * unit}
+                        width={11 * unit}
+                        height={11 * unit}
+                        rx={2 * unit}
+                        fill="var(--surface)"
+                        stroke="var(--accent)"
+                        strokeWidth={1.5 * unit}
+                        style={{
+                          pointerEvents: "all",
+                          touchAction: "none",
+                          cursor: "nwse-resize",
+                        }}
+                        onPointerDown={(event): void =>
+                          beginScale(
+                            selectedLayer.id,
+                            event,
+                            selectedBaseBox.w,
+                          )
+                        }
+                      />
+                    </svg>
+                  )}
 
-      {overflowingLayers.length > 0 && (
-        <p
-          className="creview__thread-empty"
-          role="status"
-          style={{ margin: 0 }}
-        >
-          {overflowingLayers
-            .map((layer) => `${LAYER_LABEL[layer.id]} text may overflow`)
-            .join(" · ")}
-        </p>
-      )}
-
-      {layers.length > 0 && (
-        <div className="creview__section">
-          <span className="review-panel__label">Layers</span>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "6px",
-              alignItems: "center",
-            }}
-          >
-            {layers.map((layer) => {
-              const visible = folded.visible[layer.id] !== false;
-              const isSelected = layer.id === selectedId;
-              return (
-                <span
-                  key={layer.id}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "2px",
-                  }}
-                >
-                  <button
-                    type="button"
-                    className={`layer-chip${isSelected ? " layer-chip--active" : ""}`}
-                    aria-pressed={isSelected}
-                    onClick={(): void =>
-                      setSelectedId(isSelected ? null : layer.id)
-                    }
-                  >
-                    {LAYER_LABEL[layer.id]}
-                  </button>
-                  <button
-                    type="button"
-                    className="layer-chip"
-                    aria-pressed={!visible}
-                    aria-label={`${visible ? "Hide" : "Show"} ${LAYER_LABEL[layer.id]}`}
-                    title={visible ? "Hide layer" : "Show layer"}
-                    style={visible ? undefined : { opacity: 0.45 }}
-                    onClick={(): void => toggleVisible(layer.id)}
-                  >
-                    <EyeIcon open={visible} />
-                  </button>
-                </span>
-              );
-            })}
-            {selectedIsText && selectedLayer !== null && (
-              <button
-                type="button"
-                className="btn btn--secondary btn--sm"
-                onClick={(): void => openTextEditor(selectedLayer)}
-              >
-                Edit text
-              </button>
+                {editing !== null &&
+                  editingBox !== null &&
+                  editingTextLayout !== null && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: `${(editingBox.x - viewBox.x) * pxPerUnit}px`,
+                        top: `${(editingBox.y - viewBox.y) * pxPerUnit}px`,
+                        width: `${Math.max(editingBox.w * pxPerUnit, 1)}px`,
+                        zIndex: 3,
+                      }}
+                    >
+                      <textarea
+                        ref={textareaRef}
+                        className="creview__input"
+                        value={editing.value}
+                        maxLength={MAX_TEXT_CHARS}
+                        rows={2}
+                        aria-label={`Edit ${LAYER_LABEL[editing.layerId]} text`}
+                        style={{
+                          boxSizing: "border-box",
+                          width: "100%",
+                          height: `${Math.max(
+                            editingBox.h * pxPerUnit,
+                            editingTextLayout.lineHeight *
+                              pxPerUnit *
+                              editingTransform.scale *
+                              2,
+                          )}px`,
+                          minHeight: 0,
+                          resize: "none",
+                          fontSize: `${Math.max(
+                            editingTextLayout.fontSize *
+                              pxPerUnit *
+                              editingTransform.scale,
+                            10,
+                          )}px`,
+                          lineHeight: `${Math.max(
+                            editingTextLayout.lineHeight *
+                              pxPerUnit *
+                              editingTransform.scale,
+                            12,
+                          )}px`,
+                          textAlign: textAlignForAnchor(
+                            editingTextLayout.textAnchor,
+                          ),
+                          boxShadow: "var(--shadow-pop)",
+                        }}
+                        onChange={(event): void =>
+                          handleTextChange(event.target.value)
+                        }
+                        onBlur={commitTextEdit}
+                        onKeyDown={handleEditKeyDown}
+                      />
+                      <span
+                        style={{
+                          display: "block",
+                          marginTop: "4px",
+                          padding: "3px 6px",
+                          borderRadius: "var(--r-xs)",
+                          color: "var(--muted)",
+                          background: "var(--surface)",
+                          boxShadow: "var(--shadow-pop)",
+                          fontSize: "11px",
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        Enter adds a line · ⌘/Ctrl+Enter applies · Esc cancels
+                      </span>
+                    </div>
+                  )}
+              </>
             )}
           </div>
         </div>
-      )}
 
-      {showSwatches && selectedLayer !== null && (
-        <div className="creview__section">
-          <span className="review-panel__label">
-            Fill · {LAYER_LABEL[selectedLayer.id]} — brand palette
-          </span>
-          <div className="brief-swatches">
-            {brandColors.map((color) => {
-              const active = selectedFillRole === color.name;
-              return (
-                <button
-                  key={color.name}
-                  type="button"
-                  className="brief-swatch"
-                  aria-pressed={active}
-                  title={`${color.name} · ${color.hex}`}
-                  onClick={(): void =>
-                    pickFillRole(selectedLayer.id, color.name)
-                  }
-                >
-                  <span
-                    className="brief-swatch__chip"
-                    style={{
-                      background: color.hex,
-                      ...(active
-                        ? {
-                            outline: "2px solid var(--accent)",
-                            outlineOffset: "1px",
-                          }
-                        : {}),
-                    }}
-                  />
-                  <span className="brief-swatch__name">{color.name}</span>
-                  <span className="brief-swatch__hex">{color.hex}</span>
-                </button>
-              );
-            })}
-          </div>
+        <div style={{ position: "absolute", bottom: "16px", left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
+           <ZoomControls
+             zoom={zoom}
+             onZoomChange={handleZoomChange}
+             creativeSize={{ w: viewBox.w, h: viewBox.h }}
+             creativeFormat={Math.abs(viewBox.w / viewBox.h - 1) < 0.01 ? "Square / IG Post" : (Math.abs(viewBox.w / viewBox.h - 4/5) < 0.01 ? "IG Portrait" : (Math.abs(viewBox.w / viewBox.h - 9/16) < 0.01 ? "Story" : (viewBox.w > viewBox.h ? "Landscape" : "Portrait")))}
+             isFullscreen={isFullscreen}
+             onToggleFullscreen={() => setIsFullscreen(f => !f)}
+           />
         </div>
-      )}
+        
+        {overflowingLayers.length > 0 && (
+          <div style={{ position: "absolute", top: "16px", left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
+             <p className="creview__thread-empty" role="status" style={{ margin: 0, background: "var(--surface)", padding: "4px 12px", borderRadius: "var(--r-full)", boxShadow: "var(--shadow-pop)", fontSize: "12px" }}>
+               {overflowingLayers.map((layer) => `${LAYER_LABEL[layer.id]} text may overflow`).join(" · ")}
+             </p>
+          </div>
+        )}
+      </div>
+      
+      <Inspector 
+         layers={layers.map(l => ({
+            id: l.id,
+            isVisible: folded.visible[l.id] !== false,
+            hasText: TEXT_EDIT_KEY[l.id] !== undefined,
+            canRecolor: RECOLORABLE.has(l.id)
+         }))}
+         selectedId={selectedId}
+         onSelect={setSelectedId}
+         onToggleVisible={toggleVisible}
+         onEditText={(id) => openTextEditor(layers.find(l => l.id === id)!)}
+         brandColors={brandColors}
+         selectedFillRole={selectedLayer ? folded.fill[selectedLayer.id] : null}
+         onPickFillRole={pickFillRole}
+         onResetLayer={resetLayer}
+         canResetSelectedLayer={selectedLayer ? history.ops.some(op => op.layer === selectedLayer.id) : false}
+         askText={askText ?? ""}
+         onAskTextChange={onAskTextChange ?? (() => {})}
+         onAddAsk={onAddAsk ?? (() => {})}
+         busy={busy ?? false}
+      />
     </div>
   );
 }

@@ -15,7 +15,6 @@ import {
 } from "./CanvasStage";
 import { VersionRail } from "./VersionRail";
 import {
-  CANVAS_LAYER_IDS,
   type ApiCanvasRevision,
   type ApiRegionAsk,
   type CanvasLayerId,
@@ -60,8 +59,7 @@ const LAYER_LABEL: Record<CanvasLayerId, string> = {
   "layer-badge": "Badge",
 };
 
-/** Contract cap on RegionAsk.instruction. */
-const MAX_ASK_CHARS = 500;
+
 
 const EMPTY_STAGE_SNAPSHOT: CanvasStageSnapshot = {
   history: { ops: [], redo: [] },
@@ -142,8 +140,6 @@ export function CanvasEditor({
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
 
-  // "Mark & tell AI" composer.
-  const [askLayer, setAskLayer] = useState<CanvasLayerId | null>(null);
   const [askText, setAskText] = useState("");
 
   // The stage emits its FULL accumulated state each time — replace ours, keep the ask.
@@ -169,17 +165,16 @@ export function CanvasEditor({
   const pendingAsk = pendingRevision?.ask ?? null;
   const hasPendingChanges =
     stageSnapshot.history.ops.length > 0 || pendingAsk !== null;
-  const canAddAsk = askLayer !== null && askText.trim() !== "" && !busy;
+  const canAddAsk = askText.trim() !== "" && !busy;
 
-  function addAsk(): void {
-    if (askLayer === null || !canAddAsk) return;
+  function addAsk(layerId: CanvasLayerId): void {
+    if (!canAddAsk) return;
     const ask: ApiRegionAsk = {
-      zone: ASK_ZONE[askLayer],
-      bbox: layerBBox(currentSvg, askLayer),
+      zone: ASK_ZONE[layerId],
+      bbox: layerBBox(currentSvg, layerId),
       instruction: askText.trim(),
     };
     setPendingRevision((prev) => ({ layer_ops: [], ...(prev ?? {}), ask }));
-    setAskLayer(null);
     setAskText("");
   }
 
@@ -194,7 +189,6 @@ export function CanvasEditor({
     setPendingRevision(null);
     setStageSnapshot(EMPTY_STAGE_SNAPSHOT);
     setPendingRevert(null);
-    setAskLayer(null);
     setAskText("");
     // The server render now carries the applied state — reset the stage's local preview.
     setStageKey((key) => key + 1);
@@ -223,7 +217,6 @@ export function CanvasEditor({
     setPendingRevision(null);
     setStageSnapshot(EMPTY_STAGE_SNAPSHOT);
     setPendingRevert(null);
-    setAskLayer(null);
     setAskText("");
     setStageKey((key) => key + 1);
     setError("");
@@ -263,6 +256,10 @@ export function CanvasEditor({
         onChange={handleStageChange}
         onHistoryChange={handleStageHistoryChange}
         controlsRef={stageControlsRef}
+        askText={askText}
+        onAskTextChange={setAskText}
+        onAddAsk={addAsk}
+        busy={busy}
       />
 
       <aside className="creview__rail" aria-label="Canvas editor">
@@ -406,43 +403,7 @@ export function CanvasEditor({
           </div>
         </div>
 
-        <div className="creview__composer">
-          <h2 className="creview__label" id="canvas-ask-label">
-            Mark &amp; tell AI
-          </h2>
-          <div className="creview__zones" role="group" aria-labelledby="canvas-ask-label">
-            {CANVAS_LAYER_IDS.map((layerId) => (
-              <button
-                key={layerId}
-                type="button"
-                className={`zone-chip${askLayer === layerId ? " zone-chip--active" : ""}`}
-                aria-pressed={askLayer === layerId}
-                onClick={(): void => setAskLayer(askLayer === layerId ? null : layerId)}
-              >
-                {LAYER_LABEL[layerId]}
-              </button>
-            ))}
-          </div>
-          <textarea
-            className="creview__input"
-            value={askText}
-            maxLength={MAX_ASK_CHARS}
-            placeholder="What should the AI change in the marked region?"
-            aria-label="AI instruction"
-            rows={2}
-            onChange={(event): void => setAskText(event.target.value)}
-          />
-          <div className="creview__composer-actions">
-            <button
-              type="button"
-              className="btn btn--secondary btn--sm"
-              disabled={!canAddAsk}
-              onClick={addAsk}
-            >
-              Queue ask
-            </button>
-          </div>
-        </div>
+
 
         {error !== "" && (
           <p className="creview__error" role="alert">
