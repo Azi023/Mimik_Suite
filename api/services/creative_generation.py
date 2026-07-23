@@ -44,6 +44,7 @@ from mimik_contracts import (
     LayerKind,
     LayerRecipe,
     PRESETS,
+    CanvasRevision,
 )
 
 
@@ -364,10 +365,7 @@ async def _render_creative_artifacts(
     return svg_path, preview_path, profile_render_path
 
 
-class ReviseCreativeRequest(BaseModel):
-    edits: dict[str, str] | None = None
-    instruction: str | None = None
-    params: dict[str, object] | None = None
+# Legacy ReviseCreativeRequest was removed; the router maps it to CanvasRevision
 
 
 def _actor_dict(principal: Principal) -> dict[str, str]:
@@ -377,12 +375,14 @@ def _actor_dict(principal: Principal) -> dict[str, str]:
     }
 
 
-def _revision_note(body: ReviseCreativeRequest) -> str | None:
-    if body.instruction:
-        return body.instruction
-    if not body.edits:
-        return None
-    return "; ".join(f"{field}: {value}" for field, value in body.edits.items())
+def _revision_note(revision: CanvasRevision) -> str | None:
+    if revision.ask and revision.ask.instruction:
+        return revision.ask.instruction
+    if revision.text_edits:
+        return "; ".join(f"{field}: {value}" for field, value in revision.text_edits.model_dump(exclude_none=True).items())
+    if revision.layer_ops:
+        return f"Layer ops: {len(revision.layer_ops)}"
+    return None
 
 
 def _set_rendered_artifacts(
@@ -426,7 +426,7 @@ async def revise_creative(
     *,
     principal: Principal,
     creative_id: str,
-    body: ReviseCreativeRequest,
+    revision: CanvasRevision,
 ) -> GeneratedCreative:
     scoped = await get_scoped_creative(session, principal=principal, creative_id=creative_id)
     if scoped is None:
@@ -446,11 +446,11 @@ async def revise_creative(
     if not image_layer or not image_layer.recipe or not image_layer.artifact_ref:
         raise HTTPException(status_code=422, detail="Creative missing L1_BASE image layer")
 
-    params = body.params or {}
+    params = revision.params or {}
     l1_params = image_layer.recipe.params
 
-    if body.instruction:
-        text_lower = body.instruction.lower()
+    if revision.ask and revision.ask.instruction:
+        text_lower = revision.ask.instruction.lower()
         for keyword in ("left", "right", "top", "bottom"):
             if keyword in text_lower:
                 params["panel_anchor"] = keyword
@@ -461,20 +461,11 @@ async def revise_creative(
         elif "larger" in text_lower:
             params["subject_zoom"] = 1.2
 
-        # `badge_background_luminance` is the luminance of the ground BEHIND the badge:
-        # badge_theme() picks the light/reversed mark on a DARK ground (low value) and the
-        # dark plum mark on a LIGHT ground (high value). So "lighter" badge => dark ground
-        # (0.0), "darker" badge => light ground (1.0). Previously inverted (Bug 1).
         if "lighter" in text_lower:
             params["badge_background_luminance"] = 0.0
         elif "darker" in text_lower:
             params["badge_background_luminance"] = 1.0
 
-        # The instruction re-drafts the copy from the brief. An explicit inline text edit is
-        # a direct user command that must win, so `body.edits` is applied AFTER the redraft
-        # below (Bug 2: previously the redraft clobbered the explicit edit). The deterministic
-        # layout/badge params above are already set; if the copy LLM is unavailable (e.g. the
-        # free-tier 429) keep the current copy and still ship the layout change rather than 500.
         try:
             copy_block = await asyncio.to_thread(
                 copy_l0.draft_copy,
@@ -482,23 +473,61 @@ async def revise_creative(
                 str(l1_params.get("pillar", "General")),
                 str(l1_params.get("topic", "General")),
                 manifest.format_key,
-                revision_note=body.instruction,
+                revision_note=revision.ask.instruction,
             )
         except (copy_l0.CopyDraftError, OSError) as exc:
             logger.warning(
                 "revise: copy redraft failed (%s); applying layout-only change", exc
             )
 
-    if body.edits:
-        if "headline" in body.edits:
-            copy_block.headline = body.edits["headline"]
-        if "sub" in body.edits:
-            copy_block.subhead = body.edits["sub"]
-        if "cta" in body.edits:
-            copy_block.cta = body.edits["cta"]
-        copy_block.status = "edited"
+    if revision.text_edits:
+        edits_dump = revision.text_edits.model_dump(exclude_none=True)
+        if "headline" in edits_dump:
+            copy_block.headline = edits_dump["headline"]
+        if "subhead" in edits_dump:
+            copy_block.subhead = edits_dump["subhead"]
+        if "cta" in edits_dump:
+            copy_block.cta = edits_dump["cta"]
+        if edits_dump:
+            copy_block.status = "edited"
 
     l1_params.update(params)
+
+    # Resolve layer operations
+    layer_overrides = l1_params.get("layer_overrides", {})
+    if not isinstance(layer_overrides, dict):
+        layer_overrides = {}
+    layer_overrides = dict(layer_overrides)  # Clone so we don't mutate in place unexpectedly
+
+    for op in revision.layer_ops:
+        override: dict[str, object] = {
+            "dx": op.dx,
+            "dy": op.dy,
+            "scale": op.scale,
+            "visible": op.visible,
+        }
+        if op.fill_role is not None:
+            # Recolor is bounded to the brand palette: resolve the role NAME to a hex from the
+            # brand tokens; an unknown role is rejected (never a free-form colour).
+            hex_color = next(
+                (
+                    c.hex
+                    for c in brand.tokens.colors
+                    if c.name.casefold() == op.fill_role.casefold()
+                ),
+                None,
+            )
+            if hex_color is None:
+                raise HTTPException(
+                    status_code=422, detail=f"Unknown brand color role: {op.fill_role}"
+                )
+            override["fill"] = hex_color
+        # An op carries the full desired state of its layer, so it replaces that layer's stored
+        # override; layers absent from this revision keep theirs (inheritance across versions).
+        layer_overrides[op.layer_id] = override
+
+    if layer_overrides:
+        l1_params["layer_overrides"] = layer_overrides
 
     new_creative_id = str(uuid4())
     artifact_dir = creative_artifact_path(new_creative_id, "preview.png").parent
@@ -531,7 +560,7 @@ async def revise_creative(
             manifest=manifest.model_dump(mode="json"),
             parent_id=creative_id,
             created_by=_actor_dict(principal),
-            revision_note=_revision_note(body),
+            revision_note=_revision_note(revision),
         )
         await session.commit()
     except Exception:

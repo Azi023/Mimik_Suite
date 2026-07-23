@@ -18,7 +18,6 @@ from api.db.mappers import to_brand, to_creative_doc
 from api.db.session import get_session
 from api.services.creative_generation import (
     GeneratedCreative,
-    ReviseCreativeRequest,
     brand_color,
     creative_artifact_path,
     get_scoped_creative,
@@ -38,6 +37,10 @@ from mimik_contracts import (
     JobStatus,
     LayerKind,
     VersionHistory,
+    CanvasRevision,
+    RegionAsk,
+    TextEdits,
+    LayerOp,
 )
 
 router = APIRouter(prefix="/jobs/{job_id}/creatives", tags=["creatives"])
@@ -72,6 +75,37 @@ class CreateCreative(BaseModel):
     _safe_artifact = field_validator("image_artifact")(
         staticmethod(_assert_safe_image_artifact)
     )
+
+
+class ReviseCreativePayload(BaseModel):
+    # CanvasRevision fields
+    text_edits: TextEdits | None = None
+    layer_ops: list[LayerOp] = []
+    params: dict[str, object] | None = None
+    ask: RegionAsk | None = None
+    # Legacy fields
+    edits: dict[str, str] | None = None
+    instruction: str | None = None
+
+    def as_revision(self) -> CanvasRevision:
+        rev = CanvasRevision(
+            text_edits=self.text_edits,
+            layer_ops=self.layer_ops,
+            params=self.params,
+            ask=self.ask,
+        )
+        if self.edits and not rev.text_edits:
+            mapped = {}
+            if "headline" in self.edits:
+                mapped["headline"] = self.edits["headline"]
+            if "sub" in self.edits:
+                mapped["subhead"] = self.edits["sub"]
+            if "cta" in self.edits:
+                mapped["cta"] = self.edits["cta"]
+            rev.text_edits = TextEdits(**mapped)
+        if self.instruction and not rev.ask:
+            rev.ask = RegionAsk(zone="other", instruction=self.instruction)
+        return rev
 
 
 class RevertCreativeRequest(BaseModel):
@@ -133,7 +167,7 @@ async def list_creatives(
 @artifact_router.post("/{creative_id}/revise", response_model=GeneratedCreative, status_code=201)
 async def revise_creative_endpoint(
     creative_id: str,
-    body: ReviseCreativeRequest,
+    body: ReviseCreativePayload,
     principal: Principal = Depends(require_role("owner", "ops", "designer", "team")),
     session: AsyncSession = Depends(get_session),
 ) -> GeneratedCreative:
@@ -141,7 +175,7 @@ async def revise_creative_endpoint(
         session,
         principal=principal,
         creative_id=creative_id,
-        body=body,
+        revision=body.as_revision(),
     )
     return result
 
