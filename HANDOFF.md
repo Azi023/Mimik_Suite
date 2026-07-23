@@ -4,7 +4,88 @@
 
 ---
 
-## ► LATEST (2026-07-23 pm7) — 3-PERSONA AUDIT TRIAGED + ACTED ON; nearly all P0/P1 cleared; only mobile editor left
+## ► LATEST (2026-07-23 pm8) — AUDIT CLEARED + EDITOR COMPLETE-ish + FULL PRODUCT INVENTORY; fresh session = product depth
+
+**This was a very long session. The canvas editor is now genuinely strong; the 3-persona audit is essentially
+cleared; and there is now a truthful whole-product inventory. The NEXT session should shift from editor polish
+to PRODUCT DEPTH (the loop actually working end-to-end) — see the inventory.**
+
+### 📋 READ FIRST NEXT SESSION: `docs/PRODUCT_STATE_INVENTORY.md`
+A full, evidence-based planned-vs-built-vs-stale accounting (written by an analyst subagent this session).
+The headline gaps below are summarized from it — but read the doc for the feature-by-feature table + file:line.
+
+### THE BIG PRODUCT GAPS (from the inventory — these matter more than editor features now):
+1. **Google Drive auto-archive — REAL CODE, NEVER RUN.** `creative/archive/google_drive.py` fully implements
+   Drive v3 upload (service-account + user-OAuth), wired into approval (`approval_flow.py submit_approval →
+   run_archive`). `.env` here is set `ARCHIVE_BACKEND=google_drive_oauth` + `DRIVE_ROOT_FOLDER_ID`. BUT
+   `GET /deliveries` = 0 rows → the approve→archive→Drive→Delivery loop has NEVER executed. **P0: run one real
+   approval end-to-end + confirm a file lands in Drive (needs a valid OAuth refresh token via
+   `scripts/drive_oauth.py`).** Until then the headline "auto-archive to Drive" is unproven.
+2. **Command Center ⌘K — NOT BUILT.** Only `/ops/queue`, `/ops/queue/stats`, `/ops/usage` endpoints exist —
+   and they have NO UI consumer (no `listQueue`/`usageReport` in `web/lib/api.ts`). A-05 parser / A-08 queue
+   panel / A-09 command bar all unbuilt. **P1: build the A-08 panel consuming the existing endpoints, then the
+   ⌘K parser+bar.**
+3. **QA critic ORPHANED.** `run_brand_qa` (real WCAG/contrast/safe-zone checks) is only called in
+   `creative/pipeline.py`, which the LIVE generate path bypasses (`creative_generation._render_creative_artifacts`
+   renders directly). **P0/P1: wire the critic into the live generate path** so the auto-QA gate actually fires.
+4. **Learning loop OPEN + UI LIES.** Signals captured on every approve/reject/edit; a ranker exists
+   (`preferences.py ranker_active()`) — but NO generation code consults it, while `preferences/page.tsx` says
+   "Ranker is steering picks." **P1: either close the loop (let generation consult the ranker) or stop claiming it.**
+5. **Imagery: only 1/3 clients real.** Glo2Go renders real Pexels; Simply Nikah + Island Cart fall to solid
+   placeholders unless the paid image gate is on (`_solid_placeholder`).
+6. **Brand-row seed drift.** 0 Brand rows in the tenant yet clients have creatives → the missing-brand CTA
+   (added this session) fires for everyone. `scripts/seed_profiles.py` DOES create Brand rows → board creatives
+   came from a different path/tenant. **Reconcile the seed/live DB.**
+7. **Satellites:** Proofkit = optional guarded import (brief extraction, unverified installed); Figma L4 handoff
+   = ZERO code; video engine = none (as planned).
+
+### WHAT SHIPPED THIS SESSION (18 commits, ALL Playwright/pytest-verified; executor-driven, Opus review/verify):
+Editor: rotation (`2446ea3`) · rulers/margins/guides/snap (`710d520`) · keyboard nudge/delete (`1feb30a`) ·
+version-head stability (`f1fba17`) · mobile @375px (`6016b34`) · whiteboard pan (`c2dc618`) · op coalescing +
+human version labels (`32daead`) · free-pan overscroll + custom draggable ruler guides (`ddbf826`) · spatial
+marking region+pin (pending commit this session).
+Shell/product: onboarding session-expired fix (`14a6ff8`) · labeled nav + editor chrome collapse (`7debdb6`) ·
+client-list-only-on-/clients + TopBar switcher + rail alignment (`c8198ec`) · onboarding specific-error +
+missing-brand CTA (`a4f43db`) · portal operator-preview banner (`8d9c47a`) · 404/onboarding-review/mobile-drawer
+polish (`453cdec`).
+Audit verdicts: portal "leak" = NOT a vuln (18/18 isolation tests; dev-preview artifact, banner added).
+Hook-order = NOT a bug (Fast-Refresh artifact; hooks unconditional).
+
+### REMAINING EDITOR BACKLOG (lower priority than the product gaps above):
+- Multi-select (selectedId is single today → needs a selection SET) → then align/distribute.
+- Layer navigator (list/select/visibility/LOCK) — the fitting subset of "layer tree". reorder/rename/duplicate
+  do NOT fit the fixed-5-layer master (needs a master-architecture decision — see the fork noted in pm6).
+- Product decisions SIGNED OFF, not built: (a) editor re-render FORMAT SWITCHER (1:1/4:5/9:16 = re-compose at
+  new dims, engine change); (b) custom-colour "BOTH" mode (team custom hex; clients bounded to brand tints/shades).
+- #11 resize opposite-edge ~1px drift (P2, sub-pixel). #19 dev microcopy ("Static route") hide outside dev.
+
+### DEV SETUP + GOTCHAS (unchanged + new):
+- API :8000 with paid TEXT keys, uvicorn NOT --reload (restart after API changes). Web:
+  `cd web && NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev`. DB head c7e90f4a1b32.
+- **NEVER let an executor run `npm run build`** — it writes web/.next and corrupts the running dev server
+  (cost a restart this session). Every executor spec now forbids it; keep that.
+- If web 500s (stale chunk): kill the node pid, `rm -rf web/.next`, restart.
+- Executors: Codex (`codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c
+  approval_policy=never - < spec.md`) for logic/geometry/backend; AGY (`agy -p "$(cat spec.md)" --mode
+  accept-edits --dangerously-skip-permissions --print-timeout 30m`) for big UI — AGY needed a re-login this
+  session (Antigravity 1.1.5, Gemini 3.1 Pro). Canvas features can't be parallelized (all touch CanvasStage/
+  editor-state) — run them sequentially; parallelize only disjoint scopes (e.g. shell ‖ canvas).
+- DEPLOY still HELD (deploy-hardening: gate `getDevToken()` on NODE_ENV!=='production'; the dev owner-JWT
+  ships in the client bundle via NEXT_PUBLIC_).
+
+### ▶ FRESH-SESSION KICKOFF (paste to start):
+"You are the BRAIN orchestrating Mimik Suite. Read HANDOFF.md (top pm8 entry) → docs/PRODUCT_STATE_INVENTORY.md.
+The editor is strong; SHIFT to product depth. Confirm the app runs. Priorities: (P0) turn on + verify Google
+Drive with ONE real approval end-to-end (0 deliveries today); wire the QA critic into the LIVE generate path.
+(P1) close the ranker/learning loop or stop the UI claiming it; build the Command Center A-08 queue panel over
+the existing /ops endpoints, then the ⌘K parser+bar; fix imagery (2/3 clients placeholder) + brand-row seed
+drift. Editor backlog (multi-select→align/distribute, layer navigator, format switcher, custom-colour both) is
+lower priority. Operating model: Opus specs/reviews/Playwright-verifies; Codex=logic/geometry/backend, AGY=big
+UI; executors NEVER commit + NEVER `npm run build`; Opus commits after live verify. Deploy HELD."
+
+---
+
+## ► (2026-07-23 pm7) — 3-PERSONA AUDIT TRIAGED + ACTED ON; nearly all P0/P1 cleared; only mobile editor left
 
 **11 commits this session, ALL Playwright/pytest-verified. Executor-driven (Codex geometry/logic + AGY big
 UI); Opus spec/review/verify/commit only — usage stayed lean.** Full commit list this session:
