@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from mimik_contracts import TaskStatus, TaskType
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -524,6 +525,40 @@ async def list_tasks(
     if status is not None:
         stmt = stmt.where(TaskRow.status == status)
     stmt = stmt.order_by(TaskRow.created_at)
+    return list((await session.execute(stmt)).scalars())
+
+
+async def list_generation_tasks(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+) -> list[TaskRow]:
+    """Tenant-scoped generation queue, oldest request first."""
+    stmt = (
+        select(TaskRow)
+        .where(
+            TaskRow.tenant_id == tenant_id,
+            TaskRow.type == TaskType.GENERATION.value,
+        )
+        .order_by(TaskRow.created_at, TaskRow.id)
+    )
+    return list((await session.execute(stmt)).scalars())
+
+
+async def list_open_generation_tasks(session: AsyncSession) -> list[TaskRow]:
+    """SYSTEM worker query: open generation tasks across tenants, oldest first.
+
+    This deliberately has no tenant filter because a worker has no caller tenant. The worker
+    must re-scope every selected row to ``task.tenant_id`` before reading its job or client.
+    """
+    stmt = (
+        select(TaskRow)
+        .where(
+            TaskRow.type == TaskType.GENERATION.value,
+            TaskRow.status == TaskStatus.OPEN.value,
+        )
+        .order_by(TaskRow.created_at, TaskRow.id)
+    )
     return list((await session.execute(stmt)).scalars())
 
 

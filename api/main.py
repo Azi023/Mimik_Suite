@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI
 
+from api.core.config import get_settings
+from api.db.session import get_sessionmaker
 from api.routers import (
     admin,
     approvals,
@@ -26,11 +33,50 @@ from api.routers import (
     tasks,
     tenants,
 )
+from api.services.generation_worker import run_worker
+
+
+logger = logging.getLogger(__name__)
+_WORKER_SHUTDOWN_TIMEOUT = 5.0
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    stop_event: asyncio.Event | None = None
+    worker_task: asyncio.Task[None] | None = None
+    if settings.generation_worker_enabled and settings.app_env != "test":
+        stop_event = asyncio.Event()
+        worker_task = asyncio.create_task(
+            run_worker(get_sessionmaker(), stop_event=stop_event),
+            name="generation-worker",
+        )
+    try:
+        yield
+    finally:
+        if stop_event is not None and worker_task is not None:
+            stop_event.set()
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(worker_task),
+                    timeout=_WORKER_SHUTDOWN_TIMEOUT,
+                )
+            except TimeoutError:
+                logger.warning("Generation worker did not stop within shutdown timeout")
+                worker_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await worker_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Generation worker exited during shutdown")
+
 
 app = FastAPI(
     title="Mimik Suite API",
     version="0.1.0",
     description="Multi-tenant done-for-you creative-agency SaaS.",
+    lifespan=lifespan,
 )
 
 app.include_router(tenants.router)

@@ -9,10 +9,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import api.db.models  # noqa: F401  (register tables on Base.metadata)
+from api.core.config import get_settings
 from api.core.security import create_access_token
 from api.db.base import Base
 from api.db.session import get_session
 from api.main import app
+
+# Lifespan-aware tests must never race a real background worker against their isolated DB.
+get_settings().generation_worker_enabled = False
 
 
 def superadmin_headers() -> dict[str, str]:

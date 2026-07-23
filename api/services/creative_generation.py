@@ -821,12 +821,14 @@ async def revert_creative(
         )
     return generated_creative_response(to_creative_doc(new_row))
 
+
 async def generate_client_creative(
     session: AsyncSession,
     *,
     principal: Principal,
     client_id: str,
     body: GenerateCreativeRequest,
+    job_id: str | None = None,
 ) -> GeneratedCreative:
     if principal.role not in _TEAM_ROLES:
         raise HTTPException(status_code=403, detail="Creative generation is a team action")
@@ -850,7 +852,26 @@ async def generate_client_creative(
     if not brand_rows:
         raise HTTPException(status_code=404, detail="Client brand not found")
 
-    brand = to_brand(brand_rows[0])
+    job: JobRow | None = None
+    brand_row = brand_rows[0]
+    if job_id is not None:
+        job = await repo.get_job(
+            session,
+            tenant_id=principal.tenant_id,
+            job_id=job_id,
+        )
+        if (
+            job is None
+            or job.client_id != client_id
+            or not is_client_in_scope(principal, job.client_id)
+        ):
+            raise HTTPException(status_code=404, detail="Job not found")
+        matching_brand = next((row for row in brand_rows if row.id == job.brand_id), None)
+        if matching_brand is None:
+            raise HTTPException(status_code=404, detail="Job brand not found")
+        brand_row = matching_brand
+
+    brand = to_brand(brand_row)
     topic = " ".join(body.topic.split())
     if not topic:
         raise HTTPException(status_code=422, detail="Topic must not be blank")
@@ -862,6 +883,9 @@ async def generate_client_creative(
     artifact_dir.mkdir(parents=True, exist_ok=False)
 
     try:
+        if job is not None:
+            job.status = JobStatus.GENERATING.value
+            job.generation_started_at = datetime.now(timezone.utc)
         art_request = await asyncio.to_thread(
             art_direction.build_image_request,
             brand,
@@ -951,16 +975,17 @@ async def generate_client_creative(
             )
         )
 
-        job = await repo.create_job(
-            session,
-            tenant_id=principal.tenant_id,
-            client_id=client_id,
-            brand_id=brand.id,
-            title=topic,
-            format_key=body.format_key,
-            status=JobStatus.GENERATING.value,
-            generation_started_at=datetime.now(timezone.utc),
-        )
+        if job is None:
+            job = await repo.create_job(
+                session,
+                tenant_id=principal.tenant_id,
+                client_id=client_id,
+                brand_id=brand.id,
+                title=topic,
+                format_key=body.format_key,
+                status=JobStatus.GENERATING.value,
+                generation_started_at=datetime.now(timezone.utc),
+            )
         creative_row = await repo.create_creative_doc(
             session,
             tenant_id=principal.tenant_id,
@@ -972,6 +997,8 @@ async def generate_client_creative(
         job.generation_started_at = None
         await session.commit()
     except HTTPException:
+        if job_id is not None:
+            await session.rollback()
         shutil.rmtree(artifact_dir, ignore_errors=True)
         raise
     except (OSError, RuntimeError, ValueError) as exc:
