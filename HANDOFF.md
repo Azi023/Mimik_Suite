@@ -4,7 +4,62 @@
 
 ---
 
-## ► LATEST (2026-07-23 pm5) — EDITOR GATES 1-4a DONE + APPLY BUG FIXED; PM report + 3-persona audit prompt written; G4b + app-shell UX next
+## ► LATEST (2026-07-23 pm6) — AUDIT BLOCKER FIXED · APP-SHELL UX SHIPPED · G4b ROTATION SHIPPED · guides in flight
+
+**Operating model this session: Opus specs/reviews/verifies; Codex + AGY do the bulk (to conserve Opus
+usage — operator flagged usage was tight). Every executor output Playwright-live-verified before commit.**
+
+### SHIPPED (all Playwright-proven, committed):
+- **`14a6ff8` fix(onboarding)** — the "session expired" that stalled the 3-persona audit at "Finish & draft
+  brief". Onboarding was the ONLY write action lacking the `NEXT_PUBLIC_DEV_TOKEN` fallback; now mirrors
+  app/actions.ts (guard on `token===null && devToken empty`, pass `token ?? undefined`). Verified end-to-end:
+  `POST /clients` with the dev token → 201 (token valid ~28d, role=owner). **The audit can re-run now.**
+  Security review flagged it → addressed: no secret committed (.env.local gitignored), not a new bypass
+  (existing intentional dev pattern), fails closed in prod (var absent → "session expired").
+- **`7debdb6` feat(SHELL-UX)** [AGY + Opus refine] — nav rail 68px→200px expand-on-hover w/ labels
+  (keyboard-focusable, aria); editor collapses app chrome by DEFAULT (client list hidden, slim 48px rail +
+  expand chevron). Editor detection tightened to `/creatives/*/edit` + `/jobs/*/review` ONLY (NOT
+  `/clients/*/edit` brand form). Verified: hover 68→200 opacity1; editor loads collapsed; expand restores
+  the client list (both directions).
+- **`2446ea3` feat(canvas GATE-4b: rotation)** [Codex + Opus verify] — the top handle ROTATES now (was
+  calling beginMove). `beginRotate` (pointer-capture, rAF, 15° Shift-snap), rotation carried through the
+  live SVG group transform AND the ApiCanvasRevision payload (clamped like the scale fix so Apply can't 422),
+  whole selection chrome rotates as one `<g rotate(θ cx cy)>`. Composition order matches
+  creative/export/svg.py:356/381. Verified: drag → rotate(34.4°); Apply → "Applied — v6" (new version, NO
+  422); persists into the server-rendered head. **Known limit (inline-documented): Gate-4a resize deltas are
+  screen-axis based → resize direction only exact at 0° rotation.**
+
+### IN FLIGHT (dispatched to Codex, PID 51347, log: $CLAUDE_JOB_DIR/tmp/codex_guides.log):
+- **G4b visual guides** — rulers (top+left) + margins/safe-area overlay + snap-to-guides (center/margins/
+  other layers, Alt to disable, snap-line feedback). Scope: CanvasStage.tsx + editor-state.ts +
+  useLayerDrag.ts. Spec: $CLAUDE_JOB_DIR/tmp/spec_guides.md. **Opus must Playwright-verify + commit when it
+  lands** (recipe pattern: scratchpad/verify_apply_rotation.py — discover live editor href, drive canvas).
+
+### PRODUCT DECISIONS — OPERATOR SIGNED OFF THIS SESSION (build these):
+- **(a) Aspect-ratio / format switch → "Editor re-render switcher".** In the editor, operator picks a target
+  format (1:1 / 4:5 / 9:16) → engine RE-COMPOSES + re-renders a NEW version at that aspect (NOT a resize).
+  Biggest lift (touches creative/ engine + a new action + a format-select control). Build in a focused round.
+- **(b) Custom colours → "Both".** Team gets full custom hex in the internal editor; everyone (incl. clients)
+  also gets brand tints/shades. **CLIENT-SAFETY GATE (LOCKED constraint): the client portal must get ONLY
+  brand tints/shades, NEVER arbitrary custom hex.** Touches editor-state (carry raw hex fill, not just role
+  name) + Inspector recolor UI + the client-facing gate. Verify the client gate explicitly.
+
+### REMAINING G4b QUEUE (SEQUENTIAL — they all mutate editor-state.ts so canvas features CANNOT be
+### parallelized; only disjoint-scope work parallelizes, as round 1 did shell‖rotation):
+layer tree (reorder/lock/rename/dup) → align/distribute → multi-select → keyboard nudge/copy/paste/delete.
+
+### DEPLOY-HARDENING BACKLOG (deploy still HELD):
+- `NEXT_PUBLIC_DEV_TOKEN` is inlined into the CLIENT bundle (Next `NEXT_PUBLIC_` semantics) → the dev
+  owner-JWT ships to the browser wherever set. Dev-only + dev Supabase, fails closed in prod, but harden:
+  gate `getDevToken()` (web/lib/api.ts:395) on `NODE_ENV !== 'production'` before deploy.
+
+### EXECUTOR DISPATCH (reference):
+- Codex: `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c approval_policy=never - < spec.md`
+- AGY: `agy -p "$(cat spec.md)" --mode accept-edits --dangerously-skip-permissions --print-timeout 30m`
+
+---
+
+## ► (2026-07-23 pm5) — EDITOR GATES 1-4a DONE + APPLY BUG FIXED; PM report + 3-persona audit prompt written; G4b + app-shell UX next
 
 **Editor rebuild (audit 13/40 → usable):** Gates 1 (`d592106`/`3eeb274`), 2 (`d911ac0`), 3 (`0b7812f`),
 4-contract (`e9640f8` sibling), 4a all-sides resize (`11baf99` be + `5fc85b4` fe) — ALL Playwright-proven.
