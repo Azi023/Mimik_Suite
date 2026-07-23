@@ -33,14 +33,30 @@ Same commands as the entry below. Web: `cd web && NEXT_PUBLIC_API_URL=http://loc
   degrades gracefully, never loses the version). `last_ask` stamped on L1 params → ask→approve `record_feedback`
   accept, ask→revert decline (exception-safe, after commit). approval APPROVAL signal gains `edited_by_client`.
   LIVE: 59-test suite green.
+- **B-10 (`edb72b6`)** — ReviewPanel integration: in-memory history[] replaced with persisted
+  `listCreativeVersions` via the shared VersionRail; quick edits/Ask-AI/param presets post the TYPED body;
+  "Open in editor ↗" link; inline styles → design classes; approve/request-change flow byte-identical.
+  tsc clean across app.
+- **A-03 (`4a5951e`)** — generation queue spine: `generate_client_creative(job_id=)` reuses a pre-created
+  job (sync path unchanged); `generation_queue.py` (enqueue/list/stats, typed GenerationQueueItem/QueueStats);
+  `generation_worker.py` single-concurrency worker (claims IN_PROGRESS+commit BEFORE running = crash-safe;
+  least-privilege TEAM principal scoped to the task's tenant+client; failure → task DONE-with-error + job
+  BLOCKED); `repo.list_open_generation_tasks` (cross-tenant) + `list_generation_tasks` (scoped); `main.py`
+  lifespan starts/stops the worker (gated on `generation_worker_enabled` AND `app_env!=test`; conftest
+  disables in tests). LIVE: 43 tests on :5434 + full suite 477 green; API boots clean with the worker running.
 
-### ▶ EXACT NEXT ACTION — wave 3: A-03 (backend) ∥ B-10 (frontend)
-Hot-file sequence on `creative_generation.py` reached: [B-01 · imagery · B-04 · B-06 · B-07 · B-11 · B-13] →
-**A-03 next** (generation queue service + `generate_client_creative(job_id=...)` + asyncio worker in lifespan +
-`repo.list_open_generation_tasks`). Then A-04 (/ops/queue+/ops/usage) → A-05 (command parser ⌘K backend).
-Track B: **B-10** (ReviewPanel integration — replace in-memory history[] with listCreativeVersions; conflicts
-with A-06 on ReviewPanel.tsx so land before A-06). Then A-06→A-07→A-11 (board/calendar/deliveries) on api.ts.
-BLOCKED until their backend: A-08 (A-04), A-09 (A-05), B-12 (B-11). Gates last: A-12, B-14.
+**Track B canvas program (B-08→B-09→B-10) COMPLETE.** Backend hot-file sequence reached A-03.
+
+### ▶ EXACT NEXT ACTION — wave 4: A-04 (backend) ∥ A-06 (frontend)
+Hot-file `creative_generation.py` sequence DONE through A-03. `api/routers/ops.py` sequence next:
+**A-04** (`GET /ops/queue` + `/ops/queue/stats` + `POST /ops/queue` single-enqueue + `GET /ops/usage`;
+NEW `api/services/usage.py`; team-gated incl. admin) → **A-05** (command parser + `POST /ops/command:parse`
++ `:execute`, ⌘K backend, `command_center.py`). Both serialize on `ops.py`.
+Track B (web/lib/api.ts single-writer, sequential): **A-06** (board drag-transitions on /ops/board — the
+ReviewPanel conflict is now cleared) → A-07 (calendar+SLA) → A-11 (delivery/archive).
+BLOCKED until their backend lands: A-08 (needs A-04), A-09 (needs A-05). B-12 (portal bounded editor +
+shim removal) is now UNBLOCKED (B-11 done) — schedule on Track B after A-06/A-07/A-11 or interleave.
+Gates last: A-12 (cockpit E2E), B-14 (canvas E2E).
 - Executors: Codex `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c approval_policy=never - < spec.md` (specs in `scratchpad/spec_*.md`); Fable via Agent tool (model: fable) + frontend-design skill. Executors NEVER commit; Opus reviews diff + live-verifies (restart API + run tests on :5434) + commits phase-tagged.
 - **Deploy: HELD** until all W4 done + operator sorts Supabase auth.
 

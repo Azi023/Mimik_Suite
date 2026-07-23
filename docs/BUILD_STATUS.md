@@ -175,7 +175,10 @@ suite on the live :5434 DB, restarts the API for hot-file changes, then commits 
 | B-08 | CanvasStage inline-SVG direct manipulation (pure component, sanitized) | Fable | ✅ `b0b1df4` | tsc/next-lint clean, zero any |
 | B-09 | CanvasEditor page + VersionRail + revert + mark-&-tell-AI; bearer server-side | Fable | ✅ `345b21d` | tsc clean across app; real endpoints wired |
 | B-13 | flywheel: edit_signals seam; EDIT/REJECTION signals (savepoint); ask→approve/revert feedback | Codex | ✅ `cc89d67` | 59 tests on :5434; ruff clean; API reboot clean |
+| B-10 | ReviewPanel integration — persisted versions (VersionRail), typed bodies, open-in-editor | Fable | ✅ `edb72b6` | tsc/lint clean; approve flow untouched |
+| A-03 | generation queue + job-attached generate + crash-safe asyncio worker in lifespan | Codex | ✅ `4a5951e` | 43 tests + full 477 on :5434; API boots clean w/ worker live |
 
-**Hot-file `creative_generation.py` sequence** now: [B-01·imagery·B-04·B-06·B-07·**B-11**·**B-13**] → **A-03 next**.
-**Wave 3 (in flight):** A-03 (generation queue + asyncio worker in lifespan) ∥ B-10 (ReviewPanel integration).
-Remaining after: A-04→A-05 (ops.py), A-06→A-07→A-11 (web board/calendar/deliveries), blocked A-08/A-09/B-12, gates A-12/B-14.
+**Track B canvas program (B-08→B-09→B-10) COMPLETE.** Hot-file `creative_generation.py` sequence done through A-03.
+**Wave 4 (next):** A-04 (/ops/queue + /ops/usage; NEW usage.py) ∥ A-06 (board drag-transitions). Then
+A-05 (⌘K command backend) on ops.py; A-07→A-11 on web. Blocked: A-08(A-04), A-09(A-05). B-12 now unblocked.
+Gates: A-12, B-14.
