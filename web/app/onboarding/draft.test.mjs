@@ -6,6 +6,7 @@ import {
   clearOnboardingDraft,
   composeImageryStyle,
   createInitialOnboardingDraft,
+  onboardingDraftStorageKey,
   parseOnboardingDraft,
   saveOnboardingDraft,
   serializeOnboardingDraft,
@@ -13,6 +14,11 @@ import {
 
 test("uses the requested stable onboarding draft key", () => {
   assert.equal(DRAFT_STORAGE_KEY, "mimik:onboarding-draft");
+  assert.equal(onboardingDraftStorageKey(), DRAFT_STORAGE_KEY);
+  assert.equal(
+    onboardingDraftStorageKey("client-123"),
+    "mimik:onboarding-draft:client-123",
+  );
 });
 
 test("composes imagery medium and optional notes into imagery_style", () => {
@@ -23,6 +29,7 @@ test("composes imagery medium and optional notes into imagery_style", () => {
 test("round-trips every serializable onboarding field", () => {
   const draft = {
     ...createInitialOnboardingDraft(),
+    clientId: "client-created-before-brand-error",
     step: 3,
     clientName: "Glow Aesthetics",
     brandName: "Glow",
@@ -59,4 +66,25 @@ test("saves and clears the draft through the stable localStorage key", () => {
 
   clearOnboardingDraft(storage);
   assert.equal(writes.has(DRAFT_STORAGE_KEY), false);
+});
+
+test("saves and clears a repair draft under its client-scoped key", () => {
+  const writes = new Map();
+  const storage = {
+    setItem(key, value) {
+      writes.set(key, value);
+    },
+    removeItem(key) {
+      writes.delete(key);
+    },
+  };
+  const draft = { ...createInitialOnboardingDraft(), brandName: "Recovery brand" };
+  const storageKey = onboardingDraftStorageKey("client-123");
+
+  saveOnboardingDraft(storage, draft, storageKey);
+  assert.deepEqual(parseOnboardingDraft(writes.get(storageKey)), draft);
+  assert.equal(writes.has(DRAFT_STORAGE_KEY), false);
+
+  clearOnboardingDraft(storage, storageKey);
+  assert.equal(writes.has(storageKey), false);
 });

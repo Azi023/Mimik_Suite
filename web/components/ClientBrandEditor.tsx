@@ -115,9 +115,19 @@ export function ClientBrandEditor({ client, brand }: ClientBrandEditorProps): JS
 
           <SectionTitle>Brand brief</SectionTitle>
           {brand === null ? (
-            <p className="wiz__hint">
-              No brand brief is linked to this client yet. Client details can still be saved.
-            </p>
+            <div className="empty-state">
+              <p className="empty-state__title">Brand setup required</p>
+              <p className="empty-state__body">
+                This client cannot use Generate until a brand kit and brief are linked.
+                Client details can still be saved separately.
+              </p>
+              <Link
+                href={`/onboarding?clientId=${encodeURIComponent(client.id)}`}
+                className="btn-primary"
+              >
+                Create brand kit &amp; brief
+              </Link>
+            </div>
           ) : (
             <>
               <div className="wiz-grid">

@@ -422,14 +422,22 @@ export function isApiConfigured(sessionToken?: string): boolean {
   return url !== undefined && url !== "" && resolveBearer(sessionToken) !== undefined;
 }
 
+/** One FastAPI/Pydantic validation item, normalized for frontend consumers. */
+export interface ApiValidationDetail {
+  loc: string[];
+  msg: string;
+}
+
 /** Raised for non-2xx responses so callers can distinguish API errors from network errors. */
 export class ApiError extends Error {
   readonly status: number;
+  readonly detail: ApiValidationDetail[] | undefined;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail?: ApiValidationDetail[]) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -446,23 +454,61 @@ async function apiGet<T>(path: string, sessionToken?: string): Promise<T> {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new ApiError(response.status, `GET ${path} -> ${response.status}`);
+    throw await apiError(response, `GET ${path} -> ${response.status}`);
   }
   return (await response.json()) as T;
 }
 
+interface ParsedErrorDetail {
+  message: string;
+  validation: ApiValidationDetail[] | undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validationDetail(value: unknown): ApiValidationDetail[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const parsed: ApiValidationDetail[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || !Array.isArray(item.loc) || typeof item.msg !== "string") {
+      continue;
+    }
+    const loc = item.loc
+      .filter((part): part is string | number => {
+        return typeof part === "string" || typeof part === "number";
+      })
+      .map(String);
+    if (loc.length === item.loc.length && loc.length > 0 && item.msg !== "") {
+      parsed.push({ loc, msg: item.msg });
+    }
+  }
+  return parsed.length > 0 ? parsed : undefined;
+}
+
 /**
  * Prefer the API's JSON `detail` message (the FastAPI error convention) over a generic
- * status line, so callers can surface the server's own reason (e.g. a 409's
- * "Illegal transition ..."). Non-JSON bodies fall back to the generic message.
+ * status line, and retain Pydantic's structured validation array when present.
+ * Non-JSON or malformed bodies fall back to the generic message.
  */
-async function errorDetail(response: Response, fallback: string): Promise<string> {
+async function errorDetail(response: Response, fallback: string): Promise<ParsedErrorDetail> {
   try {
-    const body = (await response.json()) as { detail?: unknown };
-    return typeof body.detail === "string" && body.detail !== "" ? body.detail : fallback;
+    const body: unknown = await response.json();
+    if (!isRecord(body)) return { message: fallback, validation: undefined };
+    if (typeof body.detail === "string" && body.detail !== "") {
+      return { message: body.detail, validation: undefined };
+    }
+    return { message: fallback, validation: validationDetail(body.detail) };
   } catch {
-    return fallback;
+    return { message: fallback, validation: undefined };
   }
+}
+
+async function apiError(response: Response, fallback: string): Promise<ApiError> {
+  const parsed = await errorDetail(response, fallback);
+  return new ApiError(response.status, parsed.message, parsed.validation);
 }
 
 async function apiPost<T>(
@@ -488,10 +534,7 @@ async function apiPost<T>(
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      await errorDetail(response, `POST ${path} -> ${response.status}`),
-    );
+    throw await apiError(response, `POST ${path} -> ${response.status}`);
   }
   return (await response.json()) as T;
 }
@@ -515,7 +558,7 @@ async function apiPostForm<T>(path: string, form: FormData, sessionToken?: strin
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new ApiError(response.status, `POST ${path} -> ${response.status}`);
+    throw await apiError(response, `POST ${path} -> ${response.status}`);
   }
   return (await response.json()) as T;
 }
@@ -538,7 +581,7 @@ async function apiPatch<T>(path: string, body: unknown, sessionToken?: string): 
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new ApiError(response.status, `PATCH ${path} -> ${response.status}`);
+    throw await apiError(response, `PATCH ${path} -> ${response.status}`);
   }
   return (await response.json()) as T;
 }
@@ -724,7 +767,7 @@ export async function fetchCreativeArtifact(
     signal: AbortSignal.timeout(CREATIVE_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new ApiError(response.status, `GET ${path} -> ${response.status}`);
+    throw await apiError(response, `GET ${path} -> ${response.status}`);
   }
   return response;
 }

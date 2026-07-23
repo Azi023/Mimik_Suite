@@ -9,9 +9,11 @@ import {
   createBrief,
   createClient,
   createPillar,
+  getClient,
   uploadReferenceAsset,
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
+import { formatOnboardingValidationError } from "./validation";
 
 /**
  * Onboarding submit. Runs SERVER-SIDE so the per-user Supabase bearer (httpOnly cookie) authorizes
@@ -22,7 +24,7 @@ import { getSessionToken } from "@/lib/session";
  */
 
 export interface OnboardingPayload {
-  client: { name: string; industry: string; contactEmail: string };
+  client: { id?: string; name: string; industry: string; contactEmail: string };
   brand: {
     name: string;
     slug: string;
@@ -53,6 +55,12 @@ export interface OnboardingResult {
   briefId?: string;
   /** Non-fatal issues (a pillar or upload that didn't take). */
   warnings?: string[];
+  /** Wizard step containing the first invalid API field. */
+  stepIndex?: number;
+  /** API field name to focus after returning to the failing step. */
+  field?: string;
+  /** Client already created before a later failure; reuse it on retry. */
+  clientId?: string;
 }
 
 /** Empty/whitespace -> null, to match the API's `str | None` fields. */
@@ -108,22 +116,31 @@ export async function createOnboarding(formData: FormData): Promise<OnboardingRe
   if (payload.client.name.trim() === "" || payload.brand.name.trim() === "") {
     return { ok: false, error: "Client name and brand name are required." };
   }
+  if (payload.client.id !== undefined && typeof payload.client.id !== "string") {
+    return { ok: false, error: "Something went wrong reading the form. Try again." };
+  }
 
   const files = formData
     .getAll("refFiles")
     .filter((f): f is File => f instanceof File && f.size > 0);
 
   const warnings: string[] = [];
+  let clientId: string | undefined;
 
   try {
-    const client = await createClient(
-      {
-        name: payload.client.name.trim(),
-        industry: nn(payload.client.industry),
-        contact_email: nn(payload.client.contactEmail),
-      },
-      bearer,
-    );
+    const existingClientId = payload.client.id?.trim();
+    const client =
+      existingClientId !== undefined && existingClientId !== ""
+        ? await getClient(existingClientId, bearer)
+        : await createClient(
+            {
+              name: payload.client.name.trim(),
+              industry: nn(payload.client.industry),
+              contact_email: nn(payload.client.contactEmail),
+            },
+            bearer,
+          );
+    clientId = client.id;
 
     const brandBody: CreateBrandBody = {
       client_id: client.id,
@@ -179,10 +196,27 @@ export async function createOnboarding(formData: FormData): Promise<OnboardingRe
       if (error.status === 403) {
         return { ok: false, error: "You don't have permission to onboard a client." };
       }
+      if (error.status === 404) {
+        return { ok: false, error: "This client is no longer available." };
+      }
       if (error.status === 422) {
-        return { ok: false, error: "Some details were invalid — check the form and try again." };
+        const validation = formatOnboardingValidationError(error.detail);
+        if (validation !== null) {
+          return {
+            ok: false,
+            error: validation.message,
+            stepIndex: validation.stepIndex,
+            field: validation.field,
+            clientId,
+          };
+        }
+        return {
+          ok: false,
+          error: "Some details were invalid — check the form and try again.",
+          clientId,
+        };
       }
     }
-    return { ok: false, error: "Could not complete onboarding. Try again." };
+    return { ok: false, error: "Could not complete onboarding. Try again.", clientId };
   }
 }

@@ -1,5 +1,10 @@
 export const DRAFT_STORAGE_KEY = "mimik:onboarding-draft";
 
+/** Keep repair-flow drafts isolated from the ordinary new-client onboarding draft. */
+export function onboardingDraftStorageKey(clientId?: string): string {
+  return clientId === undefined ? DRAFT_STORAGE_KEY : `${DRAFT_STORAGE_KEY}:${clientId}`;
+}
+
 export const IMAGERY_MEDIA = ["flat illustration", "photography", "product", "mixed"] as const;
 
 export type ImageryMedium = (typeof IMAGERY_MEDIA)[number];
@@ -22,6 +27,8 @@ export interface RefLink {
 }
 
 export interface OnboardingDraft {
+  /** API client already created by a partial submit; reuse it on retry. */
+  clientId?: string;
   step: number;
   clientName: string;
   industry: string;
@@ -92,12 +99,16 @@ export function serializeOnboardingDraft(draft: OnboardingDraft): string {
 export function saveOnboardingDraft(
   storage: Pick<Storage, "setItem">,
   draft: OnboardingDraft,
+  storageKey: string = DRAFT_STORAGE_KEY,
 ): void {
-  storage.setItem(DRAFT_STORAGE_KEY, serializeOnboardingDraft(draft));
+  storage.setItem(storageKey, serializeOnboardingDraft(draft));
 }
 
-export function clearOnboardingDraft(storage: Pick<Storage, "removeItem">): void {
-  storage.removeItem(DRAFT_STORAGE_KEY);
+export function clearOnboardingDraft(
+  storage: Pick<Storage, "removeItem">,
+  storageKey: string = DRAFT_STORAGE_KEY,
+): void {
+  storage.removeItem(storageKey);
 }
 
 export function parseOnboardingDraft(raw: string | null): OnboardingDraft | null {
@@ -156,6 +167,7 @@ function isOnboardingDraft(value: unknown): value is OnboardingDraft {
   if (!isRecord(value)) return false;
 
   return (
+    (value.clientId === undefined || typeof value.clientId === "string") &&
     typeof value.step === "number" &&
     Number.isInteger(value.step) &&
     value.step >= 0 &&

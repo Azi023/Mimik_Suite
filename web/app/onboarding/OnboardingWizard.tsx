@@ -3,16 +3,16 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useRouter } from "next/navigation";
 import { createOnboarding, type OnboardingPayload } from "@/app/onboarding/actions";
-import type { ApiPillarPreset } from "@/lib/api";
+import type { ApiClient, ApiPillarPreset } from "@/lib/api";
 import { useUnsavedGuard } from "@/lib/hooks";
 import { ChipsInput } from "@/components/ChipsInput";
 import { CheckIcon } from "@/components/icons";
 import { OnboardingField as Field, OnboardingSectionTitle as SectionTitle } from "@/components/OnboardingFields";
 import {
-  DRAFT_STORAGE_KEY,
   IMAGERY_MEDIA,
   clearOnboardingDraft,
   composeImageryStyle,
+  onboardingDraftStorageKey,
   parseOnboardingDraft,
   saveOnboardingDraft,
   type ColorRow,
@@ -24,6 +24,7 @@ import {
 
 interface OnboardingWizardProps {
   presets: ApiPillarPreset[];
+  existingClient?: ApiClient;
 }
 
 const STEPS = ["Brand", "Brand kit", "Content pillars", "Style reference", "Review"] as const;
@@ -51,19 +52,27 @@ const IMAGERY_MEDIUM_LABELS: Record<ImageryMedium, string> = {
   mixed: "Mixed",
 };
 
-export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Element {
+export function OnboardingWizard({
+  presets,
+  existingClient,
+}: OnboardingWizardProps): JSX.Element {
   const router = useRouter();
+  const draftStorageKey = onboardingDraftStorageKey(existingClient?.id);
   const [step, setStep] = useState(0);
   const [draftReady, setDraftReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invalidField, setInvalidField] = useState<string | null>(null);
+  const [onboardingClientId, setOnboardingClientId] = useState<string | undefined>(
+    existingClient?.id,
+  );
   const [done, setDone] = useState<{ briefId: string; warnings: string[] } | null>(null);
 
   // Step 1 — Brand + client.
-  const [clientName, setClientName] = useState("");
-  const [industry, setIndustry] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [brandName, setBrandName] = useState("");
+  const [clientName, setClientName] = useState(existingClient?.name ?? "");
+  const [industry, setIndustry] = useState(existingClient?.industry ?? "");
+  const [contactEmail, setContactEmail] = useState(existingClient?.contact_email ?? "");
+  const [brandName, setBrandName] = useState(existingClient?.name ?? "");
   const [niche, setNiche] = useState("");
   const [targetAudience, setTargetAudience] = useState("");
   const [brandVoice, setBrandVoice] = useState("");
@@ -92,6 +101,7 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
 
   const currentDraft = useMemo<OnboardingDraft>(
     () => ({
+      ...(onboardingClientId === undefined ? {} : { clientId: onboardingClientId }),
       step,
       clientName,
       industry,
@@ -116,6 +126,7 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
       refLinks,
     }),
     [
+      onboardingClientId,
       step,
       clientName,
       industry,
@@ -144,12 +155,13 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
   useEffect(() => {
     let restored: OnboardingDraft | null = null;
     try {
-      restored = parseOnboardingDraft(window.localStorage.getItem(DRAFT_STORAGE_KEY));
+      restored = parseOnboardingDraft(window.localStorage.getItem(draftStorageKey));
     } catch {
       // Storage can be unavailable in private browsing; the wizard still works in memory.
     }
 
     if (restored !== null) {
+      setOnboardingClientId(existingClient?.id ?? restored.clientId);
       setStep(restored.step);
       setClientName(restored.clientName);
       setIndustry(restored.industry);
@@ -174,16 +186,24 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
       setRefLinks(restored.refLinks);
     }
     setDraftReady(true);
-  }, []);
+  }, [draftStorageKey, existingClient?.id]);
 
   useEffect(() => {
     if (!draftReady || done !== null) return;
     try {
-      saveOnboardingDraft(window.localStorage, currentDraft);
+      saveOnboardingDraft(window.localStorage, currentDraft, draftStorageKey);
     } catch {
       // Autosave is best-effort; a storage failure must not interrupt onboarding.
     }
-  }, [currentDraft, done, draftReady]);
+  }, [currentDraft, done, draftReady, draftStorageKey]);
+
+  useEffect(() => {
+    if (invalidField === null) return;
+    const target = document.querySelector<HTMLElement>(
+      `[data-api-field="${invalidField}"]`,
+    );
+    target?.focus();
+  }, [invalidField, step]);
 
   const canAdvance = step > 0 || (clientName.trim() !== "" && brandName.trim() !== "");
   const isLast = step === STEPS.length - 1;
@@ -215,7 +235,7 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
       if (v.trim() !== "") cleanHandles[k] = v.trim();
     }
     return {
-      client: { name: clientName, industry, contactEmail },
+      client: { id: onboardingClientId, name: clientName, industry, contactEmail },
       brand: {
         name: brandName,
         slug: "",
@@ -237,6 +257,7 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
   async function onFinish(): Promise<void> {
     setBusy(true);
     setError(null);
+    setInvalidField(null);
     const form = new FormData();
     form.append("payload", JSON.stringify(buildPayload()));
     for (const f of files) form.append("refFiles", f);
@@ -244,7 +265,7 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
     const res = await createOnboarding(form);
     if (res.ok && res.briefId !== undefined) {
       try {
-        clearOnboardingDraft(window.localStorage);
+        clearOnboardingDraft(window.localStorage, draftStorageKey);
       } catch {
         // Clearing is best-effort; the successful server result remains authoritative.
       }
@@ -256,6 +277,13 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
       }
     } else {
       setError(res.error ?? "Could not complete onboarding.");
+      setInvalidField(res.field ?? null);
+      if (res.clientId !== undefined) {
+        setOnboardingClientId(res.clientId);
+      }
+      if (res.stepIndex !== undefined) {
+        setStep(res.stepIndex);
+      }
       setBusy(false);
     }
   }
@@ -291,10 +319,13 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
   return (
     <div className="wiz">
       <header className="wiz__head">
-        <h1 className="wiz__title">Onboard a client</h1>
+        <h1 className="wiz__title">
+          {existingClient === undefined ? "Onboard a client" : "Create brand kit & brief"}
+        </h1>
         <p className="wiz__sub">
-          Set up the brand, its kit, content pillars, and the references the client shared. On
-          finish, a brief is auto-drafted for sign-off.
+          {existingClient === undefined
+            ? "Set up the brand, its kit, content pillars, and the references the client shared. On finish, a brief is auto-drafted for sign-off."
+            : `Complete the missing brand setup for ${existingClient.name}. On finish, a brief is auto-drafted and the client becomes ready for Generate.`}
         </p>
         <p className="wiz__hint">Progress is saved in this browser as you work.</p>
       </header>
@@ -317,30 +348,91 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
             <SectionTitle>Client</SectionTitle>
             <div className="wiz-grid">
               <Field label="Client name" required>
-                <input className="input" value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Glow Aesthetics" />
+                <input
+                  className="input"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                  placeholder="Glow Aesthetics"
+                  readOnly={existingClient !== undefined}
+                  data-api-field="name"
+                  aria-invalid={invalidField === "name" ? true : undefined}
+                />
               </Field>
               <Field label="Industry">
-                <input className="input" value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="Skincare & aesthetics" />
+                <input
+                  className="input"
+                  value={industry}
+                  onChange={(e) => setIndustry(e.target.value)}
+                  placeholder="Skincare & aesthetics"
+                  readOnly={existingClient !== undefined}
+                  data-api-field="industry"
+                  aria-invalid={invalidField === "industry" ? true : undefined}
+                />
               </Field>
               <Field label="Contact email">
-                <input className="input" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="hello@client.com" />
+                <input
+                  className="input"
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  placeholder="hello@client.com"
+                  readOnly={existingClient !== undefined}
+                  data-api-field="contact_email"
+                  aria-invalid={invalidField === "contact_email" ? true : undefined}
+                />
               </Field>
             </div>
+            {existingClient !== undefined && (
+              <p className="wiz__hint">
+                Client details are locked here so this setup stays attached to the existing
+                client record.
+              </p>
+            )}
 
             <SectionTitle>Brand basics</SectionTitle>
             <div className="wiz-grid">
               <Field label="Brand name" required>
-                <input className="input" value={brandName} onChange={(e) => setBrandName(e.target.value)} placeholder="Glow" />
+                <input
+                  className="input"
+                  value={brandName}
+                  onChange={(e) => setBrandName(e.target.value)}
+                  placeholder="Glow"
+                  data-api-field="slug"
+                  aria-invalid={invalidField === "slug" ? true : undefined}
+                />
               </Field>
               <Field label="Niche">
-                <input className="input" value={niche} onChange={(e) => setNiche(e.target.value)} placeholder="Boutique aesthetics clinic" />
+                <input
+                  className="input"
+                  value={niche}
+                  onChange={(e) => setNiche(e.target.value)}
+                  placeholder="Boutique aesthetics clinic"
+                  data-api-field="niche"
+                  aria-invalid={invalidField === "niche" ? true : undefined}
+                />
               </Field>
             </div>
             <Field label="Target audience">
-              <textarea className="input brief-textarea" rows={2} value={targetAudience} onChange={(e) => setTargetAudience(e.target.value)} placeholder="Professional women 28-45 who research before they book." />
+              <textarea
+                className="input brief-textarea"
+                rows={2}
+                value={targetAudience}
+                onChange={(e) => setTargetAudience(e.target.value)}
+                placeholder="Professional women 28-45 who research before they book."
+                data-api-field="target_audience"
+                aria-invalid={invalidField === "target_audience" ? true : undefined}
+              />
             </Field>
             <Field label="Brand voice">
-              <textarea className="input brief-textarea" rows={2} value={brandVoice} onChange={(e) => setBrandVoice(e.target.value)} placeholder="Warm, precise, quietly confident." />
+              <textarea
+                className="input brief-textarea"
+                rows={2}
+                value={brandVoice}
+                onChange={(e) => setBrandVoice(e.target.value)}
+                placeholder="Warm, precise, quietly confident."
+                data-api-field="brand_voice"
+                aria-invalid={invalidField === "brand_voice" ? true : undefined}
+              />
             </Field>
             <div className="wiz-grid">
               <Field label="Imagery medium" hint="Choose the primary kind of imagery the creative engine should use.">
@@ -357,7 +449,15 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
                 </select>
               </Field>
               <Field label="Imagery style notes" hint="Describe lighting, composition, texture, or visual treatment.">
-                <textarea className="input brief-textarea" rows={2} value={imageryStyle} onChange={(e) => setImageryStyle(e.target.value)} placeholder="Natural light on paper grounds; avoid stock gradients." />
+                <textarea
+                  className="input brief-textarea"
+                  rows={2}
+                  value={imageryStyle}
+                  onChange={(e) => setImageryStyle(e.target.value)}
+                  placeholder="Natural light on paper grounds; avoid stock gradients."
+                  data-api-field="imagery_style"
+                  aria-invalid={invalidField === "imagery_style" ? true : undefined}
+                />
               </Field>
             </div>
             <Field label="Tone keywords" hint="A few adjectives that describe the brand.">
@@ -407,6 +507,8 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
                     value={c.hex}
                     onChange={(e) => updateColor(i, { hex: e.target.value })}
                     aria-label="Colour"
+                    data-api-field="hex"
+                    aria-invalid={invalidField === "hex" ? true : undefined}
                   />
                   <input className="input" value={c.name} onChange={(e) => updateColor(i, { name: e.target.value })} placeholder="Name (e.g. Rose)" />
                   <input className="input" value={c.usage} onChange={(e) => updateColor(i, { usage: e.target.value })} placeholder="Usage (e.g. CTA)" />
@@ -423,19 +525,50 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
             <SectionTitle>Typography</SectionTitle>
             <div className="wiz-grid">
               <Field label="Heading font">
-                <input className="input" value={headingFont} onChange={(e) => setHeadingFont(e.target.value)} placeholder="Fraunces" />
+                <input
+                  className="input"
+                  value={headingFont}
+                  onChange={(e) => setHeadingFont(e.target.value)}
+                  placeholder="Fraunces"
+                  data-api-field="heading_font"
+                  aria-invalid={invalidField === "heading_font" ? true : undefined}
+                />
               </Field>
               <Field label="Body font">
-                <input className="input" value={bodyFont} onChange={(e) => setBodyFont(e.target.value)} placeholder="Inter" />
+                <input
+                  className="input"
+                  value={bodyFont}
+                  onChange={(e) => setBodyFont(e.target.value)}
+                  placeholder="Inter"
+                  data-api-field="body_font"
+                  aria-invalid={invalidField === "body_font" ? true : undefined}
+                />
               </Field>
             </div>
 
             <SectionTitle>Logo</SectionTitle>
             <Field label="Logo notes" hint="Usable as-is, or needs a redesign — and why.">
-              <textarea className="input brief-textarea" rows={2} value={logoNotes} onChange={(e) => setLogoNotes(e.target.value)} placeholder="Wordmark is clean and legible — usable as-is." />
+              <textarea
+                className="input brief-textarea"
+                rows={2}
+                value={logoNotes}
+                onChange={(e) => setLogoNotes(e.target.value)}
+                placeholder="Wordmark is clean and legible — usable as-is."
+                data-api-field="assessment"
+                aria-invalid={invalidField === "assessment" ? true : undefined}
+              />
             </Field>
             <Field label="Minimum size (px)">
-              <input className="input wiz-narrow" type="number" min={0} value={logoMinSize} onChange={(e) => setLogoMinSize(e.target.value)} placeholder="24" />
+              <input
+                className="input wiz-narrow"
+                type="number"
+                min={0}
+                value={logoMinSize}
+                onChange={(e) => setLogoMinSize(e.target.value)}
+                placeholder="24"
+                data-api-field="min_size_px"
+                aria-invalid={invalidField === "min_size_px" ? true : undefined}
+              />
             </Field>
             <p className="wiz__hint">The logo file itself is uploaded later from the brand&apos;s asset library.</p>
           </StepBody>
@@ -594,12 +727,13 @@ export function OnboardingWizard({ presets }: OnboardingWizardProps): JSX.Elemen
                 : `${refLinks.filter((r) => r.url.trim() !== "").length} link(s) · ${files.length} image(s)`}
             </ReviewGroup>
             <p className="wiz__hint">On finish this creates the client, brand, pillars and references, then drafts a brief.</p>
-            {error !== null && (
-              <p className="brief-savemsg brief-savemsg--err" role="alert">
-                {error}
-              </p>
-            )}
           </StepBody>
+        )}
+
+        {error !== null && (
+          <p className="brief-savemsg brief-savemsg--err" role="alert">
+            {error}
+          </p>
         )}
 
         <div className="wiz-footer">
