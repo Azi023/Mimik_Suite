@@ -7,7 +7,7 @@ import logging
 import shutil
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 from uuid import uuid4
@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.auth import Principal, is_client_in_scope
+from api.core.capabilities import Capability, has_capability
+from api.core.config import get_settings
 from api.db import repo
 from api.db.mappers import to_brand, to_creative_doc
 from api.db.models import CreativeDocRow, JobRow
@@ -36,7 +38,9 @@ from creative.style_profile import ImageSource, StyleProfile, get_style_profile
 from creative.vision import text_region as vision_text_region
 from creative.revision.interpreter import interpret_ask
 from mimik_contracts import (
+    ActorRole,
     Brand,
+    CanvasRevision,
     CopyBlock,
     CreativeDoc,
     CreativeManifest,
@@ -45,7 +49,6 @@ from mimik_contracts import (
     LayerKind,
     LayerRecipe,
     PRESETS,
-    CanvasRevision,
 )
 
 
@@ -433,6 +436,37 @@ async def revise_creative(
     if scoped is None:
         raise HTTPException(status_code=404, detail="Creative not found")
     creative_row, job = scoped
+
+    if principal.role == ActorRole.CLIENT.value:
+        # A client principal must be bound to exactly one client. Fail closed if legacy account
+        # data reaches this path without that binding; empty internal scopes otherwise mean "all".
+        if principal.client_id is None:
+            raise HTTPException(status_code=404, detail="Creative not found")
+        # Bounded self-serve (locked positioning + #3): a client may only text-edit / ask — never
+        # manipulate layers or pass raw render params.
+        if not has_capability(principal.role, Capability.CLIENT_PORTAL):
+            raise HTTPException(status_code=403, detail="Client portal not permitted")
+        if revision.layer_ops or revision.params:
+            raise HTTPException(
+                status_code=422,
+                detail="Clients may only edit text or ask for changes, not manipulate layers",
+            )
+        # Rolling 24h quota on client-authored versions for this job.
+        settings = get_settings()
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        used = await repo.count_client_versions(
+            session,
+            tenant_id=principal.tenant_id,
+            job_id=job.id,
+            since=since,
+        )
+        if used >= settings.client_revision_daily_quota:
+            raise HTTPException(
+                status_code=429,
+                detail="Daily revision limit reached",
+                headers={"X-Revision-Quota-Remaining": "0"},
+            )
+
     brand_row = await repo.get_brand(
         session, tenant_id=principal.tenant_id, brand_id=job.brand_id
     )

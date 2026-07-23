@@ -168,7 +168,9 @@ async def list_creatives(
 async def revise_creative_endpoint(
     creative_id: str,
     body: ReviseCreativePayload,
-    principal: Principal = Depends(require_role("owner", "ops", "designer", "team")),
+    principal: Principal = Depends(
+        require_role("owner", "ops", "designer", "team", "client")
+    ),
     session: AsyncSession = Depends(get_session),
 ) -> GeneratedCreative:
     result = await revise_creative(

@@ -405,6 +405,24 @@ async def list_creative_versions(
     return list((await session.execute(stmt)).scalars())
 
 
+async def count_client_versions(
+    session: AsyncSession, *, tenant_id: str, job_id: str, since: datetime
+) -> int:
+    """Count creative_docs for this job authored by a CLIENT principal since `since`
+    (rolling-window quota for the bounded portal)."""
+    stmt = select(CreativeDocRow.created_by).where(
+        CreativeDocRow.tenant_id == tenant_id,
+        CreativeDocRow.job_id == job_id,
+        CreativeDocRow.created_at >= since,
+    )
+    authors = (await session.execute(stmt)).scalars()
+    return sum(
+        1
+        for author in authors
+        if isinstance(author, dict) and author.get("role") == "client"
+    )
+
+
 async def get_latest_creative_doc_for_client(
     session: AsyncSession, *, tenant_id: str, client_id: str
 ) -> CreativeDocRow | None:
