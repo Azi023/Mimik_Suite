@@ -30,9 +30,11 @@ function statusTone(status: ApiSubscriptionStatus): "ok" | "warn" | "bad" {
 function formatWhen(iso: string | null): string {
   if (iso === null) return "—";
   const d = new Date(iso);
+  // Explicit locale — an implicit (environment) locale can differ between server and
+  // client and cause a hydration mismatch. Same pattern as BriefsListView.formatDate.
   return Number.isNaN(d.getTime())
     ? "—"
-    : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    : d.toLocaleDateString("en-GB", { month: "short", day: "numeric", year: "numeric" });
 }
 
 interface BillingViewProps {

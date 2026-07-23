@@ -35,7 +35,9 @@ const PAGE_SIZE = 12;
 function formatWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  // Explicit locale — an implicit (environment) locale can differ between server and
+  // client and cause a hydration mismatch. Same pattern as BriefsListView.formatDate.
+  return d.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
 }
 
 interface TasksViewProps {

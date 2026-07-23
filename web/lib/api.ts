@@ -617,8 +617,13 @@ export function listPillars(clientId?: string, sessionToken?: string): Promise<A
 }
 
 /** GET /jobs/{id}/creatives — a job's creative versions, oldest first. */
-export function listCreatives(jobId: string, sessionToken?: string): Promise<ApiCreativeDoc[]> {
+export function listJobCreatives(jobId: string, sessionToken?: string): Promise<ApiCreativeDoc[]> {
   return apiGet<ApiCreativeDoc[]>(`/jobs/${encodeURIComponent(jobId)}/creatives`, sessionToken);
+}
+
+/** GET /creatives — the tenant's creatives (latest version per job) for the gallery. */
+export function listCreatives(sessionToken?: string): Promise<ApiCreativeDoc[]> {
+  return apiGet<ApiCreativeDoc[]>("/creatives", sessionToken);
 }
 
 export interface GenerateCreativeBody {

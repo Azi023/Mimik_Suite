@@ -10,7 +10,7 @@ import {
   getBrand,
   getJob,
   getJobAuditTrail,
-  listCreatives,
+  listJobCreatives,
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
 
@@ -62,7 +62,7 @@ export default async function PortalReviewPage({
 
   const [brand, creatives, audit] = await Promise.all([
     getBrand(job.brand_id, bearer).catch((): ApiBrand | null => null),
-    listCreatives(job.id, bearer).catch(() => []),
+    listJobCreatives(job.id, bearer).catch(() => []),
     getJobAuditTrail(job.id, bearer).catch(
       (): JobAuditTrail => ({ approvals: [], deliveries: [] }),
     ),

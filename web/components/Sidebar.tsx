@@ -35,7 +35,9 @@ interface SidebarProps {
 /** Rail items that map to a real route (the rest stay un-wired placeholder buttons). */
 const NAV_ROUTES: Partial<Record<NavItem["id"], string>> = {
   board: "/",
+  clients: "/clients",
   calendar: "/calendar",
+  creatives: "/creatives",
   "brand-briefs": "/briefs",
 };
 

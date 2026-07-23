@@ -19,7 +19,8 @@ const THUMB_SIZE = 44;
 function formatWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString(undefined, {
+  // Explicit locale — implicit (environment) locale is hydration-unsafe on SSR'd markup.
+  return d.toLocaleString("en-GB", {
     month: "short",
     day: "numeric",
     hour: "numeric",

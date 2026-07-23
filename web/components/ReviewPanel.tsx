@@ -598,7 +598,13 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
         >
           Request change
         </button>
-        <button type="button" className="btn btn--ghost">
+        {/* No reassign flow exists yet — honestly disabled, never an inert live-looking button. */}
+        <button
+          type="button"
+          className="btn btn--ghost"
+          aria-disabled="true"
+          title="Reassign is coming soon"
+        >
           Reassign
         </button>
       </div>

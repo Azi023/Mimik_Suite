@@ -21,7 +21,7 @@ import {
   isApiConfigured,
   listBriefs,
   listClients,
-  listCreatives,
+  listJobCreatives,
   listPillars,
 } from "./api";
 import {
@@ -236,7 +236,7 @@ async function resolveReviewDoc(jobs: Job[], sessionToken?: string): Promise<Cre
     return null;
   }
   try {
-    const docs = await listCreatives(candidate.id, sessionToken);
+    const docs = await listJobCreatives(candidate.id, sessionToken);
     const latest = docs[docs.length - 1];
     return latest !== undefined ? toReviewDoc(latest) : null;
   } catch (error) {

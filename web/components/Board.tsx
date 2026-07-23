@@ -51,9 +51,12 @@ const PIPELINE_COLUMNS: readonly PipelineColumn[] = [
   { status: "blocked", title: "Blocked", dot: "new" },
 ];
 
-/** Compact "how long ago" for the generating-since hint: "just now", "4m ago", "2h ago", "1d ago". */
-function relativeSince(iso: string): string {
-  const elapsedMs = Date.now() - new Date(iso).getTime();
+/**
+ * Compact "how long ago" for the generating-since hint: "just now", "4m ago", "2h ago", "1d ago".
+ * `now` is a post-mount timestamp (never `Date.now()` in render — SSR/client hydration mismatch).
+ */
+function relativeSince(iso: string, now: number): string {
+  const elapsedMs = now - new Date(iso).getTime();
   if (!Number.isFinite(elapsedMs) || elapsedMs < 60_000) return "just now";
   const minutes = Math.floor(elapsedMs / 60_000);
   if (minutes < 60) return `${minutes}m ago`;
@@ -115,6 +118,15 @@ export function Board({ board, jobs, selectedJobId, onSelectJob }: BoardProps): 
   const [dragJobId, setDragJobId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<ApiJobStatus | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+  /**
+   * Post-mount clock for the "Generating · Nm ago" hint. Null on the server and the
+   * first client paint (both render the stable "Generating" label), then set in an
+   * effect so SSR and hydration markup always match.
+   */
+  const [sinceNow, setSinceNow] = useState<number | null>(null);
+  useEffect(() => {
+    setSinceNow(Date.now());
+  }, [board]);
 
   // A fresh server board is the truth — drop the optimistic overlay it replaces.
   useEffect(() => {
@@ -160,14 +172,16 @@ export function Board({ board, jobs, selectedJobId, onSelectJob }: BoardProps): 
           generating: effectiveStatus === "generating",
         };
         const generatingSince =
-          effectiveStatus === "generating" && card.job.generation_started_at !== null
-            ? relativeSince(card.job.generation_started_at)
+          effectiveStatus === "generating" &&
+          card.job.generation_started_at !== null &&
+          sinceNow !== null
+            ? relativeSince(card.job.generation_started_at, sinceNow)
             : undefined;
         return [{ job, generatingSince }];
       });
       return { column, cards };
     });
-  }, [board, cardById, jobsById, pendingMoves]);
+  }, [board, cardById, jobsById, pendingMoves, sinceNow]);
 
   // Re-run the entrance + count tick-up when the server data (or the filter) changes —
   // NOT on optimistic drag moves, so a drop never re-animates the whole board.
@@ -283,7 +297,9 @@ export function Board({ board, jobs, selectedJobId, onSelectJob }: BoardProps): 
                 <button
                   type="button"
                   className="kanban-col__menu"
-                  aria-label={`${column.title} column options`}
+                  aria-label={`${column.title} column options (coming soon)`}
+                  aria-disabled="true"
+                  title="Column actions coming soon"
                 >
                   <DotsIcon size={14} />
                 </button>

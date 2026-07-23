@@ -51,9 +51,9 @@ export function TopBar({
 
       <div className="topbar__spacer" />
 
-      <button type="button" className="icon-btn" aria-label="Invite teammate">
+      <Link href="/members" className="icon-btn" aria-label="Invite teammate" title="Invite teammate">
         <PlusIcon />
-      </button>
+      </Link>
 
       {activeClient === null ? (
         <button type="button" className="client-chip" disabled>

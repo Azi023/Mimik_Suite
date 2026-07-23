@@ -27,7 +27,9 @@ export default function RootLayout({
         {/* Resolve theme before paint to avoid a flash of the wrong ground. */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body>{children}</body>
+      {/* Browser extensions (Grammarly, etc.) inject attributes onto <body> before React
+          hydrates; suppress the resulting benign attribute-mismatch warning. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

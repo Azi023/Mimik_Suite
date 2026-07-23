@@ -12,7 +12,7 @@ import {
   getJob,
   getJobAuditTrail,
   listClients,
-  listCreatives,
+  listJobCreatives,
 } from "@/lib/api";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
@@ -75,7 +75,7 @@ export default async function CreativeReviewPage({
 
   const [brand, creatives, audit, clients] = await Promise.all([
     getBrand(job.brand_id, bearer).catch((): ApiBrand | null => null),
-    listCreatives(job.id, bearer).catch(() => []),
+    listJobCreatives(job.id, bearer).catch(() => []),
     getJobAuditTrail(job.id, bearer).catch(
       (): JobAuditTrail => ({ approvals: [], deliveries: [] }),
     ),
