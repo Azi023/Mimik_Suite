@@ -13,6 +13,7 @@ from mimik_contracts import PRESETS, CreativeFormat
 
 from creative.knowledge.feedback import load_rules
 from creative.render.compositor import render_html_to_png
+from creative.render.fonts import embed_font_face, font_family_stack
 from creative.render.glo2go_layout import (
     DEFAULT_SUBJECT_ZOOM,
     DEFAULT_TEXT_ALIGNMENT,
@@ -36,6 +37,9 @@ _IMAGE_MIME_BY_SUFFIX = {
     ".webp": "image/webp",
 }
 _SYSTEM_FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+# Internal @font-face family names for optional brand fonts (never client text — see fonts.py).
+_HEADING_FONT_FAMILY = "MimikBrandHeading"
+_BODY_FONT_FAMILY = "MimikBrandBody"
 _DEFAULT_BADGE_TEXT = "G2G Aesthetics"
 _GLO2GO_PROFILE_ID = "glo2go-aesthetics"
 _EDITABLE_LAYER_IDS = frozenset(
@@ -404,6 +408,7 @@ def _add_wrapped_text(
     font_weight: int,
     fill: str,
     text_alignment: TextAlignment,
+    font_family: str = _SYSTEM_FONT,
 ) -> ElementTree.Element:
     svg_anchor = {"left": "start", "center": "middle", "right": "end"}[text_alignment]
     text = ElementTree.SubElement(
@@ -413,7 +418,7 @@ def _add_wrapped_text(
             "x": str(x),
             "y": str(first_baseline),
             "fill": fill,
-            "font-family": _SYSTEM_FONT,
+            "font-family": font_family,
             "font-size": str(font_size),
             "font-weight": str(font_weight),
             "text-anchor": svg_anchor,
@@ -466,10 +471,28 @@ def render_creative_svg(
     subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
     badge_background_luminance: float | None = None,
     layer_overrides: Mapping[str, object] | None = None,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> str:
-    """Return the Glo2Go hero as a complete SVG with named, editable layers."""
+    """Return the Glo2Go hero as a complete SVG with named, editable layers.
+
+    ``heading_font_ref`` / ``body_font_ref`` are OPTIONAL brand-font files (a stored
+    ``AssetKind.FONT`` ``local_path`` or a ``data:font/...`` URI). When supplied, each font is
+    embedded as an ``@font-face`` in the SVG ``<style>`` (Playwright rasterizes it) and applied
+    to the headline (heading font) and subhead/CTA (body font). When None, the render is
+    unchanged — system fonts, byte-identical to before.
+    """
     if not headline.strip():
         raise ValueError("Creative headline must not be blank")
+
+    # Resolve optional brand fonts up front (fail loud before building the tree). Distinct
+    # @font-face families let heading and body use different files simultaneously.
+    heading_font = embed_font_face(heading_font_ref, family=_HEADING_FONT_FAMILY) if heading_font_ref else None
+    body_font = embed_font_face(body_font_ref, family=_BODY_FONT_FAMILY) if body_font_ref else None
+    heading_family = (
+        font_family_stack(heading_font.family, _SYSTEM_FONT) if heading_font else _SYSTEM_FONT
+    )
+    body_family = font_family_stack(body_font.family, _SYSTEM_FONT) if body_font else _SYSTEM_FONT
 
     fmt = _format_for(format_key)
     comp = _composition(
@@ -503,6 +526,13 @@ def render_creative_svg(
             "data-design-rule-ids": rule_ids,
         },
     )
+
+    # Optional brand-font faces go in a document <style> so Playwright loads them before paint.
+    # Only emitted when a font is supplied — the no-font path adds nothing (byte-identical).
+    face_blocks = [font.face_css for font in (heading_font, body_font) if font is not None]
+    if face_blocks:
+        style = ElementTree.SubElement(root, _svg_tag("style"), {"type": "text/css"})
+        style.text = "".join(face_blocks)
 
     background_bbox = (
         comp.photo_x,
@@ -572,6 +602,7 @@ def render_creative_svg(
         font_weight=760,
         fill=palette_ink,
         text_alignment=comp.text_alignment,
+        font_family=heading_family,
     )
     subhead_baseline = (
         comp.panel_y
@@ -598,6 +629,7 @@ def render_creative_svg(
             font_weight=430,
             fill=palette_ink,
             text_alignment=comp.text_alignment,
+            font_family=body_family,
         )
     subhead_height = 0
     if comp.subhead_lines:
@@ -641,7 +673,7 @@ def render_creative_svg(
                 "x": str(cta_x + round(cta_width / 2)),
                 "y": str(cta_y + round(cta_height / 2)),
                 "fill": palette_ground,
-                "font-family": _SYSTEM_FONT,
+                "font-family": body_family,
                 "font-size": str(cta_font_size),
                 "font-weight": "750",
                 "dominant-baseline": "middle",

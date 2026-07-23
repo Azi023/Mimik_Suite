@@ -20,6 +20,7 @@ from mimik_contracts import get_format, validate_asset_ref
 
 from creative.knowledge.feedback import load_rules
 from creative.render.compositor import render_context_to_png
+from creative.render.fonts import EmbeddedFont, embed_font_face, font_family_stack
 from creative.render.glo2go_layout import (
     DEFAULT_SUBJECT_ZOOM,
     DEFAULT_TEXT_ALIGNMENT,
@@ -52,8 +53,12 @@ _IMAGE_MIME_BY_SUFFIX = {
     ".webp": "image/webp",
 }
 
-# TODO(M3): Load the approved Glo2Go heading/body font families after onboarding supplies them.
+# M-10 / Lane C: optional brand fonts now load via `creative.render.fonts` (see render_glo2go's
+# heading_font_ref / body_font_ref). With no brand font supplied, _SYSTEM_FONT is used unchanged.
 _SYSTEM_FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+# Internal @font-face family names for optional brand fonts (never client text — see fonts.py).
+_HEADING_FONT_FAMILY = "MimikBrandHeading"
+_BODY_FONT_FAMILY = "MimikBrandBody"
 
 
 class Glo2GoTemplateContext(TemplateContext):
@@ -71,6 +76,12 @@ class Glo2GoTemplateContext(TemplateContext):
     myth_text: str | None = None
     fact_label: str | None = None
     fact_text: str | None = None
+    # Optional brand-font @font-face blocks + the families to apply. None → system fonts,
+    # so the CSS is unchanged (M-10 / Lane C, resolved from AssetKind.FONT by the caller).
+    heading_font_face: str | None = None
+    body_font_face: str | None = None
+    heading_font_family: str | None = None
+    body_font_family: str | None = None
 
     _second_ref_is_safe = field_validator("image_ref_2")(
         staticmethod(validate_asset_ref)
@@ -293,6 +304,26 @@ def _canvas_open(ctx: Glo2GoTemplateContext, archetype: str) -> str:
     )
 
 
+def _font_css(ctx: Glo2GoTemplateContext) -> str:
+    """Optional @font-face blocks + family overrides for supplied brand fonts.
+
+    Emitted only when a brand font is present, so the un-branded render is byte-identical.
+    The override selectors come AFTER the base rules in the stylesheet, so they win the cascade.
+    """
+    faces = "".join(
+        face for face in (ctx.heading_font_face, ctx.body_font_face) if face is not None
+    )
+    overrides = ""
+    if ctx.heading_font_family:
+        overrides += (
+            f".g2g-panel h1{{font-family:{font_family_stack(ctx.heading_font_family, _SYSTEM_FONT)}}}"
+        )
+    if ctx.body_font_family:
+        body_stack = font_family_stack(ctx.body_font_family, _SYSTEM_FONT)
+        overrides += f".g2g-panel p,.g2g-cta,.g2g-label{{font-family:{body_stack}}}"
+    return faces + overrides
+
+
 def _common_css(ctx: Glo2GoTemplateContext) -> str:
     ground_panel = _rgba(ctx.on_primary, 0.94 if ctx.density == "compact" else 0.96)
     plum_border = _rgba(ctx.ink, 0.10)
@@ -327,6 +358,7 @@ def _common_css(ctx: Glo2GoTemplateContext) -> str:
         "font-weight:750;line-height:1.1;letter-spacing:-.01em}"
         ".g2g-panel[data-text-alignment=center] .g2g-cta{margin-left:auto;margin-right:auto}"
         ".g2g-panel[data-text-alignment=right] .g2g-cta{margin-left:auto}"
+        f"{_font_css(ctx)}"
         "</style>"
     )
 
@@ -523,6 +555,8 @@ def _build_context(
     text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
     subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
     badge_background_luminance: float | None = None,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> Glo2GoTemplateContext:
     if archetype not in GLO2GO_TEMPLATES:
         choices = ", ".join(GLO2GO_TEMPLATES)
@@ -536,6 +570,20 @@ def _build_context(
     embedded_image = _embed_local_image(image_ref)
     embedded_image_2 = _embed_local_image(image_ref_2) if image_ref_2 else None
     embedded_logo = _embed_local_image(logo_ref) if logo_ref else None
+    # Optional brand fonts (M-10 / Lane C). Resolved to self-contained @font-face blocks; None
+    # keeps the system-font CSS byte-identical.
+    heading_font: EmbeddedFont | None = (
+        embed_font_face(heading_font_ref, family=_HEADING_FONT_FAMILY) if heading_font_ref else None
+    )
+    body_font: EmbeddedFont | None = (
+        embed_font_face(body_font_ref, family=_BODY_FONT_FAMILY) if body_font_ref else None
+    )
+    font_fields = {
+        "heading_font_face": heading_font.face_css if heading_font else None,
+        "body_font_face": body_font.face_css if body_font else None,
+        "heading_font_family": heading_font.family if heading_font else None,
+        "body_font_family": body_font.family if body_font else None,
+    }
     rule_ids = tuple(rule.id for rule in load_rules(profile.id))
 
     if archetype == "single_photo_education_hero":
@@ -567,6 +615,7 @@ def _build_context(
             subject_zoom=subject_zoom,
             badge_background_luminance=resolved_badge_luminance,
             design_rule_ids=rule_ids,
+            **font_fields,
         )
 
     myth_label = _copy_value(copy, "myth_label", required=True)
@@ -600,6 +649,7 @@ def _build_context(
         myth_text=myth_text,
         fact_label=fact_label,
         fact_text=fact_text,
+        **font_fields,
     )
 
 
@@ -617,12 +667,16 @@ def build_glo2go_html(
     text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
     subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
     badge_background_luminance: float | None = None,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> str:
     """Build editable HTML for structural tests and future layer-level editing.
 
     Hero copy keys: ``headline``, optional ``sub``/``subhead``, optional ``cta``.
     Split required copy keys: ``myth_label``, ``myth``, ``fact_label``, ``fact``. Its optional
     ``headline`` defaults to "Myth vs Fact" from the supplied labels; ``cta`` is also optional.
+
+    ``heading_font_ref`` / ``body_font_ref`` are OPTIONAL brand-font files (see render_glo2go).
     """
     ctx = _build_context(
         archetype,
@@ -637,6 +691,8 @@ def build_glo2go_html(
         text_alignment=text_alignment,
         subject_zoom=subject_zoom,
         badge_background_luminance=badge_background_luminance,
+        heading_font_ref=heading_font_ref,
+        body_font_ref=body_font_ref,
     )
     return GLO2GO_TEMPLATES[archetype].render(ctx)
 
@@ -654,8 +710,16 @@ async def render_glo2go(
     text_alignment: TextAlignment = DEFAULT_TEXT_ALIGNMENT,
     subject_zoom: float = DEFAULT_SUBJECT_ZOOM,
     badge_background_luminance: float | None = None,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> bytes:
-    """Render a Glo2Go archetype through the existing Playwright compositor."""
+    """Render a Glo2Go archetype through the existing Playwright compositor.
+
+    ``heading_font_ref`` / ``body_font_ref`` are OPTIONAL brand-font files — a stored
+    ``AssetKind.FONT`` ``local_path`` or a ``data:font/...`` URI. When supplied they are
+    embedded as ``@font-face`` blocks and applied to the headline (heading) and body/CTA/label
+    (body) copy. When None, the render is unchanged (system fonts, byte-identical).
+    """
     profile = get_style_profile(_GLO2GO_PROFILE_ID)
     ctx = _build_context(
         archetype,
@@ -670,5 +734,7 @@ async def render_glo2go(
         text_alignment=text_alignment,
         subject_zoom=subject_zoom,
         badge_background_luminance=badge_background_luminance,
+        heading_font_ref=heading_font_ref,
+        body_font_ref=body_font_ref,
     )
     return await render_context_to_png(ctx, archetype)
