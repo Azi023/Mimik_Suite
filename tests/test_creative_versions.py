@@ -18,6 +18,7 @@ from api.core.auth import Principal, get_principal
 from api.db import repo
 from api.db.base import Base
 from api.main import app
+from creative.qa.checks import QAReport
 from api.services import creative_generation
 
 
@@ -119,7 +120,7 @@ def _stub_renderer(
 ) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
 
-    async def fake_render(**kwargs: object) -> tuple[Path, Path, None]:
+    async def fake_render(**kwargs: object) -> tuple[Path, Path, None, QAReport]:
         calls.append(kwargs)
         artifact_dir = kwargs["artifact_dir"]
         assert isinstance(artifact_dir, Path)
@@ -127,7 +128,7 @@ def _stub_renderer(
         preview_path = artifact_dir / "preview.png"
         svg_path.write_text(f"<svg data-render='{len(calls)}'/>", encoding="utf-8")
         preview_path.write_bytes(f"preview-{len(calls)}".encode())
-        return svg_path, preview_path, None
+        return svg_path, preview_path, None, QAReport(passed=True, failures=[])
 
     monkeypatch.setattr(creative_generation, "_render_creative_artifacts", fake_render)
     return calls

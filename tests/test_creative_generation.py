@@ -235,3 +235,133 @@ async def test_generate_creative_creates_record_and_preview(
     ).status_code == 404
     for artifact_url in (payload["preview_url"], payload["svg_url"], payload["psd_url"]):
         assert (await client.get(artifact_url, headers=_auth(other_owner))).status_code == 404
+
+
+# --- Live-path brand-QA (M-08 / Lane A): run_live_qa against the ACTUAL rendered output -----
+#
+# The live generation path renders a semantic SVG (named, bbox-carrying layers) + a raster
+# preview and bypasses creative.pipeline, so these gate creative.qa.live.run_live_qa directly.
+# render_creative_svg is browser-free when handed a data-URI image + an explicit badge
+# luminance, so the SVG geometry/colours are deterministic; only the pixel-sampling checks
+# (headline contrast, logo luminance) need Playwright and are skipped without it.
+
+from creative.export.svg import render_creative_svg  # noqa: E402
+from creative.qa.live import run_live_qa  # noqa: E402
+from creative.render.compositor import browser_available  # noqa: E402
+from creative.style_profile import get_style_profile  # noqa: E402
+from mimik_contracts import Brand, BrandTokens  # noqa: E402
+
+_qa_browser = pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+
+
+def _solid_png(hex_color: str, width: int, height: int) -> bytes:
+    """A real solid-color RGBA PNG, stdlib-only (no PIL)."""
+    import struct
+    import zlib
+
+    r, g, b = (int(hex_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
+    row = b"\x00" + bytes((r, g, b, 255)) * width
+    raw = row * height
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        payload = typ + data
+        return struct.pack(">I", len(data)) + payload + struct.pack(">I", zlib.crc32(payload))
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def _png_data_uri(hex_color: str, size: int = 8) -> str:
+    return "data:image/png;base64," + base64.b64encode(_solid_png(hex_color, size, size)).decode("ascii")
+
+
+def _qa_brand() -> Brand:
+    return Brand(tenant_id="t1", client_id="c1", slug="glo2go", name="Glo2Go", tokens=BrandTokens())
+
+
+def _qa_svg(*, ink: str, ground: str, logo_ref: str | None = None, badge_bg: float = 0.95) -> str:
+    """A real Glo2Go hero SVG (browser-free: data-URI image + explicit badge luminance).
+
+    badge_bg high (light) -> "plum" badge theme -> the badge rect fills with palette_ink, which
+    is what reproduces the purple-on-purple logo case when the logo is also plum.
+    """
+    return render_creative_svg(
+        format_key="ig_post",
+        image_ref=_png_data_uri("#CCCCCC"),
+        headline="Skin boosters, explained",
+        sub="What they do and who they suit",
+        cta="Book a consult",
+        palette_ink=ink,
+        palette_ground=ground,
+        badge_text="G2G",
+        logo_ref=logo_ref,
+        badge_background_luminance=badge_bg,
+    )
+
+
+@_qa_browser
+async def test_live_qa_flags_low_contrast_headline() -> None:
+    # Near-white ink on a white rendered ground: the sampled headline contrast fails and a
+    # scrim/darker ground is requested.
+    svg = _qa_svg(ink="#F0F0F0", ground="#FFFFFF")
+    preview = _solid_png("#FFFFFF", 1080, 1080)
+    report = await run_live_qa(
+        preview, svg, brand=_qa_brand(), profile=None,
+        format_key="ig_post", source_kind="brand_placeholder", expect_logo=False,
+    )
+    assert not report.passed
+    assert any(f.startswith("contrast:") for f in report.failures), report.failures
+    assert report.needs_scrim
+
+
+@_qa_browser
+async def test_live_qa_flags_invisible_logo() -> None:
+    # The Glo2Go dogfood regression: a plum mark on the plum badge ground.
+    plum = "#5A2A6B"
+    svg = _qa_svg(ink=plum, ground="#FFFFFF", logo_ref=_png_data_uri(plum))
+    preview = _solid_png("#FFFFFF", 1080, 1080)
+    report = await run_live_qa(
+        preview, svg, brand=_qa_brand(), profile=None,
+        format_key="ig_post", source_kind="licensed_stock", expect_logo=True,
+    )
+    assert any("mark-vs-ground" in f for f in report.failures), report.failures
+
+
+@_qa_browser
+async def test_live_qa_passes_knockout_logo() -> None:
+    # A white knockout mark on the same plum badge ground stays visible.
+    svg = _qa_svg(ink="#5A2A6B", ground="#FFFFFF", logo_ref=_png_data_uri("#FFFFFF"))
+    preview = _solid_png("#FFFFFF", 1080, 1080)
+    report = await run_live_qa(
+        preview, svg, brand=_qa_brand(), profile=None,
+        format_key="ig_post", source_kind="ai_realistic", expect_logo=True,
+    )
+    assert not any("mark-vs-ground" in f for f in report.failures), report.failures
+
+
+async def test_live_qa_simply_nikah_rejects_real_photo_source() -> None:
+    # Modesty/source guard: Simply Nikah forbids real photography of people. Pure code — no
+    # browser needed, so this runs everywhere.
+    svg = _qa_svg(ink="#2B0A2E", ground="#FAF7FB")
+    preview = _solid_png("#FAF7FB", 1080, 1080)
+    report = await run_live_qa(
+        preview, svg, brand=_qa_brand(), profile=get_style_profile("simply-nikah"),
+        format_key="ig_post", source_kind="licensed_stock", expect_logo=False,
+    )
+    assert not report.passed
+    assert any(f.startswith("source:") and "Simply Nikah" in f for f in report.failures), report.failures
+
+
+async def test_live_qa_simply_nikah_allows_generated_vector() -> None:
+    svg = _qa_svg(ink="#2B0A2E", ground="#FAF7FB")
+    preview = _solid_png("#FAF7FB", 1080, 1080)
+    report = await run_live_qa(
+        preview, svg, brand=_qa_brand(), profile=get_style_profile("simply-nikah"),
+        format_key="ig_post", source_kind="generated_vector", expect_logo=False,
+    )
+    assert not any(f.startswith("source:") for f in report.failures), report.failures

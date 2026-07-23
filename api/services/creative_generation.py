@@ -33,6 +33,8 @@ from creative.adapters import (
 from creative.copy import l0 as copy_l0
 from creative.export import svg as svg_export
 from creative.pipeline import build_manifest
+from creative.qa.checks import QAReport
+from creative.qa.live import LIVE_QA_BLOCKING, LiveQABlocked, run_live_qa
 from creative.references import gather as reference_gather
 from creative.render import glo2go_templates
 from creative.style_profile import ImageSource, StyleProfile, get_style_profile
@@ -322,7 +324,8 @@ async def _render_creative_artifacts(
     image_path: Path,
     artifact_dir: Path,
     render_params: dict,
-) -> tuple[Path, Path, Path | None]:
+    source_kind: str,
+) -> tuple[Path, Path, Path | None, QAReport]:
     profile = _profile(profile_id)
     text_region = render_params.get("text_region")
     ink = brand_color(brand, "primary", _profile_color(profile, "ink") or "#1A1D26")
@@ -369,7 +372,31 @@ async def _render_creative_artifacts(
     preview_path = artifact_dir / "preview.png"
     svg_path.write_text(svg, encoding="utf-8")
     preview_path.write_bytes(preview)
-    return svg_path, preview_path, profile_render_path
+
+    # Brand-QA gate on the ACTUAL rendered output (M-08 / Lane A): the live path bypasses
+    # creative.pipeline, so this is where the greenish-doctor / purple-on-purple checks run.
+    # Recorded gate by default (assisted autonomy): failures are logged + persisted, not raised
+    # — flip live_qa.LIVE_QA_BLOCKING to escalate to a hard gate.
+    qa_report = await run_live_qa(
+        preview,
+        svg,
+        brand=brand,
+        profile=profile,
+        format_key=format_key,
+        source_kind=source_kind,
+        expect_logo=brand.tokens.logo.ref is not None,
+    )
+    if not qa_report.passed:
+        logger.warning(
+            "live brand-QA failed for profile=%s format=%s source=%s: %s",
+            profile_id,
+            format_key,
+            source_kind,
+            "; ".join(qa_report.failures),
+        )
+        if LIVE_QA_BLOCKING:
+            raise LiveQABlocked(qa_report)
+    return svg_path, preview_path, profile_render_path, qa_report
 
 
 # Legacy ReviseCreativeRequest was removed; the router maps it to CanvasRevision
@@ -432,12 +459,25 @@ def _revision_note(revision: CanvasRevision) -> str | None:
     return None
 
 
+def _qa_params(qa_report: QAReport | None) -> dict[str, object]:
+    """The QA verdict folded into L5 params so every version records its brand-QA result
+    (non-destructive audit — there is no dedicated manifest QA field yet)."""
+    if qa_report is None:
+        return {}
+    return {
+        "qa_passed": qa_report.passed,
+        "qa_failures": list(qa_report.failures),
+        "qa_needs_scrim": qa_report.needs_scrim,
+    }
+
+
 def _set_rendered_artifacts(
     manifest: CreativeManifest,
     *,
     svg_path: Path,
     preview_path: Path,
     profile_render_path: Path | None,
+    qa_report: QAReport | None = None,
 ) -> None:
     artifact_params = {
         "svg_ref": str(svg_path),
@@ -447,6 +487,7 @@ def _set_rendered_artifacts(
             if profile_render_path is not None
             else {}
         ),
+        **_qa_params(qa_report),
     }
     l5_layer = manifest.layer(LayerKind.L5_FINISH)
     if l5_layer is None:
@@ -462,7 +503,15 @@ def _set_rendered_artifacts(
     retained_params = {
         key: value
         for key, value in l5_layer.recipe.params.items()
-        if key not in {"svg_ref", "preview_ref", "profile_render_ref"}
+        if key
+        not in {
+            "svg_ref",
+            "preview_ref",
+            "profile_render_ref",
+            "qa_passed",
+            "qa_failures",
+            "qa_needs_scrim",
+        }
     }
     l5_layer.recipe = LayerRecipe(params={**retained_params, **artifact_params})
     l5_layer.artifact_ref = str(preview_path)
@@ -645,7 +694,7 @@ async def revise_creative(
             except Exception as exc:
                 logger.warning("revise: failed to source new image (%s); keeping existing image", exc)
 
-        svg_path, preview_path, profile_render_path = await _render_creative_artifacts(
+        svg_path, preview_path, profile_render_path, qa_report = await _render_creative_artifacts(
             brand=brand,
             profile_id=str(l1_params.get("style_profile_id", "generic")),
             copy_block=copy_block,
@@ -653,6 +702,7 @@ async def revise_creative(
             image_path=image_path_for_render,
             artifact_dir=artifact_dir,
             render_params=l1_params,
+            source_kind=str(l1_params.get("image_source") or "brand_placeholder"),
         )
 
         manifest.copy_block = copy_block
@@ -661,6 +711,7 @@ async def revise_creative(
             svg_path=svg_path,
             preview_path=preview_path,
             profile_render_path=profile_render_path,
+            qa_report=qa_report,
         )
 
         new_row = await repo.create_creative_doc(
@@ -769,7 +820,7 @@ async def revert_creative(
     artifact_dir.mkdir(parents=True, exist_ok=False)
 
     try:
-        svg_path, preview_path, profile_render_path = await _render_creative_artifacts(
+        svg_path, preview_path, profile_render_path, qa_report = await _render_creative_artifacts(
             brand=brand,
             profile_id=str(render_params.get("style_profile_id", "generic")),
             copy_block=copy_block,
@@ -777,12 +828,14 @@ async def revert_creative(
             image_path=Path(image_layer.artifact_ref),
             artifact_dir=artifact_dir,
             render_params=render_params,
+            source_kind=str(render_params.get("image_source") or "brand_placeholder"),
         )
         _set_rendered_artifacts(
             manifest,
             svg_path=svg_path,
             preview_path=preview_path,
             profile_render_path=profile_render_path,
+            qa_report=qa_report,
         )
         new_row = await repo.create_creative_doc(
             session,
@@ -934,7 +987,7 @@ async def generate_client_creative(
             "text_region": text_region,
         }
 
-        svg_path, preview_path, profile_render_path = await _render_creative_artifacts(
+        svg_path, preview_path, profile_render_path, qa_report = await _render_creative_artifacts(
             brand=brand,
             profile_id=profile_id,
             copy_block=copy_block,
@@ -942,6 +995,7 @@ async def generate_client_creative(
             image_path=image_path,
             artifact_dir=artifact_dir,
             render_params=l1_params,
+            source_kind=source_kind,
         )
 
         manifest = build_manifest(
@@ -972,6 +1026,7 @@ async def generate_client_creative(
                             if profile_render_path is not None
                             else {}
                         ),
+                        **_qa_params(qa_report),
                     }
                 ),
                 artifact_ref=str(preview_path),

@@ -19,6 +19,7 @@ from api.db.session import get_session
 from api.main import app
 from api.services import approval_flow, creative_generation
 from creative.knowledge import feedback
+from creative.qa.checks import QAReport
 
 
 @dataclass(frozen=True)
@@ -118,14 +119,14 @@ def _stub_revision_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     Path("source.png").write_bytes(b"source")
     monkeypatch.delenv("REVISE_LLM", raising=False)
 
-    async def fake_render(**kwargs: object) -> tuple[Path, Path, None]:
+    async def fake_render(**kwargs: object) -> tuple[Path, Path, None, QAReport]:
         artifact_dir = kwargs["artifact_dir"]
         assert isinstance(artifact_dir, Path)
         svg_path = artifact_dir / "creative.svg"
         preview_path = artifact_dir / "preview.png"
         svg_path.write_text("<svg/>", encoding="utf-8")
         preview_path.write_bytes(b"preview")
-        return svg_path, preview_path, None
+        return svg_path, preview_path, None, QAReport(passed=True, failures=[])
 
     monkeypatch.setattr(
         creative_generation,

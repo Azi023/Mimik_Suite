@@ -33,6 +33,7 @@ from api.services.creative_generation import GenerateCreativeRequest
 from api.services.generation_queue import enqueue_generation, list_queue, queue_stats
 from api.services.generation_worker import process_one_generation_task
 from creative.adapters import ImageRequest
+from creative.qa.checks import QAReport
 
 
 @pytest_asyncio.fixture
@@ -172,14 +173,14 @@ def _stub_generation_pipeline(
 
     async def fake_render(
         **kwargs: object,
-    ) -> tuple[Path, Path, None]:
+    ) -> tuple[Path, Path, None, QAReport]:
         artifact_dir = kwargs["artifact_dir"]
         assert isinstance(artifact_dir, Path)
         svg_path = artifact_dir / "creative.svg"
         preview_path = artifact_dir / "preview.png"
         svg_path.write_text("<svg data-queue-test='true'/>", encoding="utf-8")
         preview_path.write_bytes(b"preview")
-        return svg_path, preview_path, None
+        return svg_path, preview_path, None, QAReport(passed=True, failures=[])
 
     monkeypatch.setattr(
         creative_generation.art_direction,

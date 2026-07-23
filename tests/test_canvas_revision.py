@@ -10,6 +10,7 @@ from httpx import AsyncClient
 from mimik_contracts import CopyBlock
 
 from api.services import creative_generation
+from creative.qa.checks import QAReport
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -94,7 +95,7 @@ def _stub_renderer(
 ) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
 
-    async def fake_render(**kwargs: object) -> tuple[Path, Path, None]:
+    async def fake_render(**kwargs: object) -> tuple[Path, Path, None, QAReport]:
         calls.append(kwargs)
         artifact_dir = kwargs["artifact_dir"]
         assert isinstance(artifact_dir, Path)
@@ -123,7 +124,7 @@ def _stub_renderer(
 
         svg_path.write_text(svg_content, encoding="utf-8")
         preview_path.write_bytes(f"preview-{len(calls)}".encode())
-        return svg_path, preview_path, None
+        return svg_path, preview_path, None, QAReport(passed=True, failures=[])
 
     monkeypatch.setattr(creative_generation, "_render_creative_artifacts", fake_render)
     return calls
