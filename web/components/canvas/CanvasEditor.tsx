@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type JSX } from "react";
+import { useCallback, useRef, useState, type JSX } from "react";
 import Link from "next/link";
 import type { ApiColorRole, ApiVersionHistory } from "@/lib/api";
 import {
@@ -8,7 +8,11 @@ import {
   revertCreativeAction,
   type CanvasEditActionResult,
 } from "@/app/actions";
-import { CanvasStage } from "./CanvasStage";
+import {
+  CanvasStage,
+  type CanvasStageHandle,
+  type CanvasStageSnapshot,
+} from "./CanvasStage";
 import { VersionRail } from "./VersionRail";
 import {
   CANVAS_LAYER_IDS,
@@ -59,6 +63,26 @@ const LAYER_LABEL: Record<CanvasLayerId, string> = {
 /** Contract cap on RegionAsk.instruction. */
 const MAX_ASK_CHARS = 500;
 
+const EMPTY_STAGE_SNAPSHOT: CanvasStageSnapshot = {
+  history: { ops: [], redo: [] },
+  canUndo: false,
+  canRedo: false,
+};
+
+interface PendingRevert {
+  creativeId: string;
+  ordinal: number;
+}
+
+function hasCanvasRevisionChanges(revision: ApiCanvasRevision): boolean {
+  return (
+    revision.layer_ops.length > 0 ||
+    (revision.text_edits !== undefined &&
+      Object.keys(revision.text_edits).length > 0) ||
+    (revision.params !== undefined && Object.keys(revision.params).length > 0)
+  );
+}
+
 /** The marked layer's untransformed `data-bbox` from the SVG master, or null. */
 function layerBBox(
   svg: string,
@@ -103,10 +127,14 @@ export function CanvasEditor({
   brandName,
   clientMismatch,
 }: CanvasEditorProps): JSX.Element {
+  const stageControlsRef = useRef<CanvasStageHandle>(null);
   const [currentId, setCurrentId] = useState<string>(creativeId);
   const [currentSvg, setCurrentSvg] = useState<string>(svg);
   const [versions, setVersions] = useState<ApiVersionHistory>(initialVersions);
   const [pendingRevision, setPendingRevision] = useState<ApiCanvasRevision | null>(null);
+  const [stageSnapshot, setStageSnapshot] =
+    useState<CanvasStageSnapshot>(EMPTY_STAGE_SNAPSHOT);
+  const [pendingRevert, setPendingRevert] = useState<PendingRevert | null>(null);
   /** Bumped to re-key the stage — resets its local transforms after Apply/Discard/Revert. */
   const [stageKey, setStageKey] = useState(0);
   const [revising, setRevising] = useState(false);
@@ -120,16 +148,27 @@ export function CanvasEditor({
 
   // The stage emits its FULL accumulated state each time — replace ours, keep the ask.
   const handleStageChange = useCallback((revision: ApiCanvasRevision): void => {
-    setPendingRevision((prev) =>
-      prev?.ask !== undefined ? { ...revision, ask: prev.ask } : revision,
-    );
+    setPendingRevision((previous) => {
+      const ask = previous?.ask;
+      if (!hasCanvasRevisionChanges(revision)) {
+        return ask === undefined ? null : { layer_ops: [], ask };
+      }
+      return ask === undefined ? revision : { ...revision, ask };
+    });
   }, []);
 
+  const handleStageHistoryChange = useCallback(
+    (snapshot: CanvasStageSnapshot): void => {
+      setStageSnapshot(snapshot);
+      if (snapshot.history.ops.length === 0) setPendingRevert(null);
+    },
+    [],
+  );
+
   const busy = revising || reverting;
-  const pendingLayerOps = pendingRevision === null ? 0 : pendingRevision.layer_ops.length;
-  const pendingTextEdits =
-    pendingRevision?.text_edits === undefined ? 0 : Object.keys(pendingRevision.text_edits).length;
   const pendingAsk = pendingRevision?.ask ?? null;
+  const hasPendingChanges =
+    stageSnapshot.history.ops.length > 0 || pendingAsk !== null;
   const canAddAsk = askLayer !== null && askText.trim() !== "" && !busy;
 
   function addAsk(): void {
@@ -153,6 +192,8 @@ export function CanvasEditor({
     setCurrentSvg(result.svg);
     setVersions(result.versions);
     setPendingRevision(null);
+    setStageSnapshot(EMPTY_STAGE_SNAPSHOT);
+    setPendingRevert(null);
     setAskLayer(null);
     setAskText("");
     // The server render now carries the applied state — reset the stage's local preview.
@@ -180,6 +221,8 @@ export function CanvasEditor({
   function discard(): void {
     if (busy) return;
     setPendingRevision(null);
+    setStageSnapshot(EMPTY_STAGE_SNAPSHOT);
+    setPendingRevert(null);
     setAskLayer(null);
     setAskText("");
     setStageKey((key) => key + 1);
@@ -202,14 +245,14 @@ export function CanvasEditor({
     setReverting(false);
   }
 
-  const pendingSummary: string[] = [];
-  if (pendingLayerOps > 0) {
-    pendingSummary.push(`${pendingLayerOps} layer ${pendingLayerOps === 1 ? "op" : "ops"}`);
+  function requestRevert(toCreativeId: string, ordinal: number): void {
+    if (busy) return;
+    if (stageSnapshot.history.ops.length > 0) {
+      setPendingRevert({ creativeId: toCreativeId, ordinal });
+      return;
+    }
+    void revert(toCreativeId);
   }
-  if (pendingTextEdits > 0) {
-    pendingSummary.push(`${pendingTextEdits} text ${pendingTextEdits === 1 ? "edit" : "edits"}`);
-  }
-  if (pendingAsk !== null) pendingSummary.push("1 AI ask");
 
   return (
     <div className="creview">
@@ -218,6 +261,8 @@ export function CanvasEditor({
         svg={currentSvg}
         brandColors={brandColors}
         onChange={handleStageChange}
+        onHistoryChange={handleStageHistoryChange}
+        controlsRef={stageControlsRef}
       />
 
       <aside className="creview__rail" aria-label="Canvas editor">
@@ -243,14 +288,14 @@ export function CanvasEditor({
             </p>
           </div>
           <span
-            className={`creview__status${!busy && pendingRevision === null ? " creview__status--done" : ""}`}
+            className={`creview__status${!busy && !hasPendingChanges ? " creview__status--done" : ""}`}
           >
             <span className="creview__status-dot" aria-hidden="true" />
             {busy
               ? revising
                 ? "Revising…"
                 : "Reverting…"
-              : pendingRevision !== null
+              : hasPendingChanges
                 ? "Pending changes"
                 : "Up to date"}
           </span>
@@ -270,13 +315,59 @@ export function CanvasEditor({
         )}
 
         <div className="creview__section">
-          <h2 className="creview__label">Pending</h2>
-          {pendingRevision === null ? (
-            <p className="creview__thread-empty">
-              Nothing pending. Drag, scale, recolor, or edit text on the canvas — then Apply.
-            </p>
+          <div className="creview__pending-head">
+            <h2 className="creview__label">
+              Pending
+              <span className="creview__count">{stageSnapshot.history.ops.length}</span>
+            </h2>
+            <div className="creview__history-actions" aria-label="Edit history">
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                title="Undo · ⌘/Ctrl+Z"
+                disabled={busy || !stageSnapshot.canUndo}
+                onClick={(): void => stageControlsRef.current?.undo()}
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                title="Redo · ⌘/Ctrl+Shift+Z"
+                disabled={busy || !stageSnapshot.canRedo}
+                onClick={(): void => stageControlsRef.current?.redo()}
+              >
+                Redo
+              </button>
+            </div>
+          </div>
+          {stageSnapshot.history.ops.length === 0 ? (
+            <p className="creview__thread-empty">No pending changes</p>
           ) : (
-            <p className="creview__event-text">{pendingSummary.join(" · ")}</p>
+            <ol className="creview__op-list" aria-label="Pending canvas changes">
+              {stageSnapshot.history.ops.map((operation) => (
+                <li key={operation.id} className="creview__op">
+                  <span className="creview__op-copy">
+                    <span className="creview__op-label">{operation.label}</span>
+                    <span className="creview__op-layer">
+                      {LAYER_LABEL[operation.layer]}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="creview__op-remove"
+                    aria-label={`Remove ${operation.label}`}
+                    title="Remove change"
+                    disabled={busy}
+                    onClick={(): void =>
+                      stageControlsRef.current?.removeOp(operation.id)
+                    }
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ol>
           )}
           {pendingAsk !== null && (
             <ul className="pin-list" aria-label="Queued AI ask">
@@ -299,7 +390,7 @@ export function CanvasEditor({
             <button
               type="button"
               className="btn btn--secondary btn--sm"
-              disabled={pendingRevision === null || busy}
+              disabled={!hasPendingChanges || busy}
               onClick={discard}
             >
               Discard
@@ -307,7 +398,7 @@ export function CanvasEditor({
             <button
               type="button"
               className="btn btn--primary btn--sm"
-              disabled={pendingRevision === null || busy}
+              disabled={!hasPendingChanges || pendingRevision === null || busy}
               onClick={(): void => void apply()}
             >
               {revising ? "Applying…" : "Apply"}
@@ -359,10 +450,48 @@ export function CanvasEditor({
           </p>
         )}
 
+        {pendingRevert !== null && (
+          <div
+            className="creview__revert-confirm"
+            role="alertdialog"
+            aria-labelledby="canvas-revert-confirm-title"
+          >
+            <p id="canvas-revert-confirm-title">
+              You have {stageSnapshot.history.ops.length} unsaved{" "}
+              {stageSnapshot.history.ops.length === 1 ? "change" : "changes"}.
+              Revert discards{" "}
+              {stageSnapshot.history.ops.length === 1 ? "it" : "them"} and restores
+              v{pendingRevert.ordinal}. Continue?
+            </p>
+            <div className="creview__composer-actions">
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={busy}
+                onClick={(): void => setPendingRevert(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger btn--sm"
+                disabled={busy}
+                onClick={(): void => {
+                  const target = pendingRevert.creativeId;
+                  setPendingRevert(null);
+                  void revert(target);
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
         <VersionRail
           versions={versions.versions}
           currentId={currentId}
-          onRevert={(toCreativeId): void => void revert(toCreativeId)}
+          onRevert={requestRevert}
           reverting={reverting}
         />
       </aside>

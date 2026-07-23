@@ -9,12 +9,17 @@ export interface VersionRailProps {
   versions: ApiCreativeVersionInfo[];
   /** The creative currently on the stage — its row is tagged and not revertable. */
   currentId: string;
-  onRevert: (toCreativeId: string) => void;
+  onRevert: (toCreativeId: string, ordinal: number) => void;
   /** True while a revert is in flight — all revert buttons disable together. */
   reverting: boolean;
 }
 
 const THUMB_SIZE = 44;
+
+interface OrderedVersion {
+  version: ApiCreativeVersionInfo;
+  ordinal: number;
+}
 
 function formatWhen(iso: string): string {
   const d = new Date(iso);
@@ -26,6 +31,27 @@ function formatWhen(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function orderVersions(
+  versions: readonly ApiCreativeVersionInfo[],
+): OrderedVersion[] {
+  const oldestFirst = [...versions].sort((left, right) => {
+    const leftTime = Date.parse(left.created_at);
+    const rightTime = Date.parse(right.created_at);
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
+      const byTime = leftTime - rightTime;
+      if (byTime !== 0) return byTime;
+    } else if (Number.isFinite(leftTime)) {
+      return -1;
+    } else if (Number.isFinite(rightTime)) {
+      return 1;
+    }
+    return left.creative_id.localeCompare(right.creative_id);
+  });
+  return oldestFirst
+    .map((version, index) => ({ version, ordinal: index + 1 }))
+    .reverse();
 }
 
 /** Preview thumb via the same-origin proxy (cookies stay httpOnly, bearer added server-side). */
@@ -67,10 +93,9 @@ function VersionThumb({ version }: { version: ApiCreativeVersionInfo }): JSX.Ele
 }
 
 /**
- * The persisted version history rail (B-09): newest-first rows of version number,
- * note, author role, timestamp, and a preview thumb — with a Revert action on
- * every version that isn't the current head. Replaces ReviewPanel v1's in-memory
- * `history[]` with the server's GET /creatives/{id}/versions record.
+ * The persisted version history rail (B-09): newest-first rows with a stable
+ * oldest-to-newest ordinal, timestamp, stored version metadata, note, author,
+ * and a preview thumb — with Revert on every version that isn't the current head.
  */
 export function VersionRail({
   versions,
@@ -78,7 +103,7 @@ export function VersionRail({
   onRevert,
   reverting,
 }: VersionRailProps): JSX.Element {
-  const ordered = [...versions].sort((a, b) => b.version - a.version);
+  const ordered = orderVersions(versions);
 
   return (
     <div className="creview__section" aria-label="Version history">
@@ -92,7 +117,7 @@ export function VersionRail({
         </p>
       ) : (
         <ul className="creview__thread">
-          {ordered.map((version) => {
+          {ordered.map(({ version, ordinal }) => {
             const isCurrent = version.creative_id === currentId;
             return (
               <li key={version.creative_id} className="creview__event">
@@ -107,27 +132,32 @@ export function VersionRail({
                   }}
                 >
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                    <span className="creview__event-who">v{version.version}</span>
+                    <span className="creview__event-who">
+                      Version {ordinal} ·{" "}
+                      <time dateTime={version.created_at}>
+                        {formatWhen(version.created_at)}
+                      </time>
+                    </span>
                     {isCurrent && (
                       <span className="creview__vchip-latest">current</span>
                     )}
+                  </span>
+                  <span className="creview__event-text">
+                    Stored v{version.version}
                     {version.created_by !== null && (
-                      <span className="creview__event-text">
-                        {version.created_by.name ?? version.created_by.role}
-                      </span>
+                      <> · {version.created_by.name ?? version.created_by.role}</>
                     )}
                   </span>
                   {version.note !== null && version.note !== "" && (
                     <span className="creview__event-note">{version.note}</span>
                   )}
-                  <time className="creview__event-time">{formatWhen(version.created_at)}</time>
                 </span>
                 {!isCurrent && (
                   <button
                     type="button"
                     className="btn btn--ghost btn--sm"
                     disabled={reverting}
-                    onClick={(): void => onRevert(version.creative_id)}
+                    onClick={(): void => onRevert(version.creative_id, ordinal)}
                   >
                     Revert
                   </button>

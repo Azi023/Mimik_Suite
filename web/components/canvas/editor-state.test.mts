@@ -3,11 +3,16 @@ import assert from "node:assert/strict";
 import {
   appendOp,
   applyState,
+  canRedo,
+  canUndo,
   dirtyLayerIds,
   fold,
   layerTransformAttr,
+  redo,
+  removeOp,
   toCanvasRevision,
   transformedBBox,
+  undo,
   type DocOp,
   type EditHistory,
   type EditorBaseState,
@@ -144,6 +149,68 @@ test("appendOp pushes one discrete op and clears redo", (): void => {
   assert.deepEqual(next.ops, [...history.ops, nextOp]);
   assert.deepEqual(next.redo, []);
   assert.notEqual(next, history);
+});
+
+test("undo moves the newest applied op onto the redo stack", (): void => {
+  const first = op({ id: "first", text: "First" });
+  const second = op({ id: "second", text: "Second" });
+  const history: EditHistory = {
+    ops: [first, second],
+    redo: [op({ id: "older-redo" })],
+  };
+
+  const next = undo(history);
+
+  assert.deepEqual(next.ops, [first]);
+  assert.deepEqual(next.redo, [...history.redo, second]);
+  assert.deepEqual(history.ops, [first, second]);
+});
+
+test("redo restores the newest redo op to the applied stack", (): void => {
+  const applied = op({ id: "applied" });
+  const olderRedo = op({ id: "older-redo", text: "Older" });
+  const newestRedo = op({ id: "newest-redo", text: "Newest" });
+  const history: EditHistory = {
+    ops: [applied],
+    redo: [olderRedo, newestRedo],
+  };
+
+  const next = redo(history);
+
+  assert.deepEqual(next.ops, [applied, newestRedo]);
+  assert.deepEqual(next.redo, [olderRedo]);
+  assert.deepEqual(history.redo, [olderRedo, newestRedo]);
+});
+
+test("canUndo and canRedo reflect their respective stacks", (): void => {
+  assert.equal(canUndo(EMPTY_HISTORY), false);
+  assert.equal(canRedo(EMPTY_HISTORY), false);
+  assert.equal(canUndo({ ops: [op({ id: "applied" })], redo: [] }), true);
+  assert.equal(canRedo({ ops: [], redo: [op({ id: "redo" })] }), true);
+});
+
+test("removeOp removes only the requested applied op and preserves redo", (): void => {
+  const first = op({ id: "first", text: "First" });
+  const removed = op({
+    id: "remove-me",
+    layer: "layer-panel",
+    kind: "visible",
+    text: undefined,
+    visible: false,
+    label: "Hide Panel",
+  });
+  const last = op({ id: "last", text: "Last" });
+  const redoStack = [op({ id: "redo" })];
+  const history: EditHistory = {
+    ops: [first, removed, last],
+    redo: redoStack,
+  };
+
+  const next = removeOp(history, removed.id);
+
+  assert.deepEqual(next.ops, [first, last]);
+  assert.equal(next.redo, redoStack);
+  assert.deepEqual(history.ops, [first, removed, last]);
 });
 
 test("toCanvasRevision emits text plus one full folded layer op per touched layer", (): void => {

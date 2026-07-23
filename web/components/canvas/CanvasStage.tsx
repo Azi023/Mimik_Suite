@@ -3,12 +3,15 @@
 import {
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type JSX,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type Ref,
 } from "react";
 import type { ApiColorRole } from "@/lib/api";
 import {
@@ -23,10 +26,15 @@ import {
   TEXT_TARGET,
   appendOp,
   applyState,
+  canRedo,
+  canUndo,
   createEditorBaseState,
   fold,
+  redo as redoHistory,
+  removeOp as removeHistoryOp,
   toCanvasRevision,
   transformedBBox,
+  undo as undoHistory,
   type BaseLayerCapture,
   type DocOp,
   type EditHistory,
@@ -44,6 +52,24 @@ export interface CanvasStageProps {
   brandColors: ApiColorRole[];
   /** Fired with the single folded pending revision on every committed change. */
   onChange: (revision: ApiCanvasRevision) => void;
+  /** Surfaces the ordered canonical history and reactive undo/redo availability. */
+  onHistoryChange?: (snapshot: CanvasStageSnapshot) => void;
+  /** Small imperative bridge for toolbar actions while history stays stage-owned. */
+  controlsRef?: Ref<CanvasStageHandle>;
+}
+
+export interface CanvasStageSnapshot {
+  history: EditHistory;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export interface CanvasStageHandle {
+  undo: () => void;
+  redo: () => void;
+  removeOp: (operationId: string) => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 }
 
 interface ViewBox {
@@ -226,6 +252,17 @@ function sameOperationIds(left: readonly DocOp[], right: readonly DocOp[]): bool
   );
 }
 
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select" ||
+    target.isContentEditable
+  );
+}
+
 function textAlignForAnchor(
   anchor: string,
 ): "center" | "left" | "right" {
@@ -268,6 +305,8 @@ export function CanvasStage({
   svg,
   brandColors,
   onChange,
+  onHistoryChange,
+  controlsRef,
 }: CanvasStageProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -277,6 +316,8 @@ export function CanvasStage({
   const editingRef = useRef<TextEditing | null>(null);
   const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeDragOpIdRef = useRef<string | null>(null);
+  const draggingLayerRef = useRef<CanvasLayerId | null>(null);
+  const showingOriginalRef = useRef(false);
   const operationCounterRef = useRef(0);
   const brandColorsRef = useRef<readonly ApiColorRole[]>(brandColors);
 
@@ -284,6 +325,7 @@ export function CanvasStage({
   const [stageWidth, setStageWidth] = useState(0);
   const [baseVersion, setBaseVersion] = useState(0);
   const [history, setHistory] = useState<EditHistory>(EMPTY_HISTORY);
+  const [showingOriginal, setShowingOriginal] = useState(false);
   const [selectedId, setSelectedId] = useState<CanvasLayerId | null>(null);
   const [hoveredId, setHoveredId] = useState<CanvasLayerId | null>(null);
   const [editing, setEditing] = useState<TextEditing | null>(null);
@@ -310,6 +352,89 @@ export function CanvasStage({
   foldedRef.current = folded;
   editingRef.current = editing;
   brandColorsRef.current = brandColors;
+
+  const setCanonicalHistory = useCallback((next: EditHistory): void => {
+    historyRef.current = next;
+    setHistory(next);
+  }, []);
+
+  const applyFoldedToHost = useCallback((nextFolded: FoldedState): void => {
+    const host = hostRef.current;
+    const base = baseRef.current;
+    if (host === null || base === null) return;
+    const result = applyState(host, base, nextFolded);
+    setOverflow(result.overflow);
+  }, []);
+
+  const restoreOriginalPreview = useCallback((): void => {
+    if (!showingOriginalRef.current) return;
+    showingOriginalRef.current = false;
+    setShowingOriginal(false);
+    applyFoldedToHost(foldedRef.current);
+  }, [applyFoldedToHost]);
+
+  const showOriginalPreview = useCallback((): boolean => {
+    if (
+      showingOriginalRef.current ||
+      editingRef.current !== null ||
+      draggingLayerRef.current !== null
+    ) {
+      return false;
+    }
+    showingOriginalRef.current = true;
+    setShowingOriginal(true);
+    applyFoldedToHost(fold([]));
+    return true;
+  }, [applyFoldedToHost]);
+
+  const transitionHistory = useCallback(
+    (transition: (current: EditHistory) => EditHistory): void => {
+      if (
+        editingRef.current !== null ||
+        draggingLayerRef.current !== null
+      ) {
+        return;
+      }
+      restoreOriginalPreview();
+      const current = historyRef.current;
+      const next = transition(current);
+      if (next === current) return;
+      setCanonicalHistory(next);
+    },
+    [restoreOriginalPreview, setCanonicalHistory],
+  );
+
+  const performUndo = useCallback((): void => {
+    transitionHistory(undoHistory);
+  }, [transitionHistory]);
+
+  const performRedo = useCallback((): void => {
+    transitionHistory(redoHistory);
+  }, [transitionHistory]);
+
+  const performRemoveOp = useCallback(
+    (operationId: string): void => {
+      transitionHistory((current) => {
+        if (!current.ops.some((operation) => operation.id === operationId)) {
+          return current;
+        }
+        return removeHistoryOp(current, operationId);
+      });
+    },
+    [transitionHistory],
+  );
+
+  useImperativeHandle(
+    controlsRef,
+    (): CanvasStageHandle => ({
+      undo: performUndo,
+      redo: performRedo,
+      removeOp: performRemoveOp,
+      canUndo: (): boolean => canUndo(historyRef.current),
+      canRedo: (): boolean => canRedo(historyRef.current),
+    }),
+    [performRedo, performRemoveOp, performUndo],
+  );
 
   const nextOperationId = useCallback((): string => {
     operationCounterRef.current += 1;
@@ -354,10 +479,9 @@ export function CanvasStage({
             item.id === operationId ? operation : item,
           ),
         };
-      historyRef.current = next;
-      setHistory(next);
+      setCanonicalHistory(next);
     },
-    [nextOperationId],
+    [nextOperationId, setCanonicalHistory],
   );
 
   const { draggingLayer, beginMove, beginScale } = useLayerDrag({
@@ -372,6 +496,7 @@ export function CanvasStage({
       activeDragOpIdRef.current = null;
     },
   });
+  draggingLayerRef.current = draggingLayer;
 
   const layerBox = useCallback(
     (layer: CanvasLayerInfo): LayerBBox | null =>
@@ -450,7 +575,11 @@ export function CanvasStage({
     const host = hostRef.current;
     const base = baseRef.current;
     if (host === null || base === null || parsed === null) return;
-    const result = applyState(host, base, folded);
+    const result = applyState(
+      host,
+      base,
+      showingOriginalRef.current ? fold([]) : folded,
+    );
     setOverflow(result.overflow);
   }, [baseVersion, folded, parsed]);
 
@@ -471,11 +600,26 @@ export function CanvasStage({
     onChangeRef.current = onChange;
   }, [onChange]);
 
+  const onHistoryChangeRef = useRef(onHistoryChange);
+  useEffect(() => {
+    onHistoryChangeRef.current = onHistoryChange;
+  }, [onHistoryChange]);
+
+  useEffect(() => {
+    onHistoryChangeRef.current?.({
+      history: {
+        ops: [...history.ops],
+        redo: [...history.redo],
+      },
+      canUndo: canUndo(history),
+      canRedo: canRedo(history),
+    });
+  }, [history]);
+
   // Draft text and active drags already render canonically, but parent payload
   // emission waits for their transaction boundary to avoid 60fps shell churn.
   useEffect(() => {
     if (
-      history.ops.length === 0 ||
       editing !== null ||
       draggingLayer !== null
     ) {
@@ -494,8 +638,7 @@ export function CanvasStage({
 
   function addOperation(operation: DocOp): void {
     const next = appendOp(historyRef.current, operation);
-    historyRef.current = next;
-    setHistory(next);
+    setCanonicalHistory(next);
   }
 
   function removeTextDraft(
@@ -542,8 +685,7 @@ export function CanvasStage({
 
   function applyTextDraft(current: TextEditing): EditHistory {
     const next = historyWithTextDraft(historyRef.current, current);
-    historyRef.current = next;
-    setHistory(next);
+    setCanonicalHistory(next);
     return next;
   }
 
@@ -582,8 +724,7 @@ export function CanvasStage({
       textPreviewTimerRef.current = null;
     }
     const next = removeTextDraft(historyRef.current, current);
-    historyRef.current = next;
-    setHistory(next);
+    setCanonicalHistory(next);
     editingRef.current = null;
     setEditing(null);
   }
@@ -641,6 +782,59 @@ export function CanvasStage({
       event.preventDefault();
       commitTextEdit();
     }
+  }
+
+  function handleEditorKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void {
+    if (
+      event.defaultPrevented ||
+      isTextEntryTarget(event.target) ||
+      (!event.metaKey && !event.ctrlKey)
+    ) {
+      return;
+    }
+    const key = event.key.toLowerCase();
+    const wantsUndo = key === "z" && !event.shiftKey;
+    const wantsRedo = (key === "z" && event.shiftKey) || key === "y";
+    if (!wantsUndo && !wantsRedo) return;
+    event.preventDefault();
+    if (wantsRedo) performRedo();
+    else performUndo();
+  }
+
+  function handleBeforePointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (!showOriginalPreview()) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleBeforePointerEnd(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    restoreOriginalPreview();
+  }
+
+  function handleBeforeKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+  ): void {
+    if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+      event.preventDefault();
+      showOriginalPreview();
+    }
+  }
+
+  function handleBeforeKeyUp(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+  ): void {
+    if (event.key !== " " && event.key !== "Enter") return;
+    event.preventDefault();
+    restoreOriginalPreview();
   }
 
   function toggleVisible(id: CanvasLayerId): void {
@@ -758,7 +952,12 @@ export function CanvasStage({
   );
 
   return (
-    <div className="creview__stage" aria-label="Creative canvas">
+    <div
+      className="creview__stage"
+      aria-label="Creative canvas"
+      tabIndex={0}
+      onKeyDown={handleEditorKeyDown}
+    >
       <div className="creview__stage-head">
         <span className="creview__meta">Canvas</span>
         <span className="creview__meta creview__meta--muted">
@@ -771,12 +970,33 @@ export function CanvasStage({
         <span className="creview__meta creview__meta--muted">
           {history.ops.length} pending
         </span>
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm creview__compare"
+          aria-pressed={showingOriginal}
+          title="Hold to show the original creative"
+          disabled={editing !== null || draggingLayer !== null}
+          onPointerDown={handleBeforePointerDown}
+          onPointerUp={handleBeforePointerEnd}
+          onPointerCancel={handleBeforePointerEnd}
+          onLostPointerCapture={restoreOriginalPreview}
+          onKeyDown={handleBeforeKeyDown}
+          onKeyUp={handleBeforeKeyUp}
+          onBlur={restoreOriginalPreview}
+        >
+          Before/After
+        </button>
         <span className="creview__hint">
           Click a layer · drag to move · double-click text to edit
         </span>
       </div>
 
       <div className="creview__canvas-wrap">
+        {showingOriginal && (
+          <span className="creview__original-badge" role="status">
+            Showing original
+          </span>
+        )}
         <div
           className="creview__canvas creview__canvas--locked"
           style={{

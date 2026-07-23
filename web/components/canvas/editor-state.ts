@@ -117,6 +117,39 @@ export function appendOp(history: EditHistory, operation: DocOp): EditHistory {
   return { ops: [...history.ops, operation], redo: [] };
 }
 
+export function undo(history: EditHistory): EditHistory {
+  const operation = history.ops.at(-1);
+  if (operation === undefined) return history;
+  return {
+    ops: history.ops.slice(0, -1),
+    redo: [...history.redo, operation],
+  };
+}
+
+export function redo(history: EditHistory): EditHistory {
+  const operation = history.redo.at(-1);
+  if (operation === undefined) return history;
+  return {
+    ops: [...history.ops, operation],
+    redo: history.redo.slice(0, -1),
+  };
+}
+
+export function canUndo(history: EditHistory): boolean {
+  return history.ops.length > 0;
+}
+
+export function canRedo(history: EditHistory): boolean {
+  return history.redo.length > 0;
+}
+
+export function removeOp(history: EditHistory, operationId: string): EditHistory {
+  return {
+    ops: history.ops.filter((operation) => operation.id !== operationId),
+    redo: history.redo,
+  };
+}
+
 export function fold(ops: readonly DocOp[]): FoldedState {
   const folded: FoldedState = {
     text: {},
