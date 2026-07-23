@@ -4,7 +4,46 @@
 
 ---
 
-## ► LATEST (2026-07-23 pm) — W4 CANVAS PROGRAM: B-11 · B-08 · B-09 · B-13 LANDED (client-bounds + editor + flywheel)
+## ► LATEST (2026-07-23 pm2) — W4 A-03/A-04/A-06 + FRONTEND REMEDIATION (canvas actually works now)
+
+**State:** Operator tested the local product and reported the FRONTEND felt broken (canvas not clickable,
+dead nav buttons, /creatives 404, hydration error). Ran a full-app QA audit + fixed. **Backend is solid**
+(500 tests green, endpoints live-verified). The gap was frontend wiring. All fixed + committed. Local runs;
+API restarted (pid varies); **deploy still HELD** (and should stay held until operator does a full click-through).
+
+### ▶ WHAT LANDED (this half-session, all committed to main)
+- **A-03 (`4a5951e`)** generation queue + crash-safe async worker (see prior entry detail) — LIVE: enqueue→
+  worker→INTERNAL_REVIEW drained end-to-end over HTTP.
+- **A-04 (`b21c01c`)** /ops/queue + /ops/queue/stats + POST /ops/queue + /ops/usage (team-gated, tenant-scoped,
+  client→403). LIVE: /ops/usage → 29 renders grouped by source/profile.
+- **A-06 (`c5e9508`)** board live drag-transitions (snap-back on 409, at-risk dot, generating-since).
+- **CANVAS FIX (`e4265d3` + `3169760`) — THE key user issue.** The editor was dead because CanvasStage
+  required `data-editable`/`data-bbox` attrs that OLD creatives' SVGs lack (18/30 on disk). Fix: (1) hit-rect
+  overlay per layer for select/drag/dblclick over the full bbox; (2) measure each layer's real geometry from
+  the live DOM via `getBBox()` (select by `data-layer` alone). **Playwright-verified** all 6 layers return
+  real boxes. Frame made fluid. Canvas now works on any creative.
+- **FRONTEND WIRING (`6ddef91`)** from the QA audit: TopBar Invite→/members; Board col-menu + ReviewPanel
+  Reassign honestly-disabled; NEW /creatives gallery + /clients index + app/not-found.tsx; Sidebar
+  creatives/clients glyphs routed; hydration fixed (<body suppressHydrationWarning, Board Date.now→effect,
+  en-GB locales); touch targets ≥44px. tsc+lint clean.
+- **GET /creatives (`c95e906`)** tenant-wide latest-per-job list powering the gallery. LIVE: 16 items.
+
+### ▶ AUDIT VERDICT (docs/ — the multi-persona-qa-reviewer report)
+App is MORE wired than it felt — damage was a concentrated set of dead placeholder controls + missing index
+routes + 3 hydration bugs, all now fixed. Deferred follow-ups (noted, not P0): board touch-DnD fallback
+(HTML5 DnD is desktop-only), `.kanban--pipeline`/`.kanban` CSS-class rename, keyboard shortcuts, RSC
+preview-404 graceful thumb fallback.
+
+### ▶ EXACT NEXT ACTION — remaining W4 (paused for the frontend fix)
+Backend: **A-05** (command parser + POST /ops/command:parse+:execute, ⌘K backend, command_center.py — on
+ops.py). Frontend (web/lib/api.ts single-writer, sequential): **A-07** calendar+SLA · **A-08** queue/budget
+panel (backend A-04 ready) · **A-09** ⌘K bar (needs A-05) · **A-11** deliveries · **B-12** portal bounded
+editor + BC-shim removal (B-11 done). Gates: A-12, B-14. Then the deferred audit follow-ups.
+RECOMMEND: operator does a full click-through of the fixed frontend FIRST (esp. the canvas) before more features.
+
+---
+
+## ► (2026-07-23 pm) — W4 CANVAS PROGRAM: B-11 · B-08 · B-09 · B-13 LANDED (client-bounds + editor + flywheel)
 
 **State:** Opus-orchestrated W4 running two parallel tracks (Codex backend ∥ Fable frontend, disjoint file
 scopes). Four tasks this session, all reviewed + live-verified on the :5434 DB + committed. Local product runs
