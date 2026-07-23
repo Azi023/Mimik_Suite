@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import {
   ApiError,
   type ApiGeneratedCreative,
+  type ApiJob,
+  type ApiJobStatus,
   type ApiVersionHistory,
   type ReviseCreativeBody,
   fetchCreativeSvg,
@@ -11,6 +13,7 @@ import {
   listCreativeVersions,
   reviseCreative,
   revertCreative,
+  transitionJob,
 } from "@/lib/api";
 import { toReviewDoc } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
@@ -130,6 +133,51 @@ export async function reviseCreativeCanvasAction(
     return bundle;
   } catch (error) {
     return { ok: false, error: canvasErrorMessage(error, "revise") };
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Board transitions (A-06) — drag-and-drop moves run server-side so the browser
+   never receives the httpOnly Supabase bearer (same model as the actions above).
+--------------------------------------------------------------------------- */
+
+export type TransitionJobActionResult =
+  | { ok: true; job: ApiJob }
+  | { ok: false; error: string; status?: number };
+
+/**
+ * POST /ops/jobs/{id}/transition with the bearer resolved server-side. A 409 (illegal
+ * transition) returns the API's own `detail` plus `status` so the board can snap the
+ * card back and surface the reason; other failures return a canned message.
+ */
+export async function transitionJobAction(
+  jobId: string,
+  toStatus: ApiJobStatus,
+  note?: string,
+): Promise<TransitionJobActionResult> {
+  const bearer = await resolveCanvasBearer();
+  if (bearer === null) {
+    return { ok: false, error: "Your session has expired. Sign in again." };
+  }
+  try {
+    const result = await transitionJob(jobId, toStatus, note, bearer);
+    revalidatePath("/");
+    return { ok: true, job: result.job };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 409) {
+        // The server's detail names the rejected move, e.g. "Illegal transition archived -> draft".
+        return { ok: false, error: error.message, status: 409 };
+      }
+      if (error.status === 403) {
+        return { ok: false, error: "You don't have permission to move this job.", status: 403 };
+      }
+      if (error.status === 404) {
+        return { ok: false, error: "Job not found. It may belong to another workspace.", status: 404 };
+      }
+      return { ok: false, error: "Could not move the job. Try again.", status: error.status };
+    }
+    return { ok: false, error: "Could not move the job. Try again." };
   }
 }
 

@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { BoardView } from "@/components/BoardView";
+import { fetchBoard, isApiConfigured, type ApiBoardResponse } from "@/lib/api";
 import { getBoardData, getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
 import { redirectClientToPortal } from "@/lib/guard";
@@ -26,6 +27,22 @@ function devFallbackAllowed(): boolean {
   return isDev && hasDevToken;
 }
 
+/**
+ * GET /ops/board server-side (RSC), same failure posture as `lib/data`: an unconfigured
+ * API or a failed request returns null so the board renders a truthful empty state.
+ */
+async function loadBoard(bearer: string | undefined): Promise<ApiBoardResponse | null> {
+  if (!isApiConfigured(bearer)) {
+    return null;
+  }
+  try {
+    return await fetchBoard(bearer);
+  } catch (error) {
+    console.warn(`[mimik-web] Board request failed; rendering an empty board (${String(error)})`);
+    return null;
+  }
+}
+
 /** Board view — the default dashboard screen, gated behind a Supabase session.
  *
  * Auth gate: read the server-side session token. When there is no session AND the
@@ -45,9 +62,10 @@ export default async function BoardPage(): Promise<JSX.Element> {
   // session but the fallback is allowed.
   const bearer = sessionToken ?? undefined;
   await redirectClientToPortal(sessionToken);
-  const [{ pillars, jobs, reviewDoc }, sidebar] = await Promise.all([
+  const [{ pillars, jobs, reviewDoc }, sidebar, board] = await Promise.all([
     getBoardData(bearer),
     getSidebarData(bearer),
+    loadBoard(bearer),
   ]);
 
   return (
@@ -55,6 +73,7 @@ export default async function BoardPage(): Promise<JSX.Element> {
       <BoardView
         pillars={pillars}
         jobs={jobs}
+        board={board}
         reviewDoc={reviewDoc}
         clients={sidebar.groups.flatMap((group) =>
           group.projects.map((project) => ({ id: project.id, name: project.name })),

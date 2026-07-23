@@ -1,4 +1,4 @@
-import type { JSX, KeyboardEvent } from "react";
+import type { DragEvent, JSX, KeyboardEvent } from "react";
 import { FORMAT_TONE, PILLAR_TONE, type Job } from "@/lib/view-models";
 import { CheckIcon, ClipIcon, ClockIcon, CommentIcon } from "./icons";
 
@@ -8,15 +8,33 @@ interface JobRowProps {
   selected: boolean;
   /** Fired on click / Enter / Space — selects this job into the review panel. */
   onSelect: (job: Job) => void;
+  /** Enables HTML5 drag between board columns (grab-cursor affordance). */
+  draggable?: boolean;
+  /** True while this card is the drag source — dims it in place. */
+  dragging?: boolean;
+  /** Preformatted "generating since" hint (e.g. "4m ago") shown on the generating badge. */
+  generatingSince?: string;
+  onDragStart?: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd?: (event: DragEvent<HTMLElement>) => void;
 }
 
 /**
  * A kanban card: colored format/pillar tags, title, circular-checkbox
  * checklist, SLA line, and a footer with the avatar stack + comment /
  * attachment counts — mirroring the reference card anatomy. The whole card is
- * a button (role + keyboard) that selects the job into the review panel.
+ * a button (role + keyboard) that selects the job into the review panel, and —
+ * when `draggable` — an HTML5 drag source for board column transitions.
  */
-export function JobRow({ job, selected, onSelect }: JobRowProps): JSX.Element {
+export function JobRow({
+  job,
+  selected,
+  onSelect,
+  draggable,
+  dragging,
+  generatingSince,
+  onDragStart,
+  onDragEnd,
+}: JobRowProps): JSX.Element {
   const pillarTone = PILLAR_TONE[job.pillar] ?? "gray";
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>): void {
@@ -26,16 +44,25 @@ export function JobRow({ job, selected, onSelect }: JobRowProps): JSX.Element {
     }
   }
 
+  const className =
+    "job-card" +
+    (selected ? " job-card--selected" : "") +
+    (draggable === true ? " job-card--draggable" : "") +
+    (dragging === true ? " job-card--dragging" : "");
+
   return (
     <article
-      className={`job-card${selected ? " job-card--selected" : ""}`}
+      className={className}
       data-animate="card"
       role="button"
       tabIndex={0}
       aria-pressed={selected}
       aria-label={`Review ${job.title}`}
+      draggable={draggable === true}
       onClick={(): void => onSelect(job)}
       onKeyDown={handleKeyDown}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
     >
       <div className="job-card__tags">
         <span className={`tag tag--${FORMAT_TONE[job.format]}`}>{job.format}</span>
@@ -43,7 +70,7 @@ export function JobRow({ job, selected, onSelect }: JobRowProps): JSX.Element {
         {job.generating === true && (
           <span className="job-badge job-badge--generating">
             <span className="job-badge__pulse" aria-hidden="true" />
-            Generating
+            {generatingSince !== undefined ? `Generating · ${generatingSince}` : "Generating"}
           </span>
         )}
         {job.atRisk === true && job.generating !== true && (

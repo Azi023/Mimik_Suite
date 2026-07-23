@@ -174,6 +174,8 @@ export interface ApiJob {
   approval_lead_days: number;
   assignee: string | null;
   status: ApiJobStatus;
+  /** ISO datetime stamped while the job sits in GENERATING; null otherwise. */
+  generation_started_at: string | null;
 }
 
 /** mimik_contracts.pillars.ContentPillar */
@@ -449,6 +451,20 @@ async function apiGet<T>(path: string, sessionToken?: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * Prefer the API's JSON `detail` message (the FastAPI error convention) over a generic
+ * status line, so callers can surface the server's own reason (e.g. a 409's
+ * "Illegal transition ..."). Non-JSON bodies fall back to the generic message.
+ */
+async function errorDetail(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    return typeof body.detail === "string" && body.detail !== "" ? body.detail : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function apiPost<T>(
   path: string,
   body: unknown,
@@ -472,7 +488,10 @@ async function apiPost<T>(
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
-    throw new ApiError(response.status, `POST ${path} -> ${response.status}`);
+    throw new ApiError(
+      response.status,
+      await errorDetail(response, `POST ${path} -> ${response.status}`),
+    );
   }
   return (await response.json()) as T;
 }
@@ -746,6 +765,25 @@ export function createCreativeVersion(
 /** GET /ops/board — jobs grouped by status with computed at-risk flags. */
 export function fetchBoard(sessionToken?: string): Promise<ApiBoardResponse> {
   return apiGet<ApiBoardResponse>("/ops/board", sessionToken);
+}
+
+/**
+ * POST /ops/jobs/{id}/transition — move a board card to another pipeline column.
+ * Team roles only (403 for a client principal). An illegal move 409s with the API's
+ * `detail`; a →approved move runs the shared approval/auto-archive path server-side,
+ * so the returned job may land in APPROVED or ARCHIVED — re-fetch the board after.
+ */
+export function transitionJob(
+  jobId: string,
+  toStatus: ApiJobStatus,
+  note?: string,
+  sessionToken?: string,
+): Promise<{ job: ApiJob }> {
+  return apiPost<{ job: ApiJob }>(
+    `/ops/jobs/${encodeURIComponent(jobId)}/transition`,
+    { to_status: toStatus, ...(note !== undefined && note !== "" ? { note } : {}) },
+    sessionToken,
+  );
 }
 
 /**

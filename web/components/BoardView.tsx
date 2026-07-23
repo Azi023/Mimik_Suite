@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition, type FormEvent, type JSX } from "react";
 import { useRouter } from "next/navigation";
 import { generateCreativeAction } from "@/app/actions";
+import type { ApiBoardResponse } from "@/lib/api";
 import type { CreativeDoc, Job, Pillar } from "@/lib/view-models";
 import { Board } from "./Board";
 import { ALL_PILLARS, PillarChips } from "./PillarChips";
@@ -11,6 +12,11 @@ import { ReviewPanel } from "./ReviewPanel";
 interface BoardViewProps {
   pillars: Pillar[];
   jobs: Job[];
+  /**
+   * The live GET /ops/board response, fetched server-side (app/page.tsx). Null means
+   * the API is unconfigured or the request failed — the board renders its empty state.
+   */
+  board: ApiBoardResponse | null;
   /**
    * The server-resolved creative for the default-selected job. Null means the API
    * returned no creative or the request failed.
@@ -29,6 +35,7 @@ interface BoardViewProps {
 export function BoardView({
   pillars,
   jobs,
+  board,
   reviewDoc,
   clients,
   initialClientId,
@@ -56,6 +63,13 @@ export function BoardView({
     if (activePillarLabel === null) return jobs;
     return jobs.filter((job) => job.pillar === activePillarLabel);
   }, [jobs, activePillarLabel]);
+
+  // Empty is decided by the server board, not the flattened job list — real empty
+  // columns still render as a (truthful) empty pipeline when any card exists.
+  const boardHasCards = useMemo<boolean>(() => {
+    if (board === null) return false;
+    return Object.values(board.columns).some((cards) => cards.length > 0);
+  }, [board]);
 
   // Never synthesize a creative for a selected job. If the server-resolved creative
   // does not belong to it, the review area renders its real empty state.
@@ -152,17 +166,18 @@ export function BoardView({
 
         <section aria-label="This week's approvals">
           <h2 className="visually-hidden">This week · approvals</h2>
-          {jobs.length === 0 ? (
-            <div className="empty-state">
-              <p className="empty-state__title">No jobs yet</p>
-              <p className="empty-state__body">Jobs will appear here when they are created.</p>
-            </div>
-          ) : (
+          {board !== null && boardHasCards ? (
             <Board
+              board={board}
               jobs={visibleJobs}
               selectedJobId={selectedJobId}
               onSelectJob={handleSelectJob}
             />
+          ) : (
+            <div className="empty-state">
+              <p className="empty-state__title">No jobs yet</p>
+              <p className="empty-state__body">Jobs will appear here when they are created.</p>
+            </div>
           )}
         </section>
       </div>
