@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.db import repo
 from api.db.mappers import to_approval, to_delivery, to_job, to_task
 from api.db.models import CreativeDocRow, JobRow
+from api.services.edit_signals import feedback_from_edit, record_signal
 from creative.archive import ArchiveBackend, get_archive_backend, safe_segment
 from creative.assemble import assemble_context
 from mimik_contracts import (
@@ -29,6 +30,7 @@ from mimik_contracts import (
     ApprovalAction,
     CreativeManifest,
     JobStatus,
+    LayerKind,
     NotificationChannel,
     PreferenceSource,
     RevisionTarget,
@@ -55,48 +57,11 @@ _TERMINAL_STATES = {
     JobStatus.ARCHIVED.value,
 }
 
+_record_signal = record_signal
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _creative_attributes(doc: CreativeDocRow) -> dict[str, str]:
-    """The salient attributes of a creative the taste-ranker scores against."""
-    manifest = doc.manifest or {}
-    attrs: dict[str, str] = {}
-    if manifest.get("template_key"):
-        attrs["template_key"] = str(manifest["template_key"])
-    if manifest.get("format_key"):
-        attrs["format_key"] = str(manifest["format_key"])
-    return attrs
-
-
-async def _record_signal(
-    session: AsyncSession,
-    *,
-    tenant_id: str,
-    job: JobRow,
-    doc: CreativeDocRow,
-    source: PreferenceSource,
-    actor: Actor,
-    reason_tag: str | None = None,
-    detail: str | None = None,
-    extra_attributes: dict[str, str] | None = None,
-) -> None:
-    """Capture a learning-loop signal, scoped to the job's client. Client-sourced signals
-    feed ONLY this client's profile — never the shared golden set (that path is human-gated)."""
-    await repo.create_preference_signal(
-        session,
-        tenant_id=tenant_id,
-        client_id=job.client_id,
-        source=source.value,
-        creative_doc_id=doc.id,
-        job_id=job.id,
-        reason_tag=reason_tag,
-        detail=detail,
-        attributes={**_creative_attributes(doc), **(extra_attributes or {})},
-        actor_role=actor.role.value,
-    )
 
 
 async def default_render(session: AsyncSession, tenant_id: str, doc: CreativeDocRow) -> bytes:
@@ -210,6 +175,7 @@ async def submit_approval(
         targets=[t.model_dump(mode="json") for t in targets] if targets else [],
     )
     result: dict = {"approval": to_approval(approval)}
+    approval_feedback: tuple[str, str | None] | None = None
 
     if action == ApprovalAction.APPROVE:
         job.status = JobStatus.APPROVED.value
@@ -231,7 +197,24 @@ async def submit_approval(
         await _record_signal(
             session, tenant_id=tenant_id, job=job, doc=doc,
             source=PreferenceSource.APPROVAL, actor=actor, detail=note,
+            extra_attributes={
+                "edited_by_client": (
+                    "true"
+                    if doc.created_by and doc.created_by.get("role") == "client"
+                    else "false"
+                )
+            },
         )
+        manifest = CreativeManifest.model_validate(doc.manifest)
+        image_layer = manifest.layer(LayerKind.L1_BASE)
+        if image_layer is not None:
+            last_ask = image_layer.recipe.params.get("last_ask")
+            profile_value = image_layer.recipe.params.get("style_profile_id")
+            if isinstance(last_ask, str) and last_ask.strip():
+                approval_feedback = (
+                    last_ask,
+                    str(profile_value) if profile_value else None,
+                )
     elif action == ApprovalAction.REQUEST_CHANGE:
         job.status = JobStatus.INTERNAL_REVIEW.value  # back to ops to action the change
         # Pin-pointed targets make the ops task actionable: each line says WHERE + WHAT,
@@ -297,4 +280,10 @@ async def submit_approval(
 
     result["job"] = to_job(job)
     await session.commit()
+    if approval_feedback is not None:
+        feedback_from_edit(
+            verdict="accept",
+            reason=approval_feedback[0],
+            profile_id=approval_feedback[1],
+        )
     return result

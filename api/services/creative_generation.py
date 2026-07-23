@@ -22,6 +22,7 @@ from api.core.config import get_settings
 from api.db import repo
 from api.db.mappers import to_brand, to_creative_doc
 from api.db.models import CreativeDocRow, JobRow
+from api.services.edit_signals import feedback_from_edit, record_signal
 from creative import art_direction
 from creative.adapters import (
     ImageGenerationFailed,
@@ -38,6 +39,7 @@ from creative.style_profile import ImageSource, StyleProfile, get_style_profile
 from creative.vision import text_region as vision_text_region
 from creative.revision.interpreter import interpret_ask
 from mimik_contracts import (
+    Actor,
     ActorRole,
     Brand,
     CanvasRevision,
@@ -49,6 +51,7 @@ from mimik_contracts import (
     LayerKind,
     LayerRecipe,
     PRESETS,
+    PreferenceSource,
 )
 
 
@@ -379,6 +382,46 @@ def _actor_dict(principal: Principal) -> dict[str, str]:
     }
 
 
+def _actor(principal: Principal) -> Actor:
+    return Actor(
+        id=principal.user_id or principal.tenant_id,
+        role=ActorRole(principal.role),
+    )
+
+
+async def _record_signal_best_effort(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    job: JobRow,
+    doc: CreativeDocRow,
+    source: PreferenceSource,
+    actor: Actor,
+    detail: str | None = None,
+    extra_attributes: dict[str, str] | None = None,
+) -> None:
+    """Capture a signal in the creative transaction without risking the new version."""
+    try:
+        async with session.begin_nested():
+            await record_signal(
+                session,
+                tenant_id=tenant_id,
+                job=job,
+                doc=doc,
+                source=source,
+                actor=actor,
+                detail=detail,
+                extra_attributes=extra_attributes,
+            )
+    except Exception as exc:
+        logger.warning(
+            "%s signal capture failed for creative %s: %s",
+            source.value,
+            doc.id,
+            exc,
+        )
+
+
 def _revision_note(revision: CanvasRevision) -> str | None:
     if revision.ask and revision.ask.instruction:
         return revision.ask.instruction
@@ -530,6 +573,10 @@ async def revise_creative(
             copy_block.status = "edited"
 
     l1_params.update(params)
+    if revision.ask and revision.ask.instruction:
+        l1_params["last_ask"] = revision.ask.instruction[:200]
+    else:
+        l1_params.pop("last_ask", None)
 
     # Resolve layer operations
     layer_overrides = l1_params.get("layer_overrides", {})
@@ -623,6 +670,24 @@ async def revise_creative(
             created_by=_actor_dict(principal),
             revision_note=_revision_note(revision),
         )
+        edit_attributes = {
+            "profile_id": str(l1_params.get("style_profile_id") or "generic"),
+            "edited_by_client": (
+                "true" if principal.role == ActorRole.CLIENT.value else "false"
+            ),
+        }
+        if revision.ask is not None:
+            edit_attributes["revision_zone"] = revision.ask.zone.value
+        await _record_signal_best_effort(
+            session,
+            tenant_id=principal.tenant_id,
+            job=job,
+            doc=new_row,
+            source=PreferenceSource.EDIT,
+            actor=_actor(principal),
+            detail=_revision_note(revision),
+            extra_attributes=edit_attributes,
+        )
         await session.commit()
     except Exception:
         await session.rollback()
@@ -667,6 +732,16 @@ async def revert_creative(
             status_code=422,
             detail="Creative versions must belong to the same job",
         )
+
+    current_manifest = CreativeManifest.model_validate(current_row.manifest)
+    current_image_layer = current_manifest.layer(LayerKind.L1_BASE)
+    current_params = (
+        current_image_layer.recipe.params
+        if current_image_layer is not None
+        else {}
+    )
+    current_last_ask = current_params.get("last_ask")
+    current_profile_value = current_params.get("style_profile_id")
 
     brand_row = await repo.get_brand(
         session,
@@ -716,12 +791,34 @@ async def revert_creative(
             created_by=_actor_dict(principal),
             revision_note=f"revert to v{target_row.version}",
         )
+        await _record_signal_best_effort(
+            session,
+            tenant_id=principal.tenant_id,
+            job=current_job,
+            doc=new_row,
+            source=PreferenceSource.REJECTION,
+            actor=_actor(principal),
+            detail=f"revert to v{target_row.version}",
+            extra_attributes={
+                "reverted_from_version": str(current_row.version),
+            },
+        )
         await session.commit()
     except Exception:
         await session.rollback()
         shutil.rmtree(artifact_dir, ignore_errors=True)
         raise
 
+    if isinstance(current_last_ask, str) and current_last_ask.strip():
+        feedback_from_edit(
+            verdict="decline",
+            reason=current_last_ask,
+            profile_id=(
+                str(current_profile_value)
+                if current_profile_value
+                else None
+            ),
+        )
     return generated_creative_response(to_creative_doc(new_row))
 
 async def generate_client_creative(
