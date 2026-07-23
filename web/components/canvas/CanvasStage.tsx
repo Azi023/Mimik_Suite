@@ -52,6 +52,20 @@ import { useLayerDrag, type ResizeHandle } from "./useLayerDrag";
 import { Inspector, type InspectorProps } from "./Inspector";
 import { ZoomControls } from "./ZoomControls";
 
+export type CanvasMark =
+  | {
+      kind: "region";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }
+  | {
+      kind: "pin";
+      x: number;
+      y: number;
+    };
+
 export interface CanvasStageProps {
   /** Raw SVG master text (B-09 fetches via fetchCreativeSvg and passes in). */
   svg: string;
@@ -65,7 +79,7 @@ export interface CanvasStageProps {
   controlsRef?: Ref<CanvasStageHandle>;
   askText?: string;
   onAskTextChange?: (text: string) => void;
-  onAddAsk?: (layerId: CanvasLayerId) => void;
+  onAddAsk?: (layerId: CanvasLayerId, mark?: CanvasMark) => void;
   busy?: boolean;
 }
 
@@ -122,6 +136,11 @@ interface TextEditing {
 interface PanPoint {
   x: number;
   y: number;
+}
+
+interface RegionMarkDrag {
+  pointerId: number;
+  start: PanPoint;
 }
 
 interface PanBounds {
@@ -418,6 +437,26 @@ function clampPan(point: PanPoint, bounds: PanBounds): PanPoint {
   };
 }
 
+function clampPointToViewBox(point: PanPoint, viewBox: ViewBox): PanPoint {
+  return {
+    x: Math.max(viewBox.x, Math.min(viewBox.x + viewBox.w, point.x)),
+    y: Math.max(viewBox.y, Math.min(viewBox.y + viewBox.h, point.y)),
+  };
+}
+
+function regionMarkBetween(
+  start: PanPoint,
+  end: PanPoint,
+): Extract<CanvasMark, { kind: "region" }> {
+  return {
+    kind: "region",
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    w: Math.abs(end.x - start.x),
+    h: Math.abs(end.y - start.y),
+  };
+}
+
 /**
  * Bounded inline-SVG editor. EditHistory is the only artwork state: the DOM,
  * overlay geometry, visibility gates, pending count, and API payload all read
@@ -451,11 +490,18 @@ export function CanvasStage({
   const wheelPanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomRef = useRef<number | "fit">("fit");
   const guideDragRef = useRef<GuideDrag | null>(null);
+  const regionMarkDragRef = useRef<RegionMarkDrag | null>(null);
 
   const [zoom, setZoom] = useState<number | "fit">("fit");
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPanToolActive, setIsPanToolActive] = useState(false);
+  const [isMarkToolActive, setIsMarkToolActive] = useState(false);
+  const [markKind, setMarkKind] = useState<CanvasMark["kind"]>("region");
+  const [activeMark, setActiveMark] = useState<CanvasMark | null>(null);
+  const [regionMarkDraft, setRegionMarkDraft] = useState<
+    Extract<CanvasMark, { kind: "region" }> | null
+  >(null);
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [isWheelPanning, setIsWheelPanning] = useState(false);
@@ -494,6 +540,7 @@ export function CanvasStage({
   const viewBox = parsed?.viewBox ?? FALLBACK_VIEWBOX;
   const folded = useMemo(() => fold(history.ops), [history.ops]);
   const isPanModeActive = isPanToolActive || isSpaceDown;
+  const isMarkInteractionActive = isMarkToolActive && !isPanModeActive;
 
   historyRef.current = history;
   foldedRef.current = folded;
@@ -673,6 +720,82 @@ export function CanvasStage({
     },
     [viewBox.h, viewBox.w, viewBox.x, viewBox.y],
   );
+
+  function handleMarkPointerDown(
+    event: ReactPointerEvent<SVGRectElement>,
+  ): void {
+    if (!isMarkInteractionActive || event.button !== 0) return;
+    const rawPoint = clientPointToViewBox(event.clientX, event.clientY);
+    if (rawPoint === null) return;
+    const point = clampPointToViewBox(rawPoint, viewBox);
+
+    event.preventDefault();
+    event.stopPropagation();
+    stageRef.current?.focus({ preventScroll: true });
+
+    if (markKind === "pin") {
+      regionMarkDragRef.current = null;
+      setRegionMarkDraft(null);
+      setActiveMark({ kind: "pin", x: point.x, y: point.y });
+      return;
+    }
+
+    regionMarkDragRef.current = {
+      pointerId: event.pointerId,
+      start: point,
+    };
+    setRegionMarkDraft(regionMarkBetween(point, point));
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleMarkPointerMove(
+    event: ReactPointerEvent<SVGRectElement>,
+  ): void {
+    const drag = regionMarkDragRef.current;
+    if (
+      drag === null ||
+      drag.pointerId !== event.pointerId ||
+      !event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      return;
+    }
+    const rawPoint = clientPointToViewBox(event.clientX, event.clientY);
+    if (rawPoint === null) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setRegionMarkDraft(
+      regionMarkBetween(
+        drag.start,
+        clampPointToViewBox(rawPoint, viewBox),
+      ),
+    );
+  }
+
+  function finishRegionMark(
+    event: ReactPointerEvent<SVGRectElement>,
+    cancelled: boolean,
+  ): void {
+    const drag = regionMarkDragRef.current;
+    if (drag === null || drag.pointerId !== event.pointerId) return;
+    const rawPoint = clientPointToViewBox(event.clientX, event.clientY);
+    regionMarkDragRef.current = null;
+    setRegionMarkDraft(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (cancelled || rawPoint === null) return;
+    const mark = regionMarkBetween(
+      drag.start,
+      clampPointToViewBox(rawPoint, viewBox),
+    );
+    const minimumSize = getScreenToViewBox() * 3;
+    if (mark.w < minimumSize || mark.h < minimumSize) return;
+    setActiveMark(mark);
+  }
 
   function updateGuide(axis: GuideAxis, index: number, value: number): void {
     const update = (current: number[]): number[] =>
@@ -1243,13 +1366,18 @@ export function CanvasStage({
       const nudgeStep = event.shiftKey ? 10 : 1;
       const nudgeDirection = NUDGE_DIRECTION[event.key];
 
-      if (selectedId !== null && nudgeDirection !== undefined) {
+      if (
+        !isMarkToolActive &&
+        selectedId !== null &&
+        nudgeDirection !== undefined
+      ) {
         event.preventDefault();
         nudgeSelectedLayer(
           nudgeDirection[0] * nudgeStep,
           nudgeDirection[1] * nudgeStep,
         );
       } else if (
+        !isMarkToolActive &&
         selectedId !== null &&
         (event.key === "Delete" || event.key === "Backspace")
       ) {
@@ -1362,8 +1490,33 @@ export function CanvasStage({
     if (!isPanToolActive && editingRef.current !== null) {
       commitTextEdit();
     }
-    if (!isPanToolActive) setHoveredId(null);
+    if (!isPanToolActive) {
+      setHoveredId(null);
+      setIsMarkToolActive(false);
+      regionMarkDragRef.current = null;
+      setRegionMarkDraft(null);
+    }
     setIsPanToolActive((current) => !current);
+  }
+
+  function handleMarkToolToggle(): void {
+    if (!isMarkToolActive && editingRef.current !== null) {
+      commitTextEdit();
+    }
+    if (!isMarkToolActive) {
+      setHoveredId(null);
+      setIsPanToolActive(false);
+    } else {
+      regionMarkDragRef.current = null;
+      setRegionMarkDraft(null);
+    }
+    setIsMarkToolActive((current) => !current);
+  }
+
+  function handleMarkKindChange(kind: CanvasMark["kind"]): void {
+    regionMarkDragRef.current = null;
+    setRegionMarkDraft(null);
+    setMarkKind(kind);
   }
 
   function resetLayer(layerId: CanvasLayerId): void {
@@ -1447,7 +1600,7 @@ export function CanvasStage({
   function handleStageClick(
     event: ReactMouseEvent<HTMLDivElement>,
   ): void {
-    if (isPanModeActive) return;
+    if (isPanModeActive || isMarkToolActive) return;
     stageRef.current?.focus({ preventScroll: true });
     const layer = layerFromEventTarget(event.target);
     setSelectedId(layer === null ? null : layer.id);
@@ -1456,7 +1609,7 @@ export function CanvasStage({
   function handleStageDoubleClick(
     event: ReactMouseEvent<HTMLDivElement>,
   ): void {
-    if (isPanModeActive) return;
+    if (isPanModeActive || isMarkToolActive) return;
     const layer = layerFromEventTarget(event.target);
     if (layer !== null) openTextEditor(layer);
   }
@@ -1512,6 +1665,29 @@ export function CanvasStage({
     viewBox.y + viewBox.h,
     rulerMinorStep,
   );
+  const activeMarkClearPoint =
+    activeMark === null
+      ? null
+      : {
+          x: Math.max(
+            viewBox.x + 10 * unit,
+            Math.min(
+              viewBox.x + viewBox.w - 10 * unit,
+              activeMark.kind === "region"
+                ? activeMark.x + activeMark.w
+                : activeMark.x + 18 * unit,
+            ),
+          ),
+          y: Math.max(
+            viewBox.y + 10 * unit,
+            Math.min(
+              viewBox.y + viewBox.h - 10 * unit,
+              activeMark.kind === "region"
+                ? activeMark.y
+                : activeMark.y - 18 * unit,
+            ),
+          ),
+        };
 
   const editingLayer =
     editing === null
@@ -1537,6 +1713,16 @@ export function CanvasStage({
     (layer) => overflow[layer.id] === true,
   );
 
+  function queueAsk(layerId: CanvasLayerId, mark?: CanvasMark): void {
+    if (onAddAsk === undefined) return;
+    if (mark === undefined) {
+      onAddAsk(layerId);
+      return;
+    }
+    onAddAsk(layerId, mark);
+    setActiveMark(null);
+  }
+
   const inspectorProps: InspectorProps = {
     layers: layers.map((layer) => ({
       id: layer.id,
@@ -1561,7 +1747,8 @@ export function CanvasStage({
       history.ops.some((operation) => operation.layer === selectedLayer.id),
     askText: askText ?? "",
     onAskTextChange: onAskTextChange ?? ((): void => {}),
-    onAddAsk: onAddAsk ?? ((): void => {}),
+    activeMark,
+    onAddAsk: queueAsk,
     busy: busy ?? false,
   };
 
@@ -1627,8 +1814,12 @@ export function CanvasStage({
             Before/After
           </button>
           <span className="creview__hint">
-            {isPanToolActive
+            {isPanModeActive
               ? "Pan tool active · drag the canvas to move it"
+              : isMarkToolActive
+                ? markKind === "region"
+                  ? "Mark tool active · drag to mark a region"
+                  : "Mark tool active · click to drop a pin"
               : "Click a layer · drag to move · scroll to pan · drag rulers for guides"}
           </span>
         </div>
@@ -1648,8 +1839,11 @@ export function CanvasStage({
               ? isPanning
                 ? "grabbing"
                 : "grab"
-              : "default",
-            touchAction: isPanModeActive ? "none" : "auto",
+              : isMarkToolActive
+                ? "crosshair"
+                : "default",
+            touchAction:
+              isPanModeActive || isMarkToolActive ? "none" : "auto",
             overscrollBehavior: "contain",
           }}
           onPointerDown={handlePanStart}
@@ -1733,7 +1927,9 @@ export function CanvasStage({
                 ? isPanning
                   ? "grabbing"
                   : "grab"
-                : "default",
+                : isMarkToolActive
+                  ? "crosshair"
+                  : "default",
             }}
           >
             {parsed === null ? (
@@ -1965,7 +2161,11 @@ export function CanvasStage({
                         aria-label={`Select ${LAYER_LABEL[layer.id]}`}
                         style={{
                           pointerEvents:
-                            visible && !isPanModeActive ? "all" : "none",
+                            visible &&
+                            !isPanModeActive &&
+                            !isMarkToolActive
+                              ? "all"
+                              : "none",
                           touchAction: "none",
                           cursor: draggingLayer !== null ? "grabbing" : "grab",
                         }}
@@ -2178,11 +2378,152 @@ export function CanvasStage({
                       )}
                     </g>
                   )}
+
+                  {isMarkInteractionActive && (
+                    <rect
+                      data-mark-interaction=""
+                      x={viewBox.x}
+                      y={viewBox.y}
+                      width={viewBox.w}
+                      height={viewBox.h}
+                      fill="transparent"
+                      aria-label={
+                        markKind === "region"
+                          ? "Draw a region mark"
+                          : "Drop a pin mark"
+                      }
+                      style={{
+                        pointerEvents: "all",
+                        touchAction: "none",
+                        cursor: "crosshair",
+                      }}
+                      onPointerDown={handleMarkPointerDown}
+                      onPointerMove={handleMarkPointerMove}
+                      onPointerUp={(event): void =>
+                        finishRegionMark(event, false)
+                      }
+                      onPointerCancel={(event): void =>
+                        finishRegionMark(event, true)
+                      }
+                      onLostPointerCapture={(event): void =>
+                        finishRegionMark(event, true)
+                      }
+                    />
+                  )}
+
+                  {regionMarkDraft !== null && (
+                    <g
+                      data-mark-region-draft=""
+                      aria-hidden="true"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      <rect
+                        x={regionMarkDraft.x}
+                        y={regionMarkDraft.y}
+                        width={regionMarkDraft.w}
+                        height={regionMarkDraft.h}
+                        fill="var(--accent)"
+                        fillOpacity="0.1"
+                        stroke="var(--accent)"
+                        strokeWidth={1.5 * unit}
+                        strokeDasharray={`${5 * unit} ${4 * unit}`}
+                      />
+                    </g>
+                  )}
+
+                  {activeMark?.kind === "region" &&
+                    activeMarkClearPoint !== null && (
+                    <g
+                      data-mark-region=""
+                      aria-label="Active region mark"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      <rect
+                        x={activeMark.x}
+                        y={activeMark.y}
+                        width={activeMark.w}
+                        height={activeMark.h}
+                        fill="var(--accent)"
+                        fillOpacity="0.14"
+                        stroke="var(--accent)"
+                        strokeWidth={1.75 * unit}
+                      />
+                      <rect
+                        x={activeMark.x + 5 * unit}
+                        y={activeMark.y + 5 * unit}
+                        width={48 * unit}
+                        height={18 * unit}
+                        rx={4 * unit}
+                        fill="var(--accent)"
+                      />
+                      <text
+                        x={activeMark.x + 29 * unit}
+                        y={activeMark.y + 17.5 * unit}
+                        fill="var(--surface)"
+                        fontFamily="var(--font-mono, monospace)"
+                        fontSize={9 * unit}
+                        fontWeight="700"
+                        letterSpacing={0.65 * unit}
+                        textAnchor="middle"
+                      >
+                        REGION
+                      </text>
+                    </g>
+                  )}
+
+                  {activeMark?.kind === "pin" &&
+                    activeMarkClearPoint !== null && (
+                    <g
+                      data-mark-pin=""
+                      aria-label="Active pin mark"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      <circle
+                        cx={activeMark.x}
+                        cy={activeMark.y}
+                        r={11 * unit}
+                        fill="var(--accent)"
+                        fillOpacity="0.14"
+                        stroke="var(--accent)"
+                        strokeOpacity="0.48"
+                        strokeWidth={1.5 * unit}
+                      />
+                      <circle
+                        cx={activeMark.x}
+                        cy={activeMark.y}
+                        r={4.5 * unit}
+                        fill="var(--accent)"
+                        stroke="var(--surface)"
+                        strokeWidth={1.5 * unit}
+                      />
+                      <rect
+                        x={activeMark.x + 8 * unit}
+                        y={activeMark.y + 8 * unit}
+                        width={34 * unit}
+                        height={18 * unit}
+                        rx={4 * unit}
+                        fill="var(--accent)"
+                      />
+                      <text
+                        x={activeMark.x + 25 * unit}
+                        y={activeMark.y + 20.5 * unit}
+                        fill="var(--surface)"
+                        fontFamily="var(--font-mono, monospace)"
+                        fontSize={9 * unit}
+                        fontWeight="700"
+                        letterSpacing={0.65 * unit}
+                        textAnchor="middle"
+                      >
+                        PIN
+                      </text>
+                    </g>
+                  )}
                 </svg>
 
                 {hoveredLayer !== null &&
                   hoveredBox !== null &&
-                  !isPanModeActive && (
+                  !isPanModeActive &&
+                  !isMarkToolActive && (
                   <svg
                     viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
                     aria-hidden="true"
@@ -2220,7 +2561,8 @@ export function CanvasStage({
                 {selectedLayer !== null &&
                   selectedBaseBox !== null &&
                   selectedBox !== null &&
-                  !isPanModeActive && (
+                  !isPanModeActive &&
+                  !isMarkToolActive && (
                     <svg
                       viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
                       aria-hidden="true"
@@ -2335,6 +2677,66 @@ export function CanvasStage({
                     </svg>
                   )}
 
+                {activeMark !== null &&
+                  activeMarkClearPoint !== null && (
+                    <svg
+                      viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        zIndex: 4,
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents: "none",
+                        overflow: "visible",
+                      }}
+                    >
+                      <g
+                        data-mark-clear=""
+                        role="button"
+                        aria-label={`Clear ${activeMark.kind} mark`}
+                        tabIndex={0}
+                        style={{
+                          pointerEvents: "all",
+                          cursor: "pointer",
+                        }}
+                        onPointerDown={(event): void => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event): void => {
+                          event.stopPropagation();
+                          setActiveMark(null);
+                        }}
+                        onKeyDown={(event): void => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setActiveMark(null);
+                        }}
+                      >
+                        <circle
+                          cx={activeMarkClearPoint.x}
+                          cy={activeMarkClearPoint.y}
+                          r={10 * unit}
+                          fill="var(--surface)"
+                          stroke="var(--accent)"
+                          strokeWidth={1.5 * unit}
+                        />
+                        <text
+                          x={activeMarkClearPoint.x}
+                          y={activeMarkClearPoint.y + 3.5 * unit}
+                          fill="var(--accent)"
+                          fontSize={13 * unit}
+                          fontWeight="700"
+                          textAnchor="middle"
+                        >
+                          ×
+                        </text>
+                      </g>
+                    </svg>
+                  )}
+
                 {editing !== null &&
                   editingBox !== null &&
                   editingTextLayout !== null && (
@@ -2426,6 +2828,10 @@ export function CanvasStage({
              onZoomChange={handleZoomChange}
              isPanToolActive={isPanToolActive}
              onTogglePanTool={handlePanToolToggle}
+             isMarkToolActive={isMarkToolActive}
+             markKind={markKind}
+             onToggleMarkTool={handleMarkToolToggle}
+             onMarkKindChange={handleMarkKindChange}
              creativeSize={{ w: viewBox.w, h: viewBox.h }}
              creativeFormat={Math.abs(viewBox.w / viewBox.h - 1) < 0.01 ? "Square / IG Post" : (Math.abs(viewBox.w / viewBox.h - 4/5) < 0.01 ? "IG Portrait" : (Math.abs(viewBox.w / viewBox.h - 9/16) < 0.01 ? "Story" : (viewBox.w > viewBox.h ? "Landscape" : "Portrait")))}
              isFullscreen={isFullscreen}

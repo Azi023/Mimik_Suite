@@ -3,6 +3,7 @@
 import type { JSX } from "react";
 import type { ApiColorRole } from "@/lib/api";
 import { CanvasLayerId } from "./canvas-types";
+import type { CanvasMark } from "./CanvasStage";
 
 const LAYER_LABEL: Record<CanvasLayerId, string> = {
   "layer-background": "Background",
@@ -42,7 +43,8 @@ export interface InspectorProps {
   
   askText: string;
   onAskTextChange: (text: string) => void;
-  onAddAsk: (id: CanvasLayerId) => void;
+  activeMark: CanvasMark | null;
+  onAddAsk: (id: CanvasLayerId, mark?: CanvasMark) => void;
   busy: boolean;
 }
 
@@ -59,10 +61,17 @@ export function Inspector({
   canResetSelectedLayer,
   askText,
   onAskTextChange,
+  activeMark,
   onAddAsk,
   busy,
 }: InspectorProps): JSX.Element {
   const selectedLayer = layers.find(l => l.id === selectedId);
+  const askScope =
+    activeMark?.kind === "region"
+      ? "region"
+      : activeMark?.kind === "pin"
+        ? "spot"
+        : "layer";
 
   return (
     <aside className="review-panel" aria-label="Inspector" style={{ height: "100%" }}>
@@ -169,8 +178,16 @@ export function Inspector({
           )}
 
           <div className="review-panel__section" style={{ marginTop: "auto", borderTop: "1px solid var(--line)", paddingTop: "var(--sp-4)" }}>
-             <span className="review-panel__label">Ask AI about this layer</span>
-             <p className="review-panel__note" style={{ fontSize: "12px", marginBottom: "4px" }}>The AI will only modify the <strong>{LAYER_LABEL[selectedLayer.id]}</strong>.</p>
+             <span className="review-panel__label">Ask AI about this {askScope}</span>
+             <p className="review-panel__note" style={{ fontSize: "12px", marginBottom: "4px" }}>
+               {activeMark === null ? (
+                 <>The AI will only modify the <strong>{LAYER_LABEL[selectedLayer.id]}</strong>.</>
+               ) : activeMark.kind === "region" ? (
+                 <>The AI will focus on the marked region for <strong>{LAYER_LABEL[selectedLayer.id]}</strong>.</>
+               ) : (
+                 <>The AI will focus on the marked spot for <strong>{LAYER_LABEL[selectedLayer.id]}</strong>.</>
+               )}
+             </p>
              <textarea
                 className="creview__input"
                 value={askText}
@@ -186,7 +203,13 @@ export function Inspector({
                     type="button"
                     className="btn btn--primary btn--sm"
                     disabled={busy || askText.trim() === ""}
-                    onClick={() => onAddAsk(selectedLayer.id)}
+                    onClick={(): void => {
+                      if (activeMark === null) {
+                        onAddAsk(selectedLayer.id);
+                      } else {
+                        onAddAsk(selectedLayer.id, activeMark);
+                      }
+                    }}
                  >
                     Queue ask
                  </button>
