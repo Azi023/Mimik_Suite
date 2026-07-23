@@ -21,8 +21,9 @@ from api.db import repo
 from api.db.mappers import to_job
 from api.db.session import get_session
 from api.routers.jobs import _TEAM
-from api.services import generation_queue, usage
+from api.services import command_center, generation_queue, usage
 from api.services.approval_flow import ApprovalFlowError, submit_approval
+from api.services.command_center import CommandParseError
 from mimik_contracts import (
     Actor,
     ActorRole,
@@ -30,6 +31,9 @@ from mimik_contracts import (
     BoardCard,
     BoardResponse,
     CalendarEntry,
+    CommandExecutionResult,
+    CommandPlan,
+    CommandRequest,
     GenerationQueueItem,
     Job,
     JobStatus,
@@ -146,6 +150,40 @@ async def enqueue_generation(
         pillar=body.pillar,
         format_key=body.format_key,
     )
+
+
+@router.post("/ops/command", response_model=CommandPlan)
+async def preview_command(
+    body: CommandRequest,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> CommandPlan:
+    """The ⌘K cockpit — dry-run. Parse operator free text ("generate 5 Educational posts for
+    Glo2Go this week") into a constrained CommandPlan for confirmation. Team-gated (operator-only,
+    same gate as the queue routes); nothing is enqueued here. Unresolvable references → 422."""
+    try:
+        return await command_center.build_plan(
+            session, principal=principal, text=body.text
+        )
+    except CommandParseError as exc:
+        raise HTTPException(status_code=422, detail=exc.message)
+
+
+@router.post("/ops/command/execute", response_model=CommandExecutionResult, status_code=201)
+async def execute_command(
+    body: CommandRequest,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> CommandExecutionResult:
+    """Confirm step: re-parse under the operator's tenant scope and fan out into N queued
+    generation jobs via the existing A-03 queue path. Team-gated; every job is tenant-scoped +
+    audited. Unresolvable references → 422 (nothing is enqueued)."""
+    try:
+        return await command_center.execute_plan(
+            session, principal=principal, text=body.text
+        )
+    except CommandParseError as exc:
+        raise HTTPException(status_code=422, detail=exc.message)
 
 
 @router.get("/ops/usage", response_model=UsageReport)
