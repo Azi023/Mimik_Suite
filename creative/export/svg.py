@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -47,7 +48,18 @@ _EDITABLE_LAYER_IDS = frozenset(
         "layer-badge",
     }
 )
-_OVERRIDE_KEYS = frozenset({"dx", "dy", "scale", "visible", "fill"})
+_OVERRIDE_KEYS = frozenset(
+    {
+        "dx",
+        "dy",
+        "scale",
+        "scale_x",
+        "scale_y",
+        "rotation",
+        "visible",
+        "fill",
+    }
+)
 _TEXT_FILL_LAYER_IDS = frozenset({"layer-headline", "layer-subhead"})
 _SHAPE_FILL_LAYER_IDS = frozenset({"layer-panel", "layer-cta", "layer-badge"})
 
@@ -243,6 +255,31 @@ def _scale_override(override: Mapping[object, object]) -> float:
     return scale
 
 
+def _axis_scale_override(
+    override: Mapping[object, object],
+    key: str,
+) -> float:
+    value = _override_value(override, key, 1.0)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"Layer override {key!r} must be a float")
+    scale = float(value)
+    if not isfinite(scale):
+        raise ValueError(f"Layer override {key!r} must be finite")
+    if scale <= 0:
+        raise ValueError(f"Layer override {key!r} must be greater than zero")
+    return min(scale, 3.0)
+
+
+def _rotation_override(override: Mapping[object, object]) -> float:
+    value = _override_value(override, "rotation", 0.0)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError("Layer override 'rotation' must be a float")
+    rotation = float(value)
+    if not isfinite(rotation):
+        raise ValueError("Layer override 'rotation' must be finite")
+    return min(max(rotation, -180.0), 180.0)
+
+
 def _visible_override(override: Mapping[object, object]) -> bool:
     value = _override_value(override, "visible", True)
     if not isinstance(value, bool):
@@ -305,17 +342,40 @@ def _apply_layer_overrides(
         layer = layers[layer_id]
         dx = _integer_override(override_value, "dx", default=0)
         dy = _integer_override(override_value, "dy", default=0)
-        scale = _scale_override(override_value)
+        legacy_scale = _scale_override(override_value)
+        scale_x = _axis_scale_override(override_value, "scale_x")
+        scale_y = _axis_scale_override(override_value, "scale_y")
+        rotation = _rotation_override(override_value)
+        use_legacy_scale = (
+            scale_x == 1.0 and scale_y == 1.0 and legacy_scale != 1.0
+        )
+        effective_scale_x = legacy_scale if use_legacy_scale else scale_x
+        effective_scale_y = legacy_scale if use_legacy_scale else scale_y
+        has_scale = effective_scale_x != 1.0 or effective_scale_y != 1.0
         transform_parts: list[str] = []
         if dx or dy:
             transform_parts.append(f"translate({dx},{dy})")
-        if scale != 1:
-            x, y, _width, _height = bboxes[layer_id]
+        if rotation != 0.0 or has_scale:
+            x, y, width, height = bboxes[layer_id]
+            center_x = x + width / 2
+            center_y = y + height / 2
+            if rotation != 0.0:
+                transform_parts.append(
+                    f"rotate({rotation:g},{center_x:g},{center_y:g})"
+                )
+        if has_scale:
+            scale_transform = (
+                f"scale({effective_scale_x:g})"
+                if use_legacy_scale
+                else f"scale({effective_scale_x:g},{effective_scale_y:g})"
+            )
+            scale_origin_x = x if use_legacy_scale else center_x
+            scale_origin_y = y if use_legacy_scale else center_y
             transform_parts.extend(
                 (
-                    f"translate({x},{y})",
-                    f"scale({scale:g})",
-                    f"translate({-x},{-y})",
+                    f"translate({scale_origin_x:g},{scale_origin_y:g})",
+                    scale_transform,
+                    f"translate({-scale_origin_x:g},{-scale_origin_y:g})",
                 )
             )
         if transform_parts:

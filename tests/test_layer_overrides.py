@@ -94,6 +94,18 @@ def _fills_by_layer(
     }
 
 
+def _bbox_center(layer: ElementTree.Element) -> tuple[str, str, str, str]:
+    x, y, width, height = (float(part) for part in layer.attrib["data-bbox"].split())
+    center_x = x + width / 2
+    center_y = y + height / 2
+    return (
+        f"{center_x:g}",
+        f"{center_y:g}",
+        f"{-center_x:g}",
+        f"{-center_y:g}",
+    )
+
+
 def test_panel_translation_is_scoped_to_panel_group() -> None:
     layers = _layers(_render({"layer-panel": {"dx": 120}}))
 
@@ -143,6 +155,85 @@ def test_scale_uses_layer_bbox_origin_after_translation() -> None:
     assert panel.attrib["transform"] == (
         f"translate(10,-5) translate({x},{y}) scale(1.25) translate(-{x},-{y})"
     )
+
+
+def test_non_uniform_scale_uses_layer_bbox_center_and_is_scoped() -> None:
+    layers = _layers(
+        _render({"layer-panel": {"scale_x": 1.5, "scale_y": 0.8}})
+    )
+    panel = layers["layer-panel"]
+    center_x, center_y, negative_center_x, negative_center_y = _bbox_center(panel)
+
+    assert panel.attrib["transform"] == (
+        f"translate({center_x},{center_y}) scale(1.5,0.8) "
+        f"translate({negative_center_x},{negative_center_y})"
+    )
+    for layer_id in set(LAYER_IDS) - {"layer-panel"}:
+        assert "transform" not in layers[layer_id].attrib
+
+
+def test_rotation_uses_layer_bbox_center_and_is_scoped() -> None:
+    layers = _layers(_render({"layer-headline": {"rotation": 30}}))
+    headline = layers["layer-headline"]
+    center_x, center_y, _negative_center_x, _negative_center_y = _bbox_center(
+        headline
+    )
+
+    assert headline.attrib["transform"] == f"rotate(30,{center_x},{center_y})"
+    for layer_id in set(LAYER_IDS) - {"layer-headline"}:
+        assert "transform" not in layers[layer_id].attrib
+
+
+def test_identity_override_is_byte_identical_to_no_override() -> None:
+    baseline = _render()
+    identity = _render(
+        {
+            "layer-panel": {
+                "dx": 0,
+                "dy": 0,
+                "scale": 1.0,
+                "scale_x": 1.0,
+                "scale_y": 1.0,
+                "rotation": 0.0,
+            }
+        }
+    )
+
+    assert identity == baseline
+
+
+def test_axis_scale_and_rotation_are_clamped_to_contract_bounds() -> None:
+    layers = _layers(
+        _render(
+            {
+                "layer-panel": {
+                    "scale_x": 4.5,
+                    "scale_y": 0.8,
+                    "rotation": 250,
+                }
+            }
+        )
+    )
+    panel = layers["layer-panel"]
+    center_x, center_y, negative_center_x, negative_center_y = _bbox_center(panel)
+
+    assert panel.attrib["transform"] == (
+        f"rotate(180,{center_x},{center_y}) "
+        f"translate({center_x},{center_y}) scale(3,0.8) "
+        f"translate({negative_center_x},{negative_center_y})"
+    )
+
+
+@pytest.mark.parametrize("key", ["scale_x", "scale_y"])
+def test_axis_scale_must_be_greater_than_zero(key: str) -> None:
+    with pytest.raises(ValueError, match=f"Layer override '{key}'"):
+        _render({"layer-panel": {key: 0}})
+
+
+@pytest.mark.parametrize("key", ["scale_x", "scale_y", "rotation"])
+def test_transform_float_overrides_must_be_finite(key: str) -> None:
+    with pytest.raises(ValueError, match=f"Layer override '{key}'"):
+        _render({"layer-panel": {key: math.nan}})
 
 
 async def test_no_override_matches_baseline_and_still_rasterizes(

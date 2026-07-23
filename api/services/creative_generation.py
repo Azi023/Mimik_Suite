@@ -589,6 +589,9 @@ async def revise_creative(
             "dx": op.dx,
             "dy": op.dy,
             "scale": op.scale,
+            "scale_x": op.scale_x,
+            "scale_y": op.scale_y,
+            "rotation": op.rotation,
             "visible": op.visible,
         }
         if op.fill_role is not None:

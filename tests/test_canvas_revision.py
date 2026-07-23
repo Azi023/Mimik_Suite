@@ -100,22 +100,24 @@ def _stub_renderer(
         assert isinstance(artifact_dir, Path)
         svg_path = artifact_dir / "creative.svg"
         preview_path = artifact_dir / "preview.png"
-        
+
         layer_overrides = kwargs.get("render_params", {}).get("layer_overrides", {})
-        
+
         svg_content = "<svg>"
         for layer_id, op in layer_overrides.items():
             svg_content += f"<g id='{layer_id}'"
-            if "dx" in op:
-                svg_content += f" dx='{op['dx']}'"
-            if "dy" in op:
-                svg_content += f" dy='{op['dy']}'"
-            if "scale" in op:
-                svg_content += f" scale='{op['scale']}'"
-            if "visible" in op:
-                svg_content += f" visible='{op['visible']}'"
-            if "fill" in op:
-                svg_content += f" fill='{op['fill']}'"
+            for key in (
+                "dx",
+                "dy",
+                "scale",
+                "scale_x",
+                "scale_y",
+                "rotation",
+                "visible",
+                "fill",
+            ):
+                if key in op:
+                    svg_content += f" {key}='{op[key]}'"
             svg_content += "></g>"
         svg_content += "</svg>"
 
@@ -135,7 +137,7 @@ async def test_revise_with_layer_ops_applies_overrides(
     monkeypatch.chdir(tmp_path)
     Path("source.png").write_bytes(b"source")
     _stub_renderer(monkeypatch)
-    
+
     tenant_id, token = await _create_tenant(client, name="Mimik", slug="mimik")
     _client_id, job_id, first_id = await _create_creative(
         client, token=token, suffix="layerops"
@@ -144,21 +146,19 @@ async def test_revise_with_layer_ops_applies_overrides(
     revised = await client.post(
         f"/creatives/{first_id}/revise",
         json={
-            "layer_ops": [
-                {"layer_id": "layer-panel", "dx": 120}
-            ]
+            "layer_ops": [{"layer_id": "layer-panel", "dx": 120}]
         },
         headers=_auth(token),
     )
 
     assert revised.status_code == 201, revised.text
     creative = revised.json()["creative"]
-    
+
     # Check L1 params
     l1_params = creative["manifest"]["layers"][0]["recipe"]["params"]
     assert "layer_overrides" in l1_params
     assert l1_params["layer_overrides"]["layer-panel"]["dx"] == 120
-    
+
     # Check rendered SVG
     svg_url = revised.json()["svg_url"]
     svg_resp = await client.get(svg_url, headers=_auth(token))
@@ -174,25 +174,42 @@ async def test_override_inheritance(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     Path("source.png").write_bytes(b"source")
-    _stub_renderer(monkeypatch)
-    
+    render_calls = _stub_renderer(monkeypatch)
+
     tenant_id, token = await _create_tenant(client, name="Mimik", slug="mimik")
     _client_id, job_id, first_id = await _create_creative(
         client, token=token, suffix="inheritance"
     )
 
-    # Revise 1 sets panel dx
+    # Revise 1 sets the panel transform.
     revised1 = await client.post(
         f"/creatives/{first_id}/revise",
         json={
             "layer_ops": [
-                {"layer_id": "layer-panel", "dx": 120}
+                {
+                    "layer_id": "layer-panel",
+                    "dx": 120,
+                    "scale_x": 1.5,
+                    "scale_y": 0.8,
+                    "rotation": 30,
+                }
             ]
         },
         headers=_auth(token),
     )
     assert revised1.status_code == 201, revised1.text
-    second_id = revised1.json()["creative"]["id"]
+    creative2 = revised1.json()["creative"]
+    second_id = creative2["id"]
+    second_overrides = creative2["manifest"]["layers"][0]["recipe"]["params"][
+        "layer_overrides"
+    ]
+    assert second_overrides["layer-panel"]["scale_x"] == 1.5
+    assert second_overrides["layer-panel"]["scale_y"] == 0.8
+    assert second_overrides["layer-panel"]["rotation"] == 30
+    first_render_overrides = render_calls[-1]["render_params"]["layer_overrides"]
+    assert first_render_overrides["layer-panel"]["scale_x"] == 1.5
+    assert first_render_overrides["layer-panel"]["scale_y"] == 0.8
+    assert first_render_overrides["layer-panel"]["rotation"] == 30
 
     # Revise 2 sets badge visible=False
     revised2 = await client.post(
@@ -206,14 +223,21 @@ async def test_override_inheritance(
     )
     assert revised2.status_code == 201, revised2.text
     creative3 = revised2.json()["creative"]
-    
+
     # The new manifest should have BOTH overrides
     l1_params = creative3["manifest"]["layers"][0]["recipe"]["params"]
     overrides = l1_params.get("layer_overrides", {})
     assert "layer-panel" in overrides
     assert overrides["layer-panel"]["dx"] == 120
+    assert overrides["layer-panel"]["scale_x"] == 1.5
+    assert overrides["layer-panel"]["scale_y"] == 0.8
+    assert overrides["layer-panel"]["rotation"] == 30
     assert "layer-badge" in overrides
     assert overrides["layer-badge"]["visible"] is False
+    second_render_overrides = render_calls[-1]["render_params"]["layer_overrides"]
+    assert second_render_overrides["layer-panel"]["scale_x"] == 1.5
+    assert second_render_overrides["layer-panel"]["scale_y"] == 0.8
+    assert second_render_overrides["layer-panel"]["rotation"] == 30
 
 
 async def test_fill_role_resolution(
@@ -299,4 +323,3 @@ async def test_bc_shim(
     # The instruction deterministic keyword check still works (e.g., 'larger' -> subject_zoom=1.2)
     l1_params = creative["manifest"]["layers"][0]["recipe"]["params"]
     assert l1_params["subject_zoom"] == 1.2
-
