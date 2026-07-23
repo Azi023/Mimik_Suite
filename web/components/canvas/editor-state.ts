@@ -199,6 +199,12 @@ function round(value: number, places: number): number {
   return Math.round(value * factor) / factor;
 }
 
+/** Keep an axis scale inside the contract's (0, 3] bound (matches the editor's [0.1, 3]). */
+function clampAxisScale(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0.1;
+  return Math.min(3, Math.max(0.1, value));
+}
+
 export function toCanvasRevision(folded: FoldedState): ApiCanvasRevision {
   const textEdits: ApiTextEdits = {};
   for (const layerId of EDITOR_LAYER_IDS) {
@@ -216,16 +222,18 @@ export function toCanvasRevision(folded: FoldedState): ApiCanvasRevision {
     if (!touched) continue;
 
     const transform = folded.transform[layerId] ?? IDENTITY_TRANSFORM;
+    // Defensive clamp at emit time so the payload always satisfies the contract's
+    // (0, 3] scale bound, regardless of any interaction edge case that could
+    // accumulate an out-of-range axis scale (a resize gesture can otherwise 422 Apply).
+    const sx = clampAxisScale(transform.scaleX);
+    const sy = clampAxisScale(transform.scaleY);
     layerOps.push({
       layer_id: layerId,
       dx: round(transform.dx, 2),
       dy: round(transform.dy, 2),
-      scale: round(
-        transform.scaleX === transform.scaleY ? transform.scaleX : 1,
-        4,
-      ),
-      scale_x: round(transform.scaleX, 4),
-      scale_y: round(transform.scaleY, 4),
+      scale: round(sx === sy ? sx : 1, 4),
+      scale_x: round(sx, 4),
+      scale_y: round(sy, 4),
       rotation: 0,
       visible: folded.visible[layerId] ?? true,
       fill_role: folded.fill[layerId] ?? null,
