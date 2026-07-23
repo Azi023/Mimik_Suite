@@ -1296,12 +1296,100 @@ export function createBrief(brandId: string, sessionToken?: string): Promise<Api
   return apiPost<ApiBrief>("/briefs", { brand_id: brandId }, sessionToken);
 }
 
-/** A registered brand-library asset (subset of mimik_contracts.BrandAsset). */
+/** mimik_contracts.enums.AssetKind — what a stored brand asset IS. */
+export type AssetKind = "logo" | "font" | "imagery" | "reference_creative";
+
+/**
+ * mimik_contracts.assets.AssetStudy — what the vision pass observed in a reference creative.
+ * Null until the reference is ingested (`POST /assets/{id}/ingest`); evidence-bound, so every
+ * field is describing what is VISIBLE in the file, never an invention.
+ */
+export interface ApiAssetStudy {
+  mood: string | null;
+  /** Observed hexes, dominant first. */
+  palette: string[];
+  composition: string | null;
+  lighting: string | null;
+  complexity: "minimal" | "moderate" | "busy" | null;
+  copy_text: string | null;
+  logo_assessment: string | null;
+  notes: string | null;
+}
+
+/** mimik_contracts.assets.BrandAsset — one stored brand-library asset (the full wire shape). */
 export interface ApiBrandAsset {
   id: string;
+  created_at: string;
+  tenant_id: string;
+  client_id: string;
   brand_id: string;
-  kind: string;
+  kind: AssetKind;
   filename: string;
+  mime: string;
+  /** Server-side storage ref; the bytes are not served to the browser (no public asset URL). */
+  local_path: string | null;
+  drive_file_id: string | null;
+  /** Human gate: an approved LOGO is wired into the brand's logo token for the compositor. */
+  approved: boolean;
+  license: string | null;
+  notes: string | null;
+  /** Filled by reference-creative ingestion; null until then. */
+  study: ApiAssetStudy | null;
+}
+
+/** creative.references.fit_critic.FitVerdict — the fit-critic's call on an ingested reference. */
+export interface ApiFitVerdict {
+  fit_score: number;
+  fits: boolean;
+  reasoning: string;
+}
+
+/** brand_memory.IngestResult — the outcome of ingesting a reference creative into brand memory. */
+export interface ApiIngestResult {
+  asset_id: string;
+  study: ApiAssetStudy;
+  verdict: ApiFitVerdict;
+  attached: boolean;
+  signals_recorded: number;
+}
+
+/**
+ * GET /brands/{id}/assets — the brand's curated asset library (team-gated). Optionally filtered
+ * to one `kind`. Returns the full BrandAsset rows (approval state, mime, and any ingest study).
+ */
+export function fetchBrandAssets(
+  brandId: string,
+  kind?: AssetKind,
+  sessionToken?: string,
+): Promise<ApiBrandAsset[]> {
+  const query = kind !== undefined ? `?kind=${encodeURIComponent(kind)}` : "";
+  return apiGet<ApiBrandAsset[]>(
+    `/brands/${encodeURIComponent(brandId)}/assets${query}`,
+    sessionToken,
+  );
+}
+
+/**
+ * POST /brands/{id}/assets — upload a brand asset of the given kind. Multipart: `kind` is a Form
+ * field, `file` is the upload. The browser sets the multipart boundary itself (no manual
+ * Content-Type). The backend SNIFFS the real mime from the bytes and 415s a disallowed type — the
+ * caller surfaces that error inline. Team-gated at the API (403 for a client principal).
+ */
+export function uploadBrandAsset(
+  brandId: string,
+  kind: AssetKind,
+  file: File,
+  sessionToken?: string,
+): Promise<ApiBrandAsset> {
+  const form = new FormData();
+  // `kind` first so the multipart part order matches the FastAPI Form(...) signature.
+  form.append("kind", kind);
+  form.append("file", file);
+  return apiPostForm<ApiBrandAsset>(
+    `/brands/${encodeURIComponent(brandId)}/assets`,
+    form,
+    sessionToken,
+  );
 }
 
 /** POST /brands/{id}/assets — upload a client-shared reference image as a reference_creative asset. */
@@ -1310,13 +1398,41 @@ export function uploadReferenceAsset(
   file: File,
   sessionToken?: string,
 ): Promise<ApiBrandAsset> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("kind", "reference_creative");
-  return apiPostForm<ApiBrandAsset>(
-    `/brands/${encodeURIComponent(brandId)}/assets`,
-    form,
+  return uploadBrandAsset(brandId, "reference_creative", file, sessionToken);
+}
+
+/**
+ * POST /assets/{id}/approve — human-approve an asset (owner/ops only). Approving a LOGO wires it
+ * into the brand's logo token so the compositor renders the real mark.
+ */
+export function approveAsset(assetId: string, sessionToken?: string): Promise<ApiBrandAsset> {
+  return apiPost<ApiBrandAsset>(`/assets/${encodeURIComponent(assetId)}/approve`, {}, sessionToken);
+}
+
+/**
+ * POST /assets/{id}/knockout — derive the white-knockout variant of a stored LOGO (a new,
+ * unapproved asset). Team-gated; 422 for a non-logo asset, 409 if the logo has no stored bytes.
+ */
+export function knockoutLogo(assetId: string, sessionToken?: string): Promise<ApiBrandAsset> {
+  return apiPost<ApiBrandAsset>(
+    `/assets/${encodeURIComponent(assetId)}/knockout`,
+    {},
     sessionToken,
+    CREATIVE_TIMEOUT_MS,
+  );
+}
+
+/**
+ * POST /assets/{id}/ingest — study a REFERENCE_CREATIVE into brand memory (vision pass + fit
+ * critic). Team-gated; 422 for a non-reference asset, 502 when the vision backend is unconfigured.
+ * Runs a model pass, so it gets the longer creative ceiling.
+ */
+export function ingestReference(assetId: string, sessionToken?: string): Promise<ApiIngestResult> {
+  return apiPost<ApiIngestResult>(
+    `/assets/${encodeURIComponent(assetId)}/ingest`,
+    {},
+    sessionToken,
+    CREATIVE_TIMEOUT_MS,
   );
 }
 

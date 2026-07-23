@@ -243,6 +243,10 @@ export function Sidebar({ groups, onCollapse, mobile = false }: SidebarProps): J
                 </button>
               );
             })}
+            <Link className={`rail-btn${pathname.startsWith("/assets") ? " rail-btn--active" : ""}`} href="/assets" aria-label="Brand assets">
+              <span className="rail-btn__icon"><AssetsGlyph /></span>
+              <span className="rail-btn__label">Brand assets</span>
+            </Link>
             <Link className={`rail-btn${pathname.startsWith("/command") ? " rail-btn--active" : ""}`} href="/command" aria-label="Command Center">
               <span className="rail-btn__icon"><CommandGlyph /></span>
               <span className="rail-btn__label">Command</span>
@@ -375,6 +379,16 @@ function CommandGlyph(): JSX.Element {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** A stacked-layers glyph for the Brand-assets rail entry (no matching icon in ./icons). */
+function AssetsGlyph(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M12 3l9 5-9 5-9-5 9-5z" strokeLinejoin="round" />
+      <path d="M3 12l9 5 9-5M3 16l9 5 9-5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
