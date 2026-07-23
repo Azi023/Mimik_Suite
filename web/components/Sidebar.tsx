@@ -30,6 +30,7 @@ import {
  */
 interface SidebarProps {
   groups: SidebarGroup[];
+  onCollapse?: () => void;
 }
 
 /** Rail items that map to a real route (the rest stay un-wired placeholder buttons). */
@@ -41,10 +42,12 @@ const NAV_ROUTES: Partial<Record<NavItem["id"], string>> = {
   "brand-briefs": "/briefs",
 };
 
-export function Sidebar({ groups }: SidebarProps): JSX.Element {
+export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
   const railItems = navItems.filter((item) => item.id !== "settings");
   const settings = navItems.find((item) => item.id === "settings");
   const hasClients = groups.some((group) => group.projects.length > 0);
+
+  const [railExpanded, setRailExpanded] = useState(false);
 
   // Search filters the client rows below it; empty groups drop out entirely.
   const [query, setQuery] = useState("");
@@ -63,68 +66,159 @@ export function Sidebar({ groups }: SidebarProps): JSX.Element {
 
   return (
     <div className="side">
-      <aside className="rail" aria-label="Primary">
-        <Link className="rail__logo" href="/" aria-label={workspaceName}>
-          M
-        </Link>
+      <style>{`
+        .rail-dynamic {
+          position: absolute;
+          top: 0;
+          left: 0;
+          bottom: 0;
+          width: 68px;
+          align-items: center;
+          transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+          z-index: 50;
+          overflow: hidden;
+        }
+        .rail-dynamic.is-expanded {
+          width: 200px;
+          align-items: stretch;
+          padding-left: 12px;
+          padding-right: 12px;
+          box-shadow: 4px 0 12px rgba(0, 0, 0, 0.05);
+        }
+        [data-theme="dark"] .rail-dynamic.is-expanded {
+          box-shadow: 4px 0 12px rgba(0, 0, 0, 0.2);
+        }
+        .rail-dynamic .rail__logo {
+          transition: transform 0.15s ease;
+        }
+        .rail-dynamic.is-expanded .rail__logo {
+          align-self: flex-start;
+          transform: translateX(2px);
+        }
+        .rail-dynamic .rail-btn {
+          width: 42px;
+          justify-content: center;
+          transition: width 0.15s ease, background 0.15s ease, color 0.15s ease;
+        }
+        .rail-dynamic.is-expanded .rail-btn {
+          width: 100%;
+          justify-content: flex-start;
+        }
+        .rail-btn__icon {
+          width: 42px;
+          height: 42px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .rail-btn__label {
+          opacity: 0;
+          white-space: nowrap;
+          font-size: 13px;
+          font-weight: 500;
+          transition: opacity 0.1s ease;
+        }
+        .rail-dynamic.is-expanded .rail-btn__label {
+          opacity: 1;
+          transition: opacity 0.2s ease 0.05s;
+        }
+      `}</style>
+      <div 
+        className="rail-container" 
+        style={{ width: 68, flexShrink: 0, position: 'relative', zIndex: 20 }}
+        onMouseEnter={() => setRailExpanded(true)}
+        onMouseLeave={() => setRailExpanded(false)}
+        onFocus={() => setRailExpanded(true)}
+        onBlur={() => setRailExpanded(false)}
+      >
+        <aside className={`rail rail-dynamic ${railExpanded ? 'is-expanded' : ''}`} aria-label="Primary">
+          <Link className="rail__logo" href="/" aria-label={workspaceName}>
+            M
+          </Link>
 
-        <nav className="rail__nav" aria-label="Sections">
-          {railItems.map((item) => {
-            // Items with a real route render as Links; the rest are not wired yet (plain buttons).
-            const href = NAV_ROUTES[item.id];
-            return href !== undefined ? (
-              <Link
-                key={item.id}
-                className="rail-btn"
-                href={href}
-                aria-label={item.label}
-                title={item.label}
-              >
-                <NavGlyph id={item.id} />
-              </Link>
-            ) : (
-              <button
-                key={item.id}
-                type="button"
-                className={`rail-btn${item.active ? " rail-btn--active" : ""}`}
-                aria-current={item.active ? "page" : undefined}
-                aria-label={item.label}
-                title={item.label}
-              >
-                <NavGlyph id={item.id} />
-              </button>
-            );
-          })}
-          <Link className="rail-btn" href="/tasks" aria-label="Tasks" title="Tasks">
-            <TasksGlyph />
-          </Link>
-          <Link className="rail-btn" href="/deliveries" aria-label="Deliveries" title="Deliveries">
-            <DeliveriesGlyph />
-          </Link>
-          <Link className="rail-btn" href="/billing" aria-label="Billing" title="Billing">
-            <BillingGlyph />
-          </Link>
-        </nav>
-
-        <div className="rail__footer">
-          {settings && (
-            <Link className="rail-btn" href="/members" aria-label="Members & roles" title="Members & roles">
-              <SettingsIcon />
+          <nav className="rail__nav" aria-label="Sections">
+            {railItems.map((item) => {
+              const href = NAV_ROUTES[item.id];
+              const content = (
+                <>
+                  <span className="rail-btn__icon"><NavGlyph id={item.id} /></span>
+                  <span className="rail-btn__label">{item.label}</span>
+                </>
+              );
+              return href !== undefined ? (
+                <Link
+                  key={item.id}
+                  className="rail-btn"
+                  href={href}
+                  aria-label={item.label}
+                  title={!railExpanded ? item.label : undefined}
+                >
+                  {content}
+                </Link>
+              ) : (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`rail-btn${item.active ? " rail-btn--active" : ""}`}
+                  aria-current={item.active ? "page" : undefined}
+                  aria-label={item.label}
+                  title={!railExpanded ? item.label : undefined}
+                >
+                  {content}
+                </button>
+              );
+            })}
+            <Link className="rail-btn" href="/tasks" aria-label="Tasks" title={!railExpanded ? "Tasks" : undefined}>
+              <span className="rail-btn__icon"><TasksGlyph /></span>
+              <span className="rail-btn__label">Tasks</span>
             </Link>
-          )}
-          {/* Logout is a POST so a prefetch/link can't sign the user out. */}
-          <form action="/api/auth/logout" method="post">
-            <button
-              type="submit"
-              className="rail-btn"
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <LogOutIcon />
-            </button>
-          </form>
-        </div>
-      </aside>
+            <Link className="rail-btn" href="/deliveries" aria-label="Deliveries" title={!railExpanded ? "Deliveries" : undefined}>
+              <span className="rail-btn__icon"><DeliveriesGlyph /></span>
+              <span className="rail-btn__label">Deliveries</span>
+            </Link>
+            <Link className="rail-btn" href="/billing" aria-label="Billing" title={!railExpanded ? "Billing" : undefined}>
+              <span className="rail-btn__icon"><BillingGlyph /></span>
+              <span className="rail-btn__label">Billing</span>
+            </Link>
+          </nav>
+
+          <div className="rail__footer">
+            {settings && (
+              <Link className="rail-btn" href="/members" aria-label="Members & roles" title={!railExpanded ? "Members & roles" : undefined}>
+                <span className="rail-btn__icon"><SettingsIcon /></span>
+                <span className="rail-btn__label">Members & roles</span>
+              </Link>
+            )}
+            <form action="/api/auth/logout" method="post" style={{ width: '100%' }}>
+              <button
+                type="submit"
+                className="rail-btn"
+                aria-label="Sign out"
+                title={!railExpanded ? "Sign out" : undefined}
+              >
+                <span className="rail-btn__icon"><LogOutIcon /></span>
+                <span className="rail-btn__label">Sign out</span>
+              </button>
+            </form>
+            {onCollapse && (
+              <button
+                type="button"
+                className="rail-btn"
+                onClick={onCollapse}
+                aria-label="Collapse sidebar"
+                title={!railExpanded ? "Collapse sidebar" : undefined}
+                style={{ marginTop: 'var(--sp-2)' }}
+              >
+                <span className="rail-btn__icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+                </span>
+                <span className="rail-btn__label">Collapse</span>
+              </button>
+            )}
+          </div>
+        </aside>
+      </div>
 
       <aside className="subbar" aria-label="Clients">
         <div className="subbar__search">
