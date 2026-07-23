@@ -659,6 +659,15 @@ export async function fetchCreativeArtifact(
   return response;
 }
 
+/** Raw SVG master text for the in-product canvas editor. */
+export async function fetchCreativeSvg(
+  creativeId: string,
+  sessionToken?: string,
+): Promise<string> {
+  const response = await fetchCreativeArtifact(creativeId, "svg", sessionToken);
+  return response.text();
+}
+
 /** POST /jobs/{id}/creatives body — mint a new creative version (the copy edit → new version path). */
 export interface CreateCreativeBody {
   template_key: string;
