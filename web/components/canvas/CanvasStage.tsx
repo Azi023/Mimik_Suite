@@ -147,6 +147,14 @@ const SAFE_AREA_INSET_RATIO = 0.05;
 const RULER_SIZE_PX = 20;
 const RULER_LABEL_SPACING_PX = 84;
 const RULER_MINOR_DIVISIONS = 5;
+const NUDGE_DIRECTION: Readonly<
+  Partial<Record<string, readonly [x: number, y: number]>>
+> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
 
 interface ResizeHandleDefinition {
   handle: ResizeHandle;
@@ -352,6 +360,7 @@ export function CanvasStage({
   onAddAsk,
   busy,
 }: CanvasStageProps): JSX.Element {
+  const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const baseRef = useRef<EditorBaseState | null>(null);
@@ -506,7 +515,7 @@ export function CanvasStage({
 
   const getCanonicalTransform = useCallback(
     (layerId: CanvasLayerId): LayerTransform =>
-      foldedRef.current.transform[layerId] ?? IDENTITY_TRANSFORM,
+      fold(historyRef.current.ops).transform[layerId] ?? IDENTITY_TRANSFORM,
     [],
   );
 
@@ -892,6 +901,23 @@ export function CanvasStage({
     }
   }
 
+  function nudgeSelectedLayer(deltaX: number, deltaY: number): void {
+    if (selectedId === null || draggingLayerRef.current !== null) {
+      return;
+    }
+    const current = getCanonicalTransform(selectedId);
+    activeDragOpIdRef.current = nextOperationId();
+    try {
+      upsertTransformOperation(selectedId, {
+        ...current,
+        dx: current.dx + deltaX,
+        dy: current.dy + deltaY,
+      });
+    } finally {
+      activeDragOpIdRef.current = null;
+    }
+  }
+
   function handleEditorKeyDown(
     event: ReactKeyboardEvent<HTMLDivElement>,
   ): void {
@@ -902,9 +928,26 @@ export function CanvasStage({
       return;
     }
     const key = event.key.toLowerCase();
-    
+
     if (!event.metaKey && !event.ctrlKey) {
-      if (key === "f") {
+      const nudgeStep = event.shiftKey ? 10 : 1;
+      const nudgeDirection = NUDGE_DIRECTION[event.key];
+
+      if (selectedId !== null && nudgeDirection !== undefined) {
+        event.preventDefault();
+        nudgeSelectedLayer(
+          nudgeDirection[0] * nudgeStep,
+          nudgeDirection[1] * nudgeStep,
+        );
+      } else if (
+        selectedId !== null &&
+        (event.key === "Delete" || event.key === "Backspace")
+      ) {
+        event.preventDefault();
+        const isVisible =
+          fold(historyRef.current.ops).visible[selectedId] ?? true;
+        if (isVisible) toggleVisible(selectedId);
+      } else if (key === "f") {
         event.preventDefault();
         setIsFullscreen(f => !f);
       } else if (key === "escape") {
@@ -1023,7 +1066,7 @@ export function CanvasStage({
   }
 
   function toggleVisible(id: CanvasLayerId): void {
-    const current = folded.visible[id] ?? true;
+    const current = fold(historyRef.current.ops).visible[id] ?? true;
     addOperation({
       id: nextOperationId(),
       layer: id,
@@ -1058,6 +1101,7 @@ export function CanvasStage({
   function handleStageClick(
     event: ReactMouseEvent<HTMLDivElement>,
   ): void {
+    stageRef.current?.focus({ preventScroll: true });
     const layer = layerFromEventTarget(event.target);
     setSelectedId(layer === null ? null : layer.id);
   }
@@ -1147,6 +1191,7 @@ export function CanvasStage({
 
   return (
     <div
+      ref={stageRef}
       className="creview__stage"
       aria-label="Creative canvas"
       tabIndex={0}
@@ -1509,6 +1554,7 @@ export function CanvasStage({
                           )
                         }
                         onPointerDown={(event): void => {
+                          stageRef.current?.focus({ preventScroll: true });
                           setSelectedId(layer.id);
                           beginMove(layer.id, event);
                         }}
