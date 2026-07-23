@@ -4,7 +4,57 @@
 
 ---
 
-## ► LATEST (2026-07-23 pm6) — AUDIT BLOCKER FIXED · APP-SHELL UX SHIPPED · G4b ROTATION SHIPPED · guides in flight
+## ► LATEST (2026-07-23 pm7) — 3-PERSONA AUDIT TRIAGED + ACTED ON; nearly all P0/P1 cleared; only mobile editor left
+
+**11 commits this session, ALL Playwright/pytest-verified. Executor-driven (Codex geometry/logic + AGY big
+UI); Opus spec/review/verify/commit only — usage stayed lean.** Full commit list this session:
+`14a6ff8` onboarding session-expired fix · `7debdb6` shell UX (labeled nav + editor collapse) · `2446ea3`
+rotation · `710d520` rulers/margins/guides · `1feb30a` keyboard nudge/delete · `c8198ec` shell IA (client
+list only on /clients + switcher + rail alignment) · `f1fba17` version-head · `a4f43db` onboarding
+specific-error + missing-brand CTA · `8d9c47a` portal operator-preview banner.
+
+### AUDIT (docs/... 3-persona, "5.5/10") — TRIAGE + STATUS. NOTE: the audit ran on the PRE-rotation build
+### (its feature table lists rotation/rulers/guides/keyboard as "Missing" — several findings self-resolved).
+- **P0 #1 portal "leak" — NOT A REAL VULN (verified).** `api/routers/jobs.py` confines a CLIENT principal to
+  its own client_id; 18/18 portal+tenant tests green. It was a dev-preview artifact (portal authed as owner
+  dev-token). Fixed the PRESENTATION with an operator-preview banner (`8d9c47a`).
+- **P0 #2 mobile editor 0×0 @375px — STILL OPEN (biggest remaining lift).** See NEXT below.
+- **P1 #3 onboarding generic 422 — FIXED** (`a4f43db`): specific field+step, draft preserved, no dup client.
+- **P1 #4 missing-brand dead end — FIXED** (`a4f43db`): "Create brand kit & brief" CTA (brand===null) ->
+  /onboarding?clientId=. (Data note: the dev tenant has 0 Brand rows — dogfood creatives were seeded WITHOUT
+  Brand rows — so the CTA correctly shows for every current client. Consider a brand-backfill for demos.)
+- **P1 #5 version-head stale — FIXED** (`f1fba17`): monotonic MAX(version)+1 under a JobRow FOR UPDATE lock;
+  one canonical head rule everywhere; exactly one stable "current" across reload (proven).
+- **P1 #8 CanvasStage hook-order — NOT A BUG (verified).** All 30+ hooks are unconditional before the single
+  return; the audit hit a Fast-Refresh dev artifact (hook count changed between HMR edits -> self-healing
+  full reload). No production issue.
+- **#6/#13 all-clients chrome / your nav asks — FIXED** (`c8198ec`): client list only on /clients, TopBar
+  ClientSwitcher, rail alignment (centered icons, opaque overlay, no native tooltip, active state).
+- **P2 #12 keyboard nudge — FIXED** (`1feb30a`): arrow 1u / Shift 10u / Delete=hide / Undo.
+- Rotation + rulers/margins/guides/snap — SHIPPED this session (audit had them "Missing").
+- STILL OPEN (lower sev, not yet done): #7 100%-zoom pan path (note: space-drag pan already exists — reverify
+  against current build) · #10 hide→show op coalescing · #11 resize opposite-edge ~1px drift · #14 onboarding
+  review omits audience/voice/logo + duplicate h1s · #16 version labels show storage internals · #17 "Mark &
+  Tell" naming · #18/#19 404 title + dev microcopy.
+
+### ▶ NEXT (the one big remaining P0): MOBILE EDITOR @375px
+The editor is a desktop flex row (canvas + right Inspector); at 375px the canvas collapses to 0×0 while the
+inspector stays ~694px. Needs a DELIBERATE mobile mode: canvas-first, bottom-sheet layer/properties inspector,
+sticky Apply/Undo, a minimum usable canvas. Do NOT try to compress the 4-column desktop shell.
+- **FRONTEND-DESIGN PRECONDITION (CLAUDE.md): needs a concrete MOBILE visual reference (URL/screenshot/Figma)
+  before styling — ask the operator for one, or scaffold structure only.** Scope: web/components/canvas/
+  CanvasStage.tsx (responsive layout) + the editor route. Verify with Playwright at viewport 375px (assert the
+  canvas has non-zero width/height and Apply/Undo are reachable).
+
+### ▶ PRODUCT DECISIONS still signed-off, not yet built (from pm6): editor re-render format switcher (1:1/4:5/
+### 9:16) + custom-colour "both" mode (team custom hex; clients bounded to brand tints/shades). Build after mobile.
+
+### ⚠ EXECUTOR RULE (learned): FORBID `npm run build` in every executor spec — it writes web/.next and
+### corrupts the running dev server (cost a restart this session). Allow only `npx tsc --noEmit` + tests.
+
+---
+
+## ► (2026-07-23 pm6) — AUDIT BLOCKER FIXED · APP-SHELL UX SHIPPED · G4b ROTATION SHIPPED · guides in flight
 
 **Operating model this session: Opus specs/reviews/verifies; Codex + AGY do the bulk (to conserve Opus
 usage — operator flagged usage was tight). Every executor output Playwright-live-verified before commit.**
