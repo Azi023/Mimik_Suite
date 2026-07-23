@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { ClientSwitcher } from "./client-switcher";
 import Link from "next/link";
 import type { Client } from "@/lib/view-models";
 import { ThemeToggle } from "./ThemeToggle";
@@ -13,6 +14,7 @@ import { ChevronDownIcon, PlusIcon } from "./icons";
  */
 interface TopBarProps {
   activeClient: Client | null;
+  clients?: { id: string; name: string }[];
   /** Page title in the bar. Defaults to the board. */
   title?: string;
   /** Secondary crumb next to the title (omitted when not given). */
@@ -25,6 +27,7 @@ interface TopBarProps {
 
 export function TopBar({
   activeClient,
+  clients = [],
   title = "Board",
   crumb,
   navOpen,
@@ -60,19 +63,7 @@ export function TopBar({
           <span>No clients yet</span>
         </button>
       ) : (
-        <Link
-          href={`/clients/${encodeURIComponent(activeClient.id)}/edit`}
-          className="client-chip"
-          aria-label={`Edit ${activeClient.name} client and brand brief`}
-        >
-          <span className="client-chip__dot" aria-hidden="true" />
-          <span>
-            {activeClient.name} · {activeClient.vertical}
-          </span>
-          <span className="client-chip__caret" aria-hidden="true">
-            <ChevronDownIcon size={12} />
-          </span>
-        </Link>
+        <ClientSwitcher activeClient={activeClient} clients={clients} />
       )}
 
       <ThemeToggle />

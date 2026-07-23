@@ -67,7 +67,6 @@ export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JS
             type="button" 
             onClick={toggleChrome} 
             aria-label="Expand sidebar" 
-            title="Expand sidebar"
             className="icon-btn"
             style={{ width: 32, minWidth: 32, height: 32, minHeight: 32, borderRadius: 8 }}
           >
@@ -79,6 +78,7 @@ export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JS
       <div className="app-main">
         <TopBar
           activeClient={sidebar.activeClient}
+          clients={sidebar.groups.flatMap(g => g.projects)}
           title={title}
           crumb={crumb}
           navOpen={mobileNavOpen}

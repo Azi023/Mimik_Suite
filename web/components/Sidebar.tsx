@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type JSX } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { navItems, workspaceName, type NavItem, type SidebarGroup } from "@/lib/view-models";
 import {
   CalendarIcon,
@@ -43,6 +44,8 @@ const NAV_ROUTES: Partial<Record<NavItem["id"], string>> = {
 };
 
 export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
+  const pathname = usePathname();
+  const showSubbar = pathname.startsWith("/clients");
   const railItems = navItems.filter((item) => item.id !== "settings");
   const settings = navItems.find((item) => item.id === "settings");
   const hasClients = groups.some((group) => group.projects.length > 0);
@@ -77,6 +80,7 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
           transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1);
           z-index: 50;
           overflow: hidden;
+          background: var(--surface);
         }
         .rail-dynamic.is-expanded {
           width: 200px;
@@ -97,7 +101,8 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
         }
         .rail-dynamic .rail-btn {
           width: 42px;
-          justify-content: center;
+          justify-content: flex-start;
+          overflow: hidden;
           transition: width 0.15s ease, background 0.15s ease, color 0.15s ease;
         }
         .rail-dynamic.is-expanded .rail-btn {
@@ -149,10 +154,9 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
               return href !== undefined ? (
                 <Link
                   key={item.id}
-                  className="rail-btn"
+                  className={`rail-btn${(href === "/" ? pathname === "/" : pathname.startsWith(href)) ? " rail-btn--active" : ""}`}
                   href={href}
                   aria-label={item.label}
-                  title={!railExpanded ? item.label : undefined}
                 >
                   {content}
                 </Link>
@@ -163,21 +167,20 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
                   className={`rail-btn${item.active ? " rail-btn--active" : ""}`}
                   aria-current={item.active ? "page" : undefined}
                   aria-label={item.label}
-                  title={!railExpanded ? item.label : undefined}
                 >
                   {content}
                 </button>
               );
             })}
-            <Link className="rail-btn" href="/tasks" aria-label="Tasks" title={!railExpanded ? "Tasks" : undefined}>
+            <Link className={`rail-btn${pathname.startsWith("/tasks") ? " rail-btn--active" : ""}`} href="/tasks" aria-label="Tasks">
               <span className="rail-btn__icon"><TasksGlyph /></span>
               <span className="rail-btn__label">Tasks</span>
             </Link>
-            <Link className="rail-btn" href="/deliveries" aria-label="Deliveries" title={!railExpanded ? "Deliveries" : undefined}>
+            <Link className={`rail-btn${pathname.startsWith("/deliveries") ? " rail-btn--active" : ""}`} href="/deliveries" aria-label="Deliveries">
               <span className="rail-btn__icon"><DeliveriesGlyph /></span>
               <span className="rail-btn__label">Deliveries</span>
             </Link>
-            <Link className="rail-btn" href="/billing" aria-label="Billing" title={!railExpanded ? "Billing" : undefined}>
+            <Link className={`rail-btn${pathname.startsWith("/billing") ? " rail-btn--active" : ""}`} href="/billing" aria-label="Billing">
               <span className="rail-btn__icon"><BillingGlyph /></span>
               <span className="rail-btn__label">Billing</span>
             </Link>
@@ -185,7 +188,7 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
 
           <div className="rail__footer">
             {settings && (
-              <Link className="rail-btn" href="/members" aria-label="Members & roles" title={!railExpanded ? "Members & roles" : undefined}>
+              <Link className={`rail-btn${pathname.startsWith("/members") ? " rail-btn--active" : ""}`} href="/members" aria-label="Members & roles">
                 <span className="rail-btn__icon"><SettingsIcon /></span>
                 <span className="rail-btn__label">Members & roles</span>
               </Link>
@@ -195,7 +198,6 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
                 type="submit"
                 className="rail-btn"
                 aria-label="Sign out"
-                title={!railExpanded ? "Sign out" : undefined}
               >
                 <span className="rail-btn__icon"><LogOutIcon /></span>
                 <span className="rail-btn__label">Sign out</span>
@@ -207,7 +209,6 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
                 className="rail-btn"
                 onClick={onCollapse}
                 aria-label="Collapse sidebar"
-                title={!railExpanded ? "Collapse sidebar" : undefined}
                 style={{ marginTop: 'var(--sp-2)' }}
               >
                 <span className="rail-btn__icon">
@@ -220,6 +221,7 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
         </aside>
       </div>
 
+      {showSubbar && (
       <aside className="subbar" aria-label="Clients">
         <div className="subbar__search">
           <SearchIcon />
@@ -288,6 +290,7 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
           New client
         </Link>
       </aside>
+      )}
     </div>
   );
 }
