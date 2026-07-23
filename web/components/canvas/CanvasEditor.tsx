@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type JSX } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import Link from "next/link";
 import type { ApiColorRole, ApiVersionHistory } from "@/lib/api";
 import {
@@ -13,7 +13,7 @@ import {
   type CanvasStageHandle,
   type CanvasStageSnapshot,
 } from "./CanvasStage";
-import { VersionRail } from "./VersionRail";
+import { canonicalCreativeHead, VersionRail } from "./VersionRail";
 import {
   type ApiCanvasRevision,
   type ApiRegionAsk,
@@ -72,6 +72,8 @@ interface PendingRevert {
   ordinal: number;
 }
 
+type HeadSyncState = "loading" | "ready" | "error";
+
 function hasCanvasRevisionChanges(revision: ApiCanvasRevision): boolean {
   return (
     revision.layer_ops.length > 0 ||
@@ -125,8 +127,10 @@ export function CanvasEditor({
   brandName,
   clientMismatch,
 }: CanvasEditorProps): JSX.Element {
+  const initialHeadId =
+    canonicalCreativeHead(initialVersions.versions)?.creative_id ?? creativeId;
   const stageControlsRef = useRef<CanvasStageHandle>(null);
-  const [currentId, setCurrentId] = useState<string>(creativeId);
+  const [currentId, setCurrentId] = useState<string>(initialHeadId);
   const [currentSvg, setCurrentSvg] = useState<string>(svg);
   const [versions, setVersions] = useState<ApiVersionHistory>(initialVersions);
   const [pendingRevision, setPendingRevision] = useState<ApiCanvasRevision | null>(null);
@@ -137,10 +141,46 @@ export function CanvasEditor({
   const [stageKey, setStageKey] = useState(0);
   const [revising, setRevising] = useState(false);
   const [reverting, setReverting] = useState(false);
+  const [headSyncState, setHeadSyncState] = useState<HeadSyncState>(
+    initialHeadId === creativeId ? "ready" : "loading",
+  );
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
 
   const [askText, setAskText] = useState("");
+
+  useEffect(() => {
+    if (initialHeadId === creativeId) return;
+
+    const controller = new AbortController();
+    async function loadCanonicalHead(): Promise<void> {
+      try {
+        const response = await fetch(
+          `/api/creatives/${encodeURIComponent(initialHeadId)}/svg`,
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`Current creative SVG returned ${String(response.status)}`);
+        }
+        const headSvg = await response.text();
+        if (controller.signal.aborted) return;
+        setCurrentSvg(headSvg);
+        setStageKey((key) => key + 1);
+        setHeadSyncState("ready");
+      } catch (loadError: unknown) {
+        if (controller.signal.aborted) return;
+        console.warn(`[mimik-web] current creative head failed to load (${String(loadError)})`);
+        setError("The current creative version could not be loaded. Reload and try again.");
+        setHeadSyncState("error");
+      }
+    }
+
+    void loadCanonicalHead();
+    return (): void => controller.abort();
+  }, [creativeId, initialHeadId]);
 
   // The stage emits its FULL accumulated state each time — replace ours, keep the ask.
   const handleStageChange = useCallback((revision: ApiCanvasRevision): void => {
@@ -161,7 +201,7 @@ export function CanvasEditor({
     [],
   );
 
-  const busy = revising || reverting;
+  const busy = revising || reverting || headSyncState !== "ready";
   const pendingAsk = pendingRevision?.ask ?? null;
   const hasPendingChanges =
     stageSnapshot.history.ops.length > 0 || pendingAsk !== null;
@@ -291,7 +331,11 @@ export function CanvasEditor({
             {busy
               ? revising
                 ? "Revising…"
-                : "Reverting…"
+                : reverting
+                  ? "Reverting…"
+                  : headSyncState === "loading"
+                    ? "Loading current…"
+                    : "Current unavailable"
               : hasPendingChanges
                 ? "Pending changes"
                 : "Up to date"}
@@ -453,7 +497,7 @@ export function CanvasEditor({
           versions={versions.versions}
           currentId={currentId}
           onRevert={requestRevert}
-          reverting={reverting}
+          reverting={busy}
         />
       </aside>
     </div>

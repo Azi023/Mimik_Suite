@@ -7,7 +7,7 @@ import type { ApiCreativeVersionInfo } from "@/lib/api";
 export interface VersionRailProps {
   /** Persisted history from GET /creatives/{id}/versions (any order — rendered newest-first). */
   versions: ApiCreativeVersionInfo[];
-  /** The creative currently on the stage — its row is tagged and not revertable. */
+  /** Fallback while an empty history is loading; populated histories derive their own head. */
   currentId: string;
   onRevert: (toCreativeId: string, ordinal: number) => void;
   /** True while a revert is in flight — all revert buttons disable together. */
@@ -19,6 +19,12 @@ const THUMB_SIZE = 44;
 interface OrderedVersion {
   version: ApiCreativeVersionInfo;
   ordinal: number;
+}
+
+function compareStableStrings(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function formatWhen(iso: string): string {
@@ -33,22 +39,36 @@ function formatWhen(iso: string): string {
   });
 }
 
+/** Ascending form of the API's canonical head rule: version, created_at, creative_id. */
+export function compareCreativeVersions(
+  left: ApiCreativeVersionInfo,
+  right: ApiCreativeVersionInfo,
+): number {
+  const byVersion = left.version - right.version;
+  if (byVersion !== 0) return byVersion;
+
+  // API datetimes are ISO-8601 strings in one normalized representation. Comparing
+  // the full value preserves database microseconds that JavaScript Date would truncate.
+  const byTimestamp = compareStableStrings(left.created_at, right.created_at);
+  if (byTimestamp !== 0) return byTimestamp;
+
+  return compareStableStrings(left.creative_id, right.creative_id);
+}
+
+/** Highest canonical version, including deterministic handling for legacy version ties. */
+export function canonicalCreativeHead(
+  versions: readonly ApiCreativeVersionInfo[],
+): ApiCreativeVersionInfo | null {
+  if (versions.length === 0) return null;
+  return versions.reduce((head, candidate) =>
+    compareCreativeVersions(candidate, head) > 0 ? candidate : head
+  );
+}
+
 function orderVersions(
   versions: readonly ApiCreativeVersionInfo[],
 ): OrderedVersion[] {
-  const oldestFirst = [...versions].sort((left, right) => {
-    const leftTime = Date.parse(left.created_at);
-    const rightTime = Date.parse(right.created_at);
-    if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
-      const byTime = leftTime - rightTime;
-      if (byTime !== 0) return byTime;
-    } else if (Number.isFinite(leftTime)) {
-      return -1;
-    } else if (Number.isFinite(rightTime)) {
-      return 1;
-    }
-    return left.creative_id.localeCompare(right.creative_id);
-  });
+  const oldestFirst = [...versions].sort(compareCreativeVersions);
   return oldestFirst
     .map((version, index) => ({ version, ordinal: index + 1 }))
     .reverse();
@@ -104,6 +124,7 @@ export function VersionRail({
   reverting,
 }: VersionRailProps): JSX.Element {
   const ordered = orderVersions(versions);
+  const canonicalCurrentId = canonicalCreativeHead(versions)?.creative_id ?? currentId;
 
   return (
     <div className="creview__section" aria-label="Version history">
@@ -118,7 +139,7 @@ export function VersionRail({
       ) : (
         <ul className="creview__thread">
           {ordered.map(({ version, ordinal }) => {
-            const isCurrent = version.creative_id === currentId;
+            const isCurrent = version.creative_id === canonicalCurrentId;
             return (
               <li key={version.creative_id} className="creview__event">
                 <VersionThumb version={version} />

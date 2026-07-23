@@ -133,6 +133,17 @@ def _stub_renderer(
     return calls
 
 
+def _canonical_head(versions: list[dict[str, object]]) -> dict[str, object]:
+    return max(
+        versions,
+        key=lambda version: (
+            int(version["version"]),
+            str(version["created_at"]),
+            str(version["creative_id"]),
+        ),
+    )
+
+
 async def test_create_creative_doc_builds_and_persists_lineage_chain(
     session: AsyncSession,
 ) -> None:
@@ -219,6 +230,47 @@ async def test_list_creative_versions_is_ordered_and_tenant_scoped(
     assert [row.id for row in versions] == [first.id, second.id, third.id]
     assert [row.version for row in versions] == [1, 2, 3]
     assert all(row.tenant_id == tenant_a.id for row in versions)
+
+
+async def test_legacy_version_ties_use_the_same_deterministic_head_everywhere(
+    session: AsyncSession,
+) -> None:
+    tenant = await repo.create_tenant(session, name="Mimik", slug="legacy-head")
+    first = await repo.create_creative_doc(
+        session,
+        tenant_id=tenant.id,
+        id="legacy-v1",
+        job_id="legacy-job",
+        manifest={},
+    )
+    tied_newer_id = await repo.create_creative_doc(
+        session,
+        tenant_id=tenant.id,
+        id="legacy-v3-z",
+        job_id="legacy-job",
+        manifest={},
+        version=3,
+        created_at=first.created_at,
+    )
+    await repo.create_creative_doc(
+        session,
+        tenant_id=tenant.id,
+        id="legacy-v3-a",
+        job_id="legacy-job",
+        manifest={},
+        version=3,
+        created_at=first.created_at,
+    )
+
+    versions = await repo.list_creative_versions(
+        session,
+        tenant_id=tenant.id,
+        job_id="legacy-job",
+    )
+    latest = await repo.list_latest_creatives(session, tenant_id=tenant.id)
+
+    assert versions[-1].id == tied_newer_id.id
+    assert [row.id for row in latest] == [tied_newer_id.id]
 
 
 async def test_create_creative_doc_rejects_cross_tenant_parent(
@@ -560,6 +612,178 @@ async def test_revert_creates_new_head_rerenders_and_keeps_existing_versions(
     ]
     assert versions[-1]["parent_id"] == second_id
     assert versions[-1]["note"] == "revert to v1"
+
+
+async def test_apply_from_stale_id_uses_job_max_and_reloads_the_same_current_head(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("source.png").write_bytes(b"source")
+    _stub_renderer(monkeypatch)
+    _tenant_id, token = await _create_tenant(client, name="Mimik", slug="stale-apply")
+    _client_id, job_id, first_id = await _create_creative(
+        client,
+        token=token,
+        suffix="stale-apply",
+    )
+    second = await client.post(
+        f"/creatives/{first_id}/revise",
+        json={"edits": {"headline": "Version two"}},
+        headers=_auth(token),
+    )
+    assert second.status_code == 201, second.text
+
+    applied = await client.post(
+        f"/creatives/{first_id}/revise",
+        json={"edits": {"headline": "Applied from a stale editor URL"}},
+        headers=_auth(token),
+    )
+
+    assert applied.status_code == 201, applied.text
+    applied_creative = applied.json()["creative"]
+    assert applied_creative["version"] == 3
+
+    first_load = await client.get(
+        f"/creatives/{first_id}/versions",
+        headers=_auth(token),
+    )
+    reload = await client.get(
+        f"/creatives/{first_id}/versions",
+        headers=_auth(token),
+    )
+    assert first_load.status_code == 200, first_load.text
+    assert reload.status_code == 200, reload.text
+    first_versions = first_load.json()["versions"]
+    reloaded_versions = reload.json()["versions"]
+    assert [version["version"] for version in first_versions] == [1, 2, 3]
+    assert len({version["version"] for version in first_versions}) == 3
+    assert _canonical_head(first_versions)["creative_id"] == applied_creative["id"]
+    assert _canonical_head(reloaded_versions)["creative_id"] == applied_creative["id"]
+
+    gallery = await client.get("/creatives", headers=_auth(token))
+    assert gallery.status_code == 200, gallery.text
+    current = next(
+        creative for creative in gallery.json() if creative["job_id"] == job_id
+    )
+    assert current["id"] == applied_creative["id"]
+
+
+async def test_revert_from_stale_id_uses_job_max_and_preserves_every_version(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("source.png").write_bytes(b"source")
+    _stub_renderer(monkeypatch)
+    _tenant_id, token = await _create_tenant(client, name="Mimik", slug="stale-revert")
+    _client_id, job_id, first_id = await _create_creative(
+        client,
+        token=token,
+        suffix="stale-revert",
+    )
+    second = await client.post(
+        f"/creatives/{first_id}/revise",
+        json={"edits": {"headline": "Version two"}},
+        headers=_auth(token),
+    )
+    assert second.status_code == 201, second.text
+    second_id = second.json()["creative"]["id"]
+    third = await client.post(
+        f"/creatives/{second_id}/revise",
+        json={"edits": {"headline": "Version three"}},
+        headers=_auth(token),
+    )
+    assert third.status_code == 201, third.text
+    third_id = third.json()["creative"]["id"]
+
+    reverted = await client.post(
+        f"/creatives/{first_id}/revert",
+        json={"to_creative_id": first_id},
+        headers=_auth(token),
+    )
+
+    assert reverted.status_code == 201, reverted.text
+    reverted_creative = reverted.json()["creative"]
+    assert reverted_creative["version"] == 4
+
+    history = await client.get(
+        f"/creatives/{reverted_creative['id']}/versions",
+        headers=_auth(token),
+    )
+    assert history.status_code == 200, history.text
+    versions = history.json()["versions"]
+    assert [version["version"] for version in versions] == [1, 2, 3, 4]
+    assert {version["creative_id"] for version in versions} == {
+        first_id,
+        second_id,
+        third_id,
+        reverted_creative["id"],
+    }
+    assert _canonical_head(versions)["creative_id"] == reverted_creative["id"]
+
+    gallery = await client.get("/creatives", headers=_auth(token))
+    assert gallery.status_code == 200, gallery.text
+    current = next(
+        creative for creative in gallery.json() if creative["job_id"] == job_id
+    )
+    assert current["id"] == reverted_creative["id"]
+
+
+async def test_apply_then_two_reverts_stays_strictly_monotonic_with_one_current(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("source.png").write_bytes(b"source")
+    _stub_renderer(monkeypatch)
+    _tenant_id, token = await _create_tenant(client, name="Mimik", slug="repeat-revert")
+    _client_id, _job_id, first_id = await _create_creative(
+        client,
+        token=token,
+        suffix="repeat-revert",
+    )
+    applied = await client.post(
+        f"/creatives/{first_id}/revise",
+        json={"edits": {"headline": "Applied edit"}},
+        headers=_auth(token),
+    )
+    assert applied.status_code == 201, applied.text
+    applied_id = applied.json()["creative"]["id"]
+    first_revert = await client.post(
+        f"/creatives/{applied_id}/revert",
+        json={"to_creative_id": first_id},
+        headers=_auth(token),
+    )
+    assert first_revert.status_code == 201, first_revert.text
+    first_revert_id = first_revert.json()["creative"]["id"]
+    second_revert = await client.post(
+        f"/creatives/{first_revert_id}/revert",
+        json={"to_creative_id": first_id},
+        headers=_auth(token),
+    )
+    assert second_revert.status_code == 201, second_revert.text
+    second_revert_id = second_revert.json()["creative"]["id"]
+
+    history = await client.get(
+        f"/creatives/{first_id}/versions",
+        headers=_auth(token),
+    )
+    assert history.status_code == 200, history.text
+    versions = history.json()["versions"]
+    assert [version["version"] for version in versions] == [1, 2, 3, 4]
+    head_id = _canonical_head(versions)["creative_id"]
+    current_versions = [
+        version
+        for version in versions
+        if version["version"] == max(item["version"] for item in versions)
+    ]
+    assert len(current_versions) == 1
+    assert head_id == second_revert_id
+    assert current_versions[0]["creative_id"] == second_revert_id
 
 
 async def test_revert_rejects_target_from_different_job(

@@ -342,6 +342,19 @@ async def get_invitation_by_email(
 
 
 # --- CreativeDoc ---
+def _creative_version_order(*, newest_first: bool):
+    """One canonical creative-head rule; reverse it for stable oldest-first history."""
+    columns = (
+        CreativeDocRow.version,
+        CreativeDocRow.created_at,
+        CreativeDocRow.id,
+    )
+    return tuple(
+        column.desc() if newest_first else column.asc()
+        for column in columns
+    )
+
+
 async def create_creative_doc(
     session: AsyncSession,
     *,
@@ -361,7 +374,26 @@ async def create_creative_doc(
             raise ValueError(
                 f"Parent creative document {parent_id!r} was not found in tenant {tenant_id!r}"
             )
-        fields["version"] = parent.version + 1
+        job_id = fields.get("job_id", parent.job_id)
+        fields["job_id"] = job_id
+
+        # Serialize production revisions for this tenant/job before MAX+1. The repo-only
+        # lineage tests intentionally use synthetic job ids, where no JobRow exists.
+        lock_job_stmt = (
+            select(JobRow.id)
+            .where(
+                JobRow.id == job_id,
+                JobRow.tenant_id == tenant_id,
+            )
+            .with_for_update()
+        )
+        await session.execute(lock_job_stmt)
+        max_version_stmt = select(func.max(CreativeDocRow.version)).where(
+            CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.job_id == job_id,
+        )
+        max_version = (await session.execute(max_version_stmt)).scalar_one()
+        fields["version"] = (max_version or 0) + 1
 
     row = CreativeDocRow(
         tenant_id=tenant_id,
@@ -401,7 +433,7 @@ async def list_creative_versions(
     stmt = (
         select(CreativeDocRow)
         .where(CreativeDocRow.tenant_id == tenant_id, CreativeDocRow.job_id == job_id)
-        .order_by(CreativeDocRow.version.asc())
+        .order_by(*_creative_version_order(newest_first=False))
     )
     return list((await session.execute(stmt)).scalars())
 
@@ -418,11 +450,7 @@ async def list_latest_creatives(
         func.row_number()
         .over(
             partition_by=CreativeDocRow.job_id,
-            order_by=(
-                CreativeDocRow.version.desc(),
-                CreativeDocRow.created_at.desc(),
-                CreativeDocRow.id.desc(),
-            ),
+            order_by=_creative_version_order(newest_first=True),
         )
         .label("creative_rank"),
     ).where(CreativeDocRow.tenant_id == tenant_id)
@@ -442,7 +470,7 @@ async def list_latest_creatives(
             CreativeDocRow.tenant_id == tenant_id,
             ranked.c.creative_rank == 1,
         )
-        .order_by(CreativeDocRow.created_at.desc())
+        .order_by(CreativeDocRow.created_at.desc(), CreativeDocRow.id.desc())
     )
     return list((await session.execute(stmt)).scalars())
 
