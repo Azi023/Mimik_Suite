@@ -351,3 +351,29 @@ plan file; the per-client creative ambitions lived in chat until STYLE_PROFILES.
 on 07-22 — 4 days after the plan. Anything else from the early conversations that never reached
 disk (other client treatments? Jasmine-side clients? video ambitions beyond "plugs in later"?)
 should be dictated into this doc's §3 now, while it's still recoverable.
+
+---
+
+## §7 — OPERATOR ANSWERS + SATELLITE VISION (2026-07-24, resolves §6)
+
+### Answers to the blocking questions
+1. **Simply Nikah assets** → engine-generated SVG vector library, sourced/seeded from **free vector packs/stacks online** (not paid-per-render). Build the generator + a starter modesty-safe vector set from free sources.
+2. **Island Cart product photos** → **YES, they exist** (held by the ops manager; to be added post-deploy). Requirement this exposes: the **ops manager must be able to add per-client brand assets** — fonts, logos, brand assets, and client-shared assets — conveniently, so we can composite on top of them. STATUS: asset upload IS built (`POST /brands/{brand_id}/assets`, logo→`Brand.tokens.logo.ref`) — but the **compositor does not load brand FONTS** (quality cap) and there is no polished ops-side "brand asset library" UI. Gap = fonts-in-compositor + a convenient asset-management surface.
+3. **Google Drive** → OAuth was set up on the **mimikcreations** Google account; env has the creds and the refresh-token file was shared. Presumed configured. So the 0-deliveries is "**never exercised in this dev instance**," not broken. ACTION: run ONE real approval end-to-end + confirm the file lands in the mimikcreations Drive folder; reconcile which env/account is live.
+4. **Semantic-SVG master** → **ACCEPTED** as the edit model (retires literal per-layer regeneration; resolves the layer-tree fork). BUT two must-haves: (a) **wire the L1 imagery generation** — `creative/generate.py` is "the piece that was never wired" → this is why L1–L5 don't work today; (b) **PSD download must play along** — `GET /creatives/{id}/export.psd` IS built; verify it exports the semantic layers as real PSD layers (note: 2 pytoshop test failures — check the dependency).
+5. **Stripe / storefront** → **DEFERRED** (hard to open a Stripe account from Sri Lanka). Bar first = "all 3 clients render their real design language." Revisit Stripe when an account exists.
+
+### The satellite-integration vision (operator: "the main idea of the suite")
+The suite was always meant to be an **orchestrator that calls the already-built Mimik tools** (confirmed in `docs/DECISIONS.md` #2 + `docs/FRONTEND_ROADMAP.md` Track B). This half is [DNB]. Elevate it in the roadmap:
+- **Mimik_Proofkit → first-class QA + reporting satellite.** Today it's only an optional guarded import for brief extraction (`brief_extraction.py:186`). Vision: use it as the **QA engineer** (audit creatives/sites) AND as the **PDF / report / template generator** (client-ready deliverables). Proofkit itself "needs improvements" (operator). Call it via CLI/API — do not absorb.
+- **Mimik_Leads / Mimik_Sales → CRM + acquisition surface via a CLEAN BOUNDARY.** `FRONTEND_ROADMAP` B12 CRM is fed from leads + Proofkit outputs. HARD CONSTRAINT (CLAUDE.md + DECISIONS #2): **Mimik_Sales is confidential (lead PII + keys) — NEVER import it into this product.** Integrate by calling its API / reading exported outputs, never by absorbing the repo/data.
+- **Creative engine** → core (already in-repo).
+- **Planflow (FRONTEND_ROADMAP B8)** → e-commerce / Meta-ad-planning satellite (same-stack monorepo) — call it, don't absorb.
+- **Track-B internal command-center** → one cockpit surfacing ALL Mimik businesses (leads, Proofkit, finance, hosting, CRM, Planflow). Big [DNB] surface; the ⌘K Command Center is the entry to this.
+
+### Revised P0 for the fresh session (folding the answers in)
+- **Lane A (backend/logic, Codex):** run Drive end-to-end once + reconcile the mimikcreations OAuth env; re-wire `run_brand_qa` + logo-contrast into the LIVE generate path; wire `creative/generate.py` L1 imagery generation so L1–L5 actually produce.
+- **Lane B (per-client craft, Codex + design):** Simply Nikah silhouettes v1 (engine vector set from free packs + modesty QA) + Island Cart product-cutout pipeline (pending photos from ops).
+- **Lane C (assets/quality):** load brand FONTS into the compositor; a convenient ops-side brand-asset library UI; verify PSD export produces real layers.
+- **Lane D (satellite bridge):** stub the Proofkit QA/report call boundary + the leads/CRM read boundary (confidential-safe).
+- Deferred: Stripe/storefront.
