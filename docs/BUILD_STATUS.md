@@ -161,3 +161,21 @@ copy/art-direction through OpenRouter/OpenAI** (done — see below).
 **Hot-file `api/services/creative_generation.py` sequence** (never parallel): [B-01 ✅ · imagery ✅] → B-04 → B-06 → B-07 → B-11 → B-13 → A-03.
 **Next (W2):** B-03 (lineage migration) ∥ A-02 (typed /ops responses). Then W3: B-04→B-06→B-07 (strict, hot file) ∥ A-10 (admin). See the plan's wave matrix.
 **Ongoing paid spend:** text chain uses OpenRouter/OpenAI (cheap per call, operator-approved). Image gate (`MIMIK_ALLOW_PAID_IMAGES`) stays OFF by default; Simply Nikah illustration validated once (faceless/on-brand).
+
+---
+
+## 2026-07-23 (session 3 — Opus orchestrator) — W4 parallel tracks (Codex backend ∥ Fable frontend)
+
+Two disjoint tracks, at most 2 executors at once. Executors never commit; Opus reviews every diff, runs the
+suite on the live :5434 DB, restarts the API for hot-file changes, then commits phase-tagged.
+
+| Task | What | Owner | Status | Verify |
+|---|---|---|---|---|
+| B-11 | client-role bounded/quota revise (reduced shape, 429, CLIENT_PORTAL, fail-closed) | Codex | ✅ `9288666` | 27 tests on :5434; ruff clean; API reboot clean |
+| B-08 | CanvasStage inline-SVG direct manipulation (pure component, sanitized) | Fable | ✅ `b0b1df4` | tsc/next-lint clean, zero any |
+| B-09 | CanvasEditor page + VersionRail + revert + mark-&-tell-AI; bearer server-side | Fable | ✅ `345b21d` | tsc clean across app; real endpoints wired |
+| B-13 | flywheel: edit_signals seam; EDIT/REJECTION signals (savepoint); ask→approve/revert feedback | Codex | ✅ `cc89d67` | 59 tests on :5434; ruff clean; API reboot clean |
+
+**Hot-file `creative_generation.py` sequence** now: [B-01·imagery·B-04·B-06·B-07·**B-11**·**B-13**] → **A-03 next**.
+**Wave 3 (in flight):** A-03 (generation queue + asyncio worker in lifespan) ∥ B-10 (ReviewPanel integration).
+Remaining after: A-04→A-05 (ops.py), A-06→A-07→A-11 (web board/calendar/deliveries), blocked A-08/A-09/B-12, gates A-12/B-14.

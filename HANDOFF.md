@@ -4,7 +4,49 @@
 
 ---
 
-## ► LATEST (2026-07-22 pm) — QA + EDITOR BUGS + ALL-3-CLIENTS IMAGERY + TEXT-CHAIN; COMMAND-CENTER/CANVAS PROGRAM STARTED
+## ► LATEST (2026-07-23 pm) — W4 CANVAS PROGRAM: B-11 · B-08 · B-09 · B-13 LANDED (client-bounds + editor + flywheel)
+
+**State:** Opus-orchestrated W4 running two parallel tracks (Codex backend ∥ Fable frontend, disjoint file
+scopes). Four tasks this session, all reviewed + live-verified on the :5434 DB + committed. Local product runs
+(API restarted twice to pick up the hot-file changes; clean boot both times). **Production still UNTOUCHED**
+(deploy HELD per operator). Local DB head unchanged: `c7e90f4a1b32` (no migration this wave).
+
+### ▶ RUN LOCALLY — unchanged from prior entry (paid TEXT keys in API env; uvicorn NOT --reload → restart after API change)
+Same commands as the entry below. Web: `cd web && NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev`.
+
+### ▶ WHAT LANDED THIS SESSION (all committed to main)
+- **B-11 (`9288666`)** — client-role bounded, quota-limited revise: `client` added to the revise gate;
+  reduced shape (text_edits/ask only — layer_ops/params → 422); `Capability.CLIENT_PORTAL` + fail-closed on
+  unbound client (404); rolling 24h quota (`client_revision_daily_quota`, default 5) → 429 w/
+  `X-Revision-Quota-Remaining`; cross-client → 404 via existing scope. revert stays team-only.
+  `repo.count_client_versions`. 6 tests. LIVE: 27-test suite green on :5434.
+- **B-08 (`b0b1df4`)** — CanvasStage: pure controlled inline-SVG editor (`web/components/canvas/` ×3 + api.ts
+  `fetchCreativeSvg`). DOMParser sanitize, select/drag/scale from `data-bbox`, visibility, brand-palette
+  recolor (fill_role=color NAME), inline text overlay; emits one `ApiCanvasRevision` upward, ZERO API calls.
+  tsc/lint clean, zero any.
+- **B-09 (`345b21d`)** — CanvasEditor page `web/app/creatives/[id]/edit`: mounts CanvasStage + Apply/Discard +
+  mark-&-tell-AI + VersionRail (real `listCreativeVersions`) + revert. api.ts: version types +
+  `listCreativeVersions`/`revertCreative` + `ReviseCreativeBody` retyped `Partial<ApiCanvasRevision>` superset.
+  Mutations run through NEW server actions so the httpOnly bearer never hits the browser. tsc clean across app.
+- **B-13 (`cc89d67`)** — flywheel: NEW `api/services/edit_signals.py` seam shared by creative + approval
+  services. revise→EDIT signal, revert→REJECTION signal (recorded via SAVEPOINT `begin_nested` — signal failure
+  degrades gracefully, never loses the version). `last_ask` stamped on L1 params → ask→approve `record_feedback`
+  accept, ask→revert decline (exception-safe, after commit). approval APPROVAL signal gains `edited_by_client`.
+  LIVE: 59-test suite green.
+
+### ▶ EXACT NEXT ACTION — wave 3: A-03 (backend) ∥ B-10 (frontend)
+Hot-file sequence on `creative_generation.py` reached: [B-01 · imagery · B-04 · B-06 · B-07 · B-11 · B-13] →
+**A-03 next** (generation queue service + `generate_client_creative(job_id=...)` + asyncio worker in lifespan +
+`repo.list_open_generation_tasks`). Then A-04 (/ops/queue+/ops/usage) → A-05 (command parser ⌘K backend).
+Track B: **B-10** (ReviewPanel integration — replace in-memory history[] with listCreativeVersions; conflicts
+with A-06 on ReviewPanel.tsx so land before A-06). Then A-06→A-07→A-11 (board/calendar/deliveries) on api.ts.
+BLOCKED until their backend: A-08 (A-04), A-09 (A-05), B-12 (B-11). Gates last: A-12, B-14.
+- Executors: Codex `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c approval_policy=never - < spec.md` (specs in `scratchpad/spec_*.md`); Fable via Agent tool (model: fable) + frontend-design skill. Executors NEVER commit; Opus reviews diff + live-verifies (restart API + run tests on :5434) + commits phase-tagged.
+- **Deploy: HELD** until all W4 done + operator sorts Supabase auth.
+
+---
+
+## ► (2026-07-22 pm) — QA + EDITOR BUGS + ALL-3-CLIENTS IMAGERY + TEXT-CHAIN; COMMAND-CENTER/CANVAS PROGRAM STARTED
 
 **State:** all 4 kickoff goals DONE + committed; the Fable-plan Command-Center/Canvas program is underway (Wave 1
 nearly complete). Local product runs; **production still UNTOUCHED** (deploy held per operator; my recommendation =
