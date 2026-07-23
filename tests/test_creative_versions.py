@@ -385,6 +385,126 @@ async def test_versions_are_ordered_tenant_scoped_and_client_scoped(
     assert hidden_history.status_code == 404
 
 
+async def test_list_all_creatives_returns_latest_per_job_newest_first_and_tenant_scoped(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("source.png").write_bytes(b"source")
+    _stub_renderer(monkeypatch)
+    tenant_id, token = await _create_tenant(client, name="Agency A", slug="gallery-a")
+    _old_client_id, old_job_id, old_creative_id = await _create_creative(
+        client,
+        token=token,
+        suffix="gallery-old",
+    )
+    revised = await client.post(
+        f"/creatives/{old_creative_id}/revise",
+        json={"edits": {"headline": "Latest version"}},
+        headers=_auth(token),
+    )
+    assert revised.status_code == 201, revised.text
+    revised_id = revised.json()["creative"]["id"]
+
+    _new_client_id, new_job_id, new_creative_id = await _create_creative(
+        client,
+        token=token,
+        suffix="gallery-new",
+    )
+    _foreign_tenant_id, foreign_token = await _create_tenant(
+        client,
+        name="Agency B",
+        slug="gallery-b",
+    )
+    _foreign_client_id, _foreign_job_id, foreign_creative_id = await _create_creative(
+        client,
+        token=foreign_token,
+        suffix="gallery-foreign",
+    )
+
+    response = await client.get("/creatives", headers=_auth(token))
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [creative["id"] for creative in payload] == [new_creative_id, revised_id]
+    assert [creative["job_id"] for creative in payload] == [new_job_id, old_job_id]
+    assert [creative["version"] for creative in payload] == [1, 2]
+    assert all(creative["tenant_id"] == tenant_id for creative in payload)
+    assert old_creative_id not in {creative["id"] for creative in payload}
+    assert foreign_creative_id not in {creative["id"] for creative in payload}
+
+    preview = await client.get(
+        f"/creatives/{revised_id}/preview",
+        headers=_auth(token),
+    )
+    assert preview.status_code == 200, preview.text
+
+
+async def test_list_all_creatives_confines_client_principal_to_own_client(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("source.png").write_bytes(b"source")
+    _stub_renderer(monkeypatch)
+    tenant_id, token = await _create_tenant(client, name="Agency A", slug="client-gallery")
+    own_client_id, _own_job_id, own_creative_id = await _create_creative(
+        client,
+        token=token,
+        suffix="client-gallery-own",
+    )
+    _other_client_id, _other_job_id, other_creative_id = await _create_creative(
+        client,
+        token=token,
+        suffix="client-gallery-other",
+    )
+
+    async def client_principal() -> Principal:
+        return Principal(
+            tenant_id=tenant_id,
+            role="client",
+            client_id=own_client_id,
+        )
+
+    app.dependency_overrides[get_principal] = client_principal
+    try:
+        response = await client.get("/creatives")
+    finally:
+        app.dependency_overrides.pop(get_principal, None)
+
+    assert response.status_code == 200, response.text
+    assert [creative["id"] for creative in response.json()] == [own_creative_id]
+    assert other_creative_id not in {creative["id"] for creative in response.json()}
+
+
+async def test_list_all_creatives_rejects_unbound_client_principal(
+    client: AsyncClient,
+) -> None:
+    tenant_id, token = await _create_tenant(
+        client,
+        name="Agency A",
+        slug="unbound-client-gallery",
+    )
+    await _create_creative(
+        client,
+        token=token,
+        suffix="unbound-client-gallery",
+    )
+
+    async def unbound_client_principal() -> Principal:
+        return Principal(tenant_id=tenant_id, role="client")
+
+    app.dependency_overrides[get_principal] = unbound_client_principal
+    try:
+        response = await client.get("/creatives")
+    finally:
+        app.dependency_overrides.pop(get_principal, None)
+
+    assert response.status_code == 403, response.text
+
+
 async def test_revert_creates_new_head_rerenders_and_keeps_existing_versions(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,

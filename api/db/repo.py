@@ -406,6 +406,47 @@ async def list_creative_versions(
     return list((await session.execute(stmt)).scalars())
 
 
+async def list_latest_creatives(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    client_id: str | None = None,
+) -> list[CreativeDocRow]:
+    """Latest-version creative for each job visible within the caller's tenant."""
+    ranked_stmt = select(
+        CreativeDocRow.id.label("creative_id"),
+        func.row_number()
+        .over(
+            partition_by=CreativeDocRow.job_id,
+            order_by=(
+                CreativeDocRow.version.desc(),
+                CreativeDocRow.created_at.desc(),
+                CreativeDocRow.id.desc(),
+            ),
+        )
+        .label("creative_rank"),
+    ).where(CreativeDocRow.tenant_id == tenant_id)
+    if client_id is not None:
+        ranked_stmt = ranked_stmt.join(
+            JobRow,
+            JobRow.id == CreativeDocRow.job_id,
+        ).where(
+            JobRow.tenant_id == tenant_id,
+            JobRow.client_id == client_id,
+        )
+    ranked = ranked_stmt.subquery()
+    stmt = (
+        select(CreativeDocRow)
+        .join(ranked, ranked.c.creative_id == CreativeDocRow.id)
+        .where(
+            CreativeDocRow.tenant_id == tenant_id,
+            ranked.c.creative_rank == 1,
+        )
+        .order_by(CreativeDocRow.created_at.desc())
+    )
+    return list((await session.execute(stmt)).scalars())
+
+
 async def list_creative_docs_in_window(
     session: AsyncSession,
     *,

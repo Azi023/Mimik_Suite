@@ -164,6 +164,26 @@ async def list_creatives(
         raise HTTPException(status_code=404, detail="Job not found")
     rows = await repo.list_creative_docs(session, tenant_id=principal.tenant_id, job_id=job_id)
     return [to_creative_doc(r) for r in rows]
+
+
+@artifact_router.get("", response_model=list[CreativeDoc])
+async def list_all_creatives(
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_session),
+) -> list[CreativeDoc]:
+    if principal.role == ActorRole.CLIENT.value and principal.client_id is None:
+        raise HTTPException(status_code=403, detail="Client principal has no client_id")
+    client_filter = (
+        principal.client_id if principal.role == ActorRole.CLIENT.value else None
+    )
+    rows = await repo.list_latest_creatives(
+        session,
+        tenant_id=principal.tenant_id,
+        client_id=client_filter,
+    )
+    return [to_creative_doc(r) for r in rows]
+
+
 @artifact_router.post("/{creative_id}/revise", response_model=GeneratedCreative, status_code=201)
 async def revise_creative_endpoint(
     creative_id: str,
