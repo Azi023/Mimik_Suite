@@ -23,14 +23,21 @@
 Verify scripts: `scratchpad/verify_editor.py` (recolor/hide/discard), `verify_g2.py` (undo/redo),
 `verify_g3_*.py` (zoom/inspector). Web 500 after big edits → `rm -rf web/.next` + restart `npm run dev`.
 
-### ▶ GATE 4 — REMAINING (the operator's explicit ask: resize from ALL sides, smooth)
-G4a (IN FLIGHT): backend render (svg.py applies rotation + non-uniform scale_x/scale_y from layer_overrides;
-revise wiring) ∥ frontend (editor-state LayerTransform → scaleX/scaleY; CanvasStage 8-handle resize = 4
-corners + 4 edges, anchor-opposite, rAF-smooth; canvas-types ApiLayerOp + scale_x/scale_y; toCanvasRevision
-emits them). Rotation contract is ready; rotation UI deferred to G4b (rotated overlay complexity).
-G4b (follow-on): rotation handle, layer tree (reorder/lock/rename/dup), align/distribute/snap/guides,
-full typography, multi-select, keyboard nudge/copy/paste/delete.
-Tool plan: Codex = render math + resize geometry (correctness); AGY = big UI; Opus specs + Playwright-verifies.
+### ▶ GATE 4a DONE — all-sides resize (the operator's explicit ask) — Playwright-PROVEN
+- **be (`11baf99`)** svg.py applies translate·rotate·scale(scale_x,scale_y about center) from layer_overrides
+  (BC: legacy uniform scale; identity→no transform); revise persists/inherits scale_x/scale_y/rotation.
+  43 tests green.
+- **fe (`5fc85b4`)** editor-state LayerTransform → {dx,dy,scaleX,scaleY}; CanvasStage 8 handles (4 corner + 4
+  edge, correct cursors); useLayerDrag.beginResize per-handle math (edge=1 axis, corner=both, anchor-opposite,
+  clamp 0.1..3, rAF-smooth, 1 undo step). toCanvasRevision emits scale_x/scale_y. 17 tests.
+- **PROVEN live:** dragging Panel's E edge grew width 226→322 with LEFT edge fixed + height unchanged;
+  recolor/undo/zoom still work (no regression). API restarted so Apply re-renders the resize.
+
+### ▶ GATE 4b — REMAINING (fuller precision toolkit; recommend FRESH session)
+Rotation HANDLE (contract + render already support rotation — just the UI: a rotate handle + rotated
+selection overlay/hit-box, which is the fiddly part); layer tree (reorder/lock/rename/duplicate);
+align/distribute/snap/guides/safe-areas; full typography (font/size/weight/spacing); multi-select;
+keyboard nudge/copy/paste/delete. Tool: Codex = geometry/logic; AGY = big UI; Opus specs + Playwright-verifies.
 
 ### ▶ ALSO STILL OPEN (paused): W4 backend A-05 (⌘K command) + frontend A-07/A-08/A-11/B-12 + gates A-12/B-14.
 
