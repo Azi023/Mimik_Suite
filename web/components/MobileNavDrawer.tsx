@@ -6,11 +6,11 @@ import { Sidebar } from "./Sidebar";
 
 /**
  * Off-canvas mobile navigation drawer (≤860px only; desktop hides it via CSS).
- * Reuses the desktop <Sidebar> wholesale so the mobile nav is pixel-identical:
- * same rail, client switcher, and logout. Slides in from the left over a scrim.
+ * Reuses the desktop <Sidebar> routes in an expanded mobile layout. The client
+ * list remains contextual to /clients, matching the desktop navigation.
  *
  * Closes on scrim click, Escape, or any link tap inside the panel. Focus moves
- * to the panel on open and returns to the opener (the topbar hamburger) on close.
+ * to the close control on open and returns to the opener on close.
  */
 interface MobileNavDrawerProps {
   groups: SidebarGroup[];
@@ -23,17 +23,23 @@ const FOCUSABLE_SELECTOR =
 
 export function MobileNavDrawer({ groups, open, onClose }: MobileNavDrawerProps): JSX.Element {
   const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
-  // On open: remember the opener and move focus into the dialog.
-  // On close (effect cleanup): hand focus back to the opener.
+  // On open: remember the opener, prevent background scrolling, and focus Close.
+  // On close (effect cleanup): restore both document state and opener focus.
   useEffect(() => {
     if (!open) return;
     restoreFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    panelRef.current?.focus();
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
     return () => {
-      restoreFocusRef.current?.focus();
+      document.body.style.overflow = previousBodyOverflow;
+      if (restoreFocusRef.current?.isConnected === true) {
+        restoreFocusRef.current.focus();
+      }
       restoreFocusRef.current = null;
     };
   }, [open]);
@@ -80,18 +86,102 @@ export function MobileNavDrawer({ groups, open, onClose }: MobileNavDrawerProps)
 
   return (
     <div id="mobile-nav" className={`mobile-nav${open ? " mobile-nav--open" : ""}`}>
+      <style>{`
+        @media (max-width: 860px) {
+          .mobile-nav__panel {
+            width: min(80vw, 300px);
+            flex-direction: column;
+            overflow: hidden;
+          }
+          .mobile-nav__head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--sp-3);
+            min-height: 60px;
+            padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+            border-bottom: 1px solid var(--line);
+            background: var(--surface);
+            flex-shrink: 0;
+          }
+          .mobile-nav__title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--ink);
+          }
+          .mobile-nav__close {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--sp-2);
+            min-height: 44px;
+            padding: 0 var(--sp-3);
+            border: 1px solid var(--line);
+            border-radius: var(--r-sm);
+            background: var(--surface);
+            color: var(--ink-2);
+            font-size: 13px;
+            font-weight: 600;
+          }
+          .mobile-nav__close:hover {
+            background: var(--surface-2);
+            color: var(--ink);
+          }
+          .mobile-nav__close:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+          }
+          .mobile-nav__panel > .side--mobile {
+            height: auto;
+            flex: 1;
+            min-height: 0;
+          }
+        }
+      `}</style>
       <div className="mobile-nav__scrim" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         className="mobile-nav__panel"
         role="dialog"
         aria-modal="true"
-        aria-label="Navigation"
+        aria-labelledby="mobile-nav-title"
         tabIndex={-1}
         onClick={handlePanelClick}
       >
-        <Sidebar groups={groups} />
+        <div className="mobile-nav__head">
+          <h2 id="mobile-nav-title" className="mobile-nav__title">
+            Navigation
+          </h2>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="mobile-nav__close"
+            onClick={onClose}
+            aria-label="Close navigation menu"
+          >
+            <CloseIcon />
+            Close
+          </button>
+        </div>
+        <Sidebar groups={groups} mobile />
       </div>
     </div>
+  );
+}
+
+function CloseIcon(): JSX.Element {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
   );
 }

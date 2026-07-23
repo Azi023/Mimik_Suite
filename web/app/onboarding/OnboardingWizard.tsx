@@ -295,7 +295,7 @@ export function OnboardingWizard({
           <div className="wiz-done__icon">
             <CheckIcon size={18} />
           </div>
-          <h1 className="wiz__title">Client onboarded</h1>
+          <h2 className="wiz__title">Client onboarded</h2>
           <p className="wiz__sub">
             The brand is set up and a brief has been drafted. A couple of extras didn&apos;t take:
           </p>
@@ -319,9 +319,9 @@ export function OnboardingWizard({
   return (
     <div className="wiz">
       <header className="wiz__head">
-        <h1 className="wiz__title">
+        <h2 className="wiz__title">
           {existingClient === undefined ? "Onboard a client" : "Create brand kit & brief"}
-        </h1>
+        </h2>
         <p className="wiz__sub">
           {existingClient === undefined
             ? "Set up the brand, its kit, content pillars, and the references the client shared. On finish, a brief is auto-drafted for sign-off."
@@ -688,6 +688,12 @@ export function OnboardingWizard({
               {brandName || "—"}
               {niche !== "" ? ` · ${niche}` : ""}
             </ReviewGroup>
+            <ReviewGroup label="Target audience">
+              {targetAudience.trim() || "—"}
+            </ReviewGroup>
+            <ReviewGroup label="Brand voice">
+              {brandVoice.trim() || "—"}
+            </ReviewGroup>
             <ReviewGroup label="Imagery">
               {IMAGERY_MEDIUM_LABELS[imageryMedium]}
               {imageryStyle.trim() !== "" ? ` · ${imageryStyle}` : ""}
@@ -712,6 +718,15 @@ export function OnboardingWizard({
             </ReviewGroup>
             <ReviewGroup label="Typography">
               {headingFont || bodyFont ? `${headingFont || "—"} / ${bodyFont || "—"}` : "—"}
+            </ReviewGroup>
+            <ReviewGroup label="Logo use / notes">
+              {logoNotes.trim() === "" && logoMinSize.trim() === ""
+                ? "—"
+                : `${logoNotes.trim() || "No use notes"}${
+                    logoMinSize.trim() === ""
+                      ? ""
+                      : ` · Minimum size ${logoMinSize.trim()} px`
+                  }`}
             </ReviewGroup>
             <ReviewGroup label="Pillars">
               {selectedPresets.length + customPillars.filter((c) => c.name.trim() !== "").length === 0

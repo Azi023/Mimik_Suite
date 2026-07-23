@@ -1,5 +1,10 @@
 import type { JSX } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Not found — Mimik Studio",
+};
 
 /**
  * Token-styled 404 — a bad URL lands on the design system, not Next's bare page,
@@ -12,7 +17,7 @@ export default function NotFound(): JSX.Element {
         <p className="not-found__code" aria-hidden="true">
           404
         </p>
-        <p className="empty-state__title">This page doesn&rsquo;t exist</p>
+        <h1 className="empty-state__title">This page doesn&rsquo;t exist</h1>
         <p className="empty-state__body">
           The link may be stale, or the record it pointed at was moved.
         </p>

@@ -32,6 +32,8 @@ import {
 interface SidebarProps {
   groups: SidebarGroup[];
   onCollapse?: () => void;
+  /** Expands labels and stacks the contextual client list inside the mobile drawer. */
+  mobile?: boolean;
 }
 
 /** Rail items that map to a real route (the rest stay un-wired placeholder buttons). */
@@ -43,7 +45,7 @@ const NAV_ROUTES: Partial<Record<NavItem["id"], string>> = {
   "brand-briefs": "/briefs",
 };
 
-export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
+export function Sidebar({ groups, onCollapse, mobile = false }: SidebarProps): JSX.Element {
   const pathname = usePathname();
   const showSubbar = pathname.startsWith("/clients");
   const railItems = navItems.filter((item) => item.id !== "settings");
@@ -51,6 +53,7 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
   const hasClients = groups.some((group) => group.projects.length > 0);
 
   const [railExpanded, setRailExpanded] = useState(false);
+  const railIsExpanded = mobile || railExpanded;
 
   // Search filters the client rows below it; empty groups drop out entirely.
   const [query, setQuery] = useState("");
@@ -68,7 +71,7 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
   }, [groups, normalizedQuery]);
 
   return (
-    <div className="side">
+    <div className={`side${mobile ? " side--mobile" : ""}`}>
       <style>{`
         .rail-dynamic {
           position: absolute;
@@ -128,16 +131,84 @@ export function Sidebar({ groups, onCollapse }: SidebarProps): JSX.Element {
           opacity: 1;
           transition: opacity 0.2s ease 0.05s;
         }
+        .side--mobile {
+          width: 100%;
+          height: 100%;
+          min-width: 0;
+          flex-direction: column;
+          overflow-y: auto;
+        }
+        .side--mobile .rail-dynamic,
+        .side--mobile .rail-dynamic.is-expanded {
+          position: static;
+          width: 100%;
+          align-items: stretch;
+          padding: var(--sp-3);
+          overflow: visible;
+          border-right: 0;
+          box-shadow: none;
+          transition: none;
+        }
+        .side--mobile .rail-dynamic .rail__logo,
+        .side--mobile .rail-dynamic.is-expanded .rail__logo {
+          align-self: flex-start;
+          transform: none;
+          margin: 0 0 var(--sp-2);
+        }
+        .side--mobile .rail__nav,
+        .side--mobile .rail__footer {
+          width: 100%;
+          align-items: stretch;
+        }
+        .side--mobile .rail__footer {
+          margin-top: var(--sp-2);
+          padding-top: var(--sp-2);
+          border-top: 1px solid var(--line);
+        }
+        .side--mobile .rail-dynamic .rail-btn,
+        .side--mobile .rail-dynamic.is-expanded .rail-btn {
+          width: 100%;
+          min-height: 44px;
+        }
+        .side--mobile .rail-dynamic .rail-btn__label {
+          opacity: 1;
+          transition: none;
+        }
+        .side--mobile .subbar {
+          width: 100%;
+          flex: none;
+          min-width: 0;
+          padding: var(--sp-4);
+          border-top: 1px solid var(--line);
+          border-right: 0;
+        }
+        .side--mobile .subbar__scroll {
+          overflow-y: visible;
+        }
+        .side--mobile .project-row__name {
+          overflow: visible;
+          text-overflow: clip;
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
       `}</style>
       <div 
         className="rail-container" 
-        style={{ width: 68, flexShrink: 0, position: 'relative', zIndex: 20 }}
-        onMouseEnter={() => setRailExpanded(true)}
-        onMouseLeave={() => setRailExpanded(false)}
-        onFocus={() => setRailExpanded(true)}
-        onBlur={() => setRailExpanded(false)}
+        style={{
+          width: mobile ? "100%" : 68,
+          flexShrink: 0,
+          position: mobile ? "static" : "relative",
+          zIndex: 20,
+        }}
+        onMouseEnter={mobile ? undefined : () => setRailExpanded(true)}
+        onMouseLeave={mobile ? undefined : () => setRailExpanded(false)}
+        onFocus={mobile ? undefined : () => setRailExpanded(true)}
+        onBlur={mobile ? undefined : () => setRailExpanded(false)}
       >
-        <aside className={`rail rail-dynamic ${railExpanded ? 'is-expanded' : ''}`} aria-label="Primary">
+        <aside
+          className={`rail rail-dynamic${railIsExpanded ? " is-expanded" : ""}`}
+          aria-label="Primary"
+        >
           <Link className="rail__logo" href="/" aria-label={workspaceName}>
             M
           </Link>
