@@ -18,6 +18,8 @@
  * — the backend already accepts it, discriminated by `iss` (api/core/auth.py).
  */
 
+import type { ApiCanvasRevision } from "@/components/canvas/canvas-types";
+
 /* ---------------------------------------------------------------------------
    Wire shapes — mimik-contracts models as JSON.
 --------------------------------------------------------------------------- */
@@ -240,6 +242,25 @@ export interface ApiGeneratedCreative {
   preview_url: string;
   svg_url: string;
   psd_url: string;
+}
+
+/** mimik_contracts.canvas.CreativeVersionInfo — one persisted version on a job's history. */
+export interface ApiCreativeVersionInfo {
+  creative_id: string;
+  version: number;
+  parent_id: string | null;
+  created_at: string;
+  created_by: ApiActor | null;
+  note: string | null;
+  /** Backend artifact path — the web app proxies via /api/creatives/{id}/preview instead. */
+  preview_url: string;
+  svg_url: string;
+}
+
+/** GET /creatives/{id}/versions — the creative's job-wide persisted version history. */
+export interface ApiVersionHistory {
+  job_id: string;
+  versions: ApiCreativeVersionInfo[];
 }
 
 /** mimik_contracts.enums.RevisionZone — WHERE on a creative a change request points. */
@@ -603,19 +624,19 @@ export function generateCreative(
 
 
 
-export interface ReviseCreativeBody {
+/**
+ * POST /creatives/{id}/revise body — a BACKWARD-COMPATIBLE SUPERSET: the typed canvas
+ * revision fields (`text_edits` / `layer_ops` / `params` / `ask`, via ApiCanvasRevision)
+ * PLUS the legacy v1-editor optionals the backend still accepts.
+ */
+export interface ReviseCreativeBody extends Partial<ApiCanvasRevision> {
+  // Legacy fields kept until B-10/B-12 remove their callers (ReviewPanel v1).
   edits?: {
     headline?: string;
     sub?: string;
     cta?: string;
   };
   instruction?: string;
-  params?: {
-    panel_anchor?: string;
-    text_alignment?: string;
-    subject_zoom?: number;
-    badge_background_luminance?: number;
-  };
 }
 
 export function reviseCreative(
@@ -626,6 +647,31 @@ export function reviseCreative(
   return apiPost<ApiGeneratedCreative>(
     `/creatives/${encodeURIComponent(creativeId)}/revise`,
     body,
+    sessionToken,
+    CREATIVE_TIMEOUT_MS,
+  );
+}
+
+/** GET /creatives/{id}/versions — the persisted version history of the creative's job. */
+export function listCreativeVersions(
+  creativeId: string,
+  sessionToken?: string,
+): Promise<ApiVersionHistory> {
+  return apiGet<ApiVersionHistory>(
+    `/creatives/${encodeURIComponent(creativeId)}/versions`,
+    sessionToken,
+  );
+}
+
+/** POST /creatives/{id}/revert — re-head the job at an older version (minted as a NEW version). */
+export function revertCreative(
+  creativeId: string,
+  toCreativeId: string,
+  sessionToken?: string,
+): Promise<ApiGeneratedCreative> {
+  return apiPost<ApiGeneratedCreative>(
+    `/creatives/${encodeURIComponent(creativeId)}/revert`,
+    { to_creative_id: toCreativeId },
     sessionToken,
     CREATIVE_TIMEOUT_MS,
   );

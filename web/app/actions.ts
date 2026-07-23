@@ -1,7 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { ApiError, generateCreative } from "@/lib/api";
+import {
+  ApiError,
+  type ApiGeneratedCreative,
+  type ApiVersionHistory,
+  type ReviseCreativeBody,
+  fetchCreativeSvg,
+  generateCreative,
+  listCreativeVersions,
+  reviseCreative,
+  revertCreative,
+} from "@/lib/api";
 import { toReviewDoc } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
 import type { CreativeDoc } from "@/lib/view-models";
@@ -53,5 +63,91 @@ export async function generateCreativeAction(
       }
     }
     return { ok: false, error: "Generate failed. Try again." };
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Canvas editor (B-09) — Apply / Revert run server-side so the browser never
+   receives the httpOnly Supabase bearer (same model as the review actions).
+--------------------------------------------------------------------------- */
+
+/** The new head after a canvas mutation: its id, its rendered SVG, and the refreshed rail. */
+export type CanvasEditActionResult =
+  | { ok: true; creativeId: string; version: number; svg: string; versions: ApiVersionHistory }
+  | { ok: false; error: string };
+
+/** Resolve the bearer exactly like generateCreativeAction: session first, dev token fallback. */
+async function resolveCanvasBearer(): Promise<string | undefined | null> {
+  const token = await getSessionToken();
+  const devToken = process.env.NEXT_PUBLIC_DEV_TOKEN;
+  if (token === null && (devToken === undefined || devToken === "")) return null;
+  return token ?? undefined;
+}
+
+/** Post-mutation bundle: fetch the new head's SVG master + the refreshed version history. */
+async function bundleHead(
+  result: ApiGeneratedCreative,
+  bearer: string | undefined,
+): Promise<CanvasEditActionResult> {
+  const [svg, versions] = await Promise.all([
+    fetchCreativeSvg(result.creative.id, bearer),
+    listCreativeVersions(result.creative.id, bearer),
+  ]);
+  return {
+    ok: true,
+    creativeId: result.creative.id,
+    version: result.creative.version,
+    svg,
+    versions,
+  };
+}
+
+function canvasErrorMessage(error: unknown, verb: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) return `You don't have permission to ${verb} this creative.`;
+    if (error.status === 404) return "Creative not found. It may belong to another workspace.";
+    if (error.status === 422) return "The change was rejected as invalid. Adjust it and retry.";
+    if (error.status === 502) {
+      return "Rendering failed. Try again when providers are available.";
+    }
+  }
+  return `Could not ${verb} the creative. Try again.`;
+}
+
+/** POST /creatives/{id}/revise with the typed canvas body, then return the new head. */
+export async function reviseCreativeCanvasAction(
+  creativeId: string,
+  body: ReviseCreativeBody,
+): Promise<CanvasEditActionResult> {
+  const bearer = await resolveCanvasBearer();
+  if (bearer === null) {
+    return { ok: false, error: "Your session has expired. Sign in again." };
+  }
+  try {
+    const result = await reviseCreative(creativeId, body, bearer);
+    const bundle = await bundleHead(result, bearer);
+    revalidatePath(`/creatives/${creativeId}/edit`);
+    return bundle;
+  } catch (error) {
+    return { ok: false, error: canvasErrorMessage(error, "revise") };
+  }
+}
+
+/** POST /creatives/{id}/revert to an older version, then return the new head. */
+export async function revertCreativeAction(
+  creativeId: string,
+  toCreativeId: string,
+): Promise<CanvasEditActionResult> {
+  const bearer = await resolveCanvasBearer();
+  if (bearer === null) {
+    return { ok: false, error: "Your session has expired. Sign in again." };
+  }
+  try {
+    const result = await revertCreative(creativeId, toCreativeId, bearer);
+    const bundle = await bundleHead(result, bearer);
+    revalidatePath(`/creatives/${creativeId}/edit`);
+    return bundle;
+  } catch (error) {
+    return { ok: false, error: canvasErrorMessage(error, "revert") };
   }
 }
