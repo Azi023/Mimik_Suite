@@ -49,8 +49,9 @@ interface LayerBBox {
 
 interface CanvasLayerInfo {
   id: CanvasLayerId;
-  /** Untransformed bounding box from `data-bbox`, in viewBox units. */
-  bbox: LayerBBox;
+  /** Optional server-provided bbox (data-bbox). Null on creatives rendered before that
+   * hook existed — we measure the real bbox from the live DOM (getBBox) after injection. */
+  bbox: LayerBBox | null;
   /** Joined tspan copy for text layers; null for non-text layers. */
   initialText: string | null;
 }
@@ -152,16 +153,22 @@ function parseSvg(svgText: string): ParsedSvg | null {
 
   const layers: CanvasLayerInfo[] = [];
   for (const id of CANVAS_LAYER_IDS) {
-    const node = doc.querySelector(`g[data-layer="${id}"][data-editable="true"]`);
+    // Select by data-layer ONLY. data-editable/data-bbox are absent on creatives
+    // rendered before those render hooks existed, so requiring them made older
+    // creatives non-interactive. The real bbox is measured from the live DOM
+    // (getBBox) after injection; the data-bbox attr, if present, is only a fallback.
+    const node = doc.querySelector(`g[data-layer="${id}"]`);
     if (node === null) continue;
+    let attrBBox: LayerBBox | null = null;
     const bboxRaw = node.getAttribute("data-bbox");
-    if (bboxRaw === null) continue;
-    const [bx, by, bw, bh] = bboxRaw.trim().split(/\s+/).map(Number);
-    if (
-      bx === undefined || by === undefined || bw === undefined || bh === undefined ||
-      ![bx, by, bw, bh].every(Number.isFinite)
-    ) {
-      continue;
+    if (bboxRaw !== null) {
+      const [bx, by, bw, bh] = bboxRaw.trim().split(/\s+/).map(Number);
+      if (
+        bx !== undefined && by !== undefined && bw !== undefined && bh !== undefined &&
+        [bx, by, bw, bh].every(Number.isFinite)
+      ) {
+        attrBBox = { x: bx, y: by, w: bw, h: bh };
+      }
     }
 
     let initialText: string | null = null;
@@ -178,7 +185,7 @@ function parseSvg(svgText: string): ParsedSvg | null {
       }
     }
 
-    layers.push({ id, bbox: { x: bx, y: by, w: bw, h: bh }, initialText });
+    layers.push({ id, bbox: attrBBox, initialText });
   }
 
   return { markup: new XMLSerializer().serializeToString(root), viewBox, layers };
@@ -261,6 +268,9 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
   const [overrides, setOverrides] = useState<Partial<Record<CanvasLayerId, LayerOverride>>>({});
   const [textEdits, setTextEdits] = useState<ApiTextEdits>({});
   const [editing, setEditing] = useState<TextEditing | null>(null);
+  // Real bbox per layer, measured from the LIVE injected DOM (getBBox) after the markup
+  // lands — independent of any server-emitted data-bbox, so ANY layered SVG is editable.
+  const [measured, setMeasured] = useState<Partial<Record<CanvasLayerId, LayerBBox>>>({});
 
   const editingRef = useRef<TextEditing | null>(null);
   useEffect(() => {
@@ -277,6 +287,39 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
   const { transforms, draggingLayer, beginMove, beginScale } = useLayerDrag({
     getScreenToViewBox,
   });
+
+  // Effective base bbox for a layer: the measured DOM geometry when available, else the
+  // server data-bbox attr (may be null on both, in which case the layer has no hit target).
+  const layerBox = useCallback(
+    (layer: CanvasLayerInfo): LayerBBox | null => measured[layer.id] ?? layer.bbox,
+    [measured],
+  );
+
+  // Measure every layer's real bbox once the SVG markup is injected. getBBox returns the
+  // element's untransformed geometry in viewBox units (it ignores the group's own transform),
+  // so our local transforms compose on top cleanly.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (host === null || parsed === null) {
+      setMeasured({});
+      return;
+    }
+    const next: Partial<Record<CanvasLayerId, LayerBBox>> = {};
+    for (const layer of parsed.layers) {
+      const node = host.querySelector<SVGGraphicsElement>(`[data-layer="${layer.id}"]`);
+      if (node === null) continue;
+      try {
+        const box = node.getBBox();
+        if (box.width > 0 && box.height > 0) {
+          next[layer.id] = { x: box.x, y: box.y, w: box.width, h: box.height };
+        }
+      } catch {
+        // getBBox throws for not-yet-rendered / display:none nodes — the data-bbox attr
+        // (if any) stays the fallback via layerBox.
+      }
+    }
+    setMeasured(next);
+  }, [parsed]);
 
   // Track the rendered stage width (overlay stroke weights + px positioning).
   useEffect(() => {
@@ -304,8 +347,9 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
         node.dataset.baseTransform = node.getAttribute("transform") ?? "";
       }
       const t = transforms[layer.id] ?? IDENTITY_TRANSFORM;
+      const box = measured[layer.id] ?? layer.bbox;
       const isIdentity = t.dx === 0 && t.dy === 0 && t.scale === 1;
-      const local = isIdentity ? "" : layerTransformAttr(t, layer.bbox);
+      const local = isIdentity || box === null ? "" : layerTransformAttr(t, box);
       const combined = `${local} ${node.dataset.baseTransform}`.trim();
       if (combined === "") node.removeAttribute("transform");
       else node.setAttribute("transform", combined);
@@ -318,7 +362,7 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
           : brandColors.find((color) => color.name === override.fillRole)?.hex;
       node.style.fill = hex ?? "";
     }
-  }, [parsed, transforms, overrides, brandColors]);
+  }, [parsed, transforms, overrides, brandColors, measured]);
 
   // Optimistic text preview — put the full edited line into the first tspan
   // (keeping its positioning attributes) and blank the wrapped remainder.
@@ -377,7 +421,7 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
 
   function layerFromEventTarget(target: EventTarget | null): CanvasLayerInfo | null {
     if (!(target instanceof Element)) return null;
-    const group = target.closest("[data-layer][data-editable='true']");
+    const group = target.closest("[data-layer]");
     if (group === null) return null;
     const raw = group.getAttribute("data-layer");
     return layers.find((layer) => layer.id === raw) ?? null;
@@ -459,10 +503,11 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
 
   const selectedLayer =
     selectedId === null ? null : (layers.find((layer) => layer.id === selectedId) ?? null);
+  const selectedBaseBox = selectedLayer === null ? null : layerBox(selectedLayer);
   const selectedBox =
-    selectedLayer === null
+    selectedLayer === null || selectedBaseBox === null
       ? null
-      : transformedBBox(selectedLayer.bbox, transforms[selectedLayer.id] ?? IDENTITY_TRANSFORM);
+      : transformedBBox(selectedBaseBox, transforms[selectedLayer.id] ?? IDENTITY_TRANSFORM);
   const selectedOverride =
     selectedLayer === null ? DEFAULT_OVERRIDE : (overrides[selectedLayer.id] ?? DEFAULT_OVERRIDE);
 
@@ -472,10 +517,11 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
 
   const editingLayer =
     editing === null ? null : (layers.find((layer) => layer.id === editing.layerId) ?? null);
+  const editingBaseBox = editingLayer === null ? null : layerBox(editingLayer);
   const editingBox =
-    editingLayer === null
+    editingLayer === null || editingBaseBox === null
       ? null
-      : transformedBBox(editingLayer.bbox, transforms[editingLayer.id] ?? IDENTITY_TRANSFORM);
+      : transformedBBox(editingBaseBox, transforms[editingLayer.id] ?? IDENTITY_TRANSFORM);
 
   const showSwatches =
     selectedLayer !== null && RECOLORABLE.has(selectedLayer.id) && brandColors.length > 0;
@@ -546,8 +592,10 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
               >
                 {layers.map((layer) => {
                   const override = overrides[layer.id] ?? DEFAULT_OVERRIDE;
+                  const base = layerBox(layer);
+                  if (base === null) return null; // no geometry yet — nothing to hit
                   const box = transformedBBox(
-                    layer.bbox,
+                    base,
                     transforms[layer.id] ?? IDENTITY_TRANSFORM,
                   );
                   return (
@@ -646,7 +694,7 @@ export function CanvasStage({ svg, brandColors, onChange }: CanvasStageProps): J
                       cursor: "nwse-resize",
                     }}
                     onPointerDown={(event): void =>
-                      beginScale(selectedLayer.id, event, selectedLayer.bbox.w)
+                      beginScale(selectedLayer.id, event, selectedBaseBox?.w ?? selectedBox.w)
                     }
                   />
                 </svg>
