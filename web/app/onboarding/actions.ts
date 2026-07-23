@@ -88,9 +88,15 @@ function buildTokens(kit: OnboardingPayload["kit"]): ApiBrandTokens {
 
 export async function createOnboarding(formData: FormData): Promise<OnboardingResult> {
   const token = await getSessionToken();
-  if (token === null) {
+  const devToken = process.env.NEXT_PUBLIC_DEV_TOKEN;
+  if (token === null && (devToken === undefined || devToken === "")) {
     return { ok: false, error: "Your session has expired — sign in again." };
   }
+  // Match every other write action: when there is no per-user session, let the
+  // API client fall back to NEXT_PUBLIC_DEV_TOKEN (dev-only) via `resolveBearer`
+  // by passing `token ?? undefined`. Onboarding previously hard-failed here, which
+  // blocked the dev/audit flow at the first authorized write.
+  const bearer = token ?? undefined;
 
   let payload: OnboardingPayload;
   try {
@@ -116,7 +122,7 @@ export async function createOnboarding(formData: FormData): Promise<OnboardingRe
         industry: nn(payload.client.industry),
         contact_email: nn(payload.client.contactEmail),
       },
-      token,
+      bearer,
     );
 
     const brandBody: CreateBrandBody = {
@@ -136,11 +142,11 @@ export async function createOnboarding(formData: FormData): Promise<OnboardingRe
         .filter((r) => r.url.trim() !== "")
         .map((r) => ({ url: r.url.trim(), source: nn(r.source), note: nn(r.note) })),
     };
-    const brand = await createBrand(brandBody, token);
+    const brand = await createBrand(brandBody, bearer);
 
     for (const key of payload.pillars.presets) {
       try {
-        await createPillar({ client_id: client.id, preset_key: key }, token);
+        await createPillar({ client_id: client.id, preset_key: key }, bearer);
       } catch {
         warnings.push(`Couldn't add the "${key}" pillar — add it later from the client.`);
       }
@@ -150,7 +156,7 @@ export async function createOnboarding(formData: FormData): Promise<OnboardingRe
       try {
         await createPillar(
           { client_id: client.id, name: custom.name.trim(), description: nn(custom.description) },
-          token,
+          bearer,
         );
       } catch {
         warnings.push(`Couldn't add the custom pillar "${custom.name.trim()}".`);
@@ -159,13 +165,13 @@ export async function createOnboarding(formData: FormData): Promise<OnboardingRe
 
     for (const file of files) {
       try {
-        await uploadReferenceAsset(brand.id, file, token);
+        await uploadReferenceAsset(brand.id, file, bearer);
       } catch {
         warnings.push(`Couldn't upload "${file.name}" — add it later from the asset library.`);
       }
     }
 
-    const brief = await createBrief(brand.id, token);
+    const brief = await createBrief(brand.id, bearer);
     revalidatePath("/briefs");
     return { ok: true, briefId: brief.id, warnings };
   } catch (error) {
