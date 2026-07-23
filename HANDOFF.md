@@ -51,16 +51,24 @@ portal `/portal/session` leaks a raw PyJWT error; confirm PROD `JWT_SECRET` ≠ 
     output. **Live adversarial injection test passed** (attack → 201, zero disallowed keys, benign part still applied).
 - **⚠ EXECUTOR: Codex quota EXHAUSTED until Jul 28** → switched to **agy** (`agy -p "$(cat spec.md)" --mode
   accept-edits --dangerously-skip-permissions --print-timeout 30m`; sweep stray `patch*.py` after — none appeared so far).
-- **A-10 backend ✅** (`7b4c7f0`) — `PATCH /admin/accounts/{id}` owner-only, role+client_scopes, cross-tenant
-  target→404, cross-tenant scope→422, unknown role→422. 12 tests green.
-- **A-10 frontend (NOT DONE — START HERE)** — members UI (role picker from `GET /admin/capabilities` + client_scopes editor,
-  `web/app/members/page.tsx` + `MembersView.tsx` + a `PATCH` helper in `web/lib/api.ts`). Runs on a **Fable agent** (#9).
-- **Then W4+** (per plan wave matrix): A-03 queue service (now safe on the hot file) ∥ B-08 canvas web stage (Fable).
-  Plan A Command Center surfaces (A-06 board drag, A-07 calendar, A-08 queue, A-09 ⌘K cmd bar) + Plan B web
-  (B-08/09/10 canvas editor) are the high-value remaining UI. See `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`.
+- **A-10 ✅ COMPLETE** — backend (`7b4c7f0`) + frontend (`ba3e4b7`, owner-gated member role/scope editing). **Wave 3 DONE.**
+
+### ▶ REMAINING WORK (Fable plan — ~16 tasks; see `docs/PLAN_COMMAND_CENTER_AND_CANVAS.md`)
+DONE so far: QA, editor bugs, imagery, text-chain, mobile-nav + plan tasks A-01, A-02, A-10, B-01..B-07.
+- **Backend (Codex — quota back as of Jul 23; these serialize on `creative_generation.py`/`ops.py`):**
+  - A-03 generation queue service + `generate_client_creative(job_id=...)` + asyncio worker in lifespan (HOT file).
+  - A-04 `/ops/queue` + `/ops/usage` endpoints. · A-05 command parser + fan-out (`command_center.py`, ⌘K backend).
+  - B-11 client-role bounded quota revise (HOT file) · B-13 flywheel capture (`edit_signals.py` + approval_flow, HOT file).
+  - Hot-file order still strict: B-11 → B-13 → A-03 (never parallel on `creative_generation.py`).
+- **Frontend (Fable, #9 — the high-value product surfaces):**
+  - A-06 board drag-transitions · A-07 calendar+SLA · A-08 queue/budget panel · A-09 ⌘K command bar · A-11 delivery/archive.
+    (`web/lib/api.ts` is a single-writer hotspot: A-06→A-07→A-08→A-09 sequential on it.)
+  - B-08 CanvasStage (inline SVG drag/resize/recolor) · B-09 CanvasEditor page (versions/revert/ask) · B-10 ReviewPanel
+    integration · B-12 portal bounded editor + BC-shim removal.
+- **Gates:** A-12 cockpit E2E · B-14 canvas E2E.
 - **Pattern:** write spec to `scratchpad/` referencing the plan's task section; demand tests + live-verify; the
-  executor (agy) CANNOT reach the :5434 DB → YOU run alembic + live API checks for any DB/route task; review diff;
-  commit phase-tagged. Hot file `creative_generation.py` now settled for B — future B-11/B-13 still serialize on it.
+  executor CANNOT reach the :5434 DB → YOU run alembic + live API checks for DB/route tasks; review diff; commit phase-tagged.
+- **Deploy: HELD** until everything's done AND the operator sorts Supabase auth. Do NOT deploy.
 - **Hot file `api/services/creative_generation.py`** — NEVER dispatch two of {B-04,B-06,B-07,B-11,B-13,A-03} at once.
 - Codex dispatch: `codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh -s workspace-write -c approval_policy=never [-C <dir>] - < spec.md`.
   Sibling-repo tasks need `-C /Users/atheeque/workspace/mimik-contracts`. Codex logs → `scratchpad/codex_*.log`.
