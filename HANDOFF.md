@@ -4,7 +4,39 @@
 
 ---
 
-## ► LATEST (2026-07-23 pm3) — CANVAS EDITOR REBUILD: GATE 1 DONE + PLAYWRIGHT-PROVEN (correctness)
+## ► LATEST (2026-07-23 pm4) — CANVAS EDITOR REBUILD: GATES 1-3 DONE + PLAYWRIGHT-PROVEN; G4 (all-sides resize) in flight
+
+**All browser-verified with the Playwright recipe (drive the real app; executors' tsc/tests are NOT enough).**
+- **GATE 1** (`d592106` core + `3eeb274` client-context) — canonical `EditHistory→fold→applyState` state;
+  ROOT-CAUSE FIX = inject SVG imperatively (`host.innerHTML`), NOT dangerouslySetInnerHTML (React
+  re-materialized it and wiped edits). Recolor→child fill. Proven: recolor/hide/text/discard all work.
+- **GATE 2** (`d911ac0`) — undo/redo (⌘Z/⇧⌘Z + buttons), ordered pending-op list w/ per-op remove, press-hold
+  before/after, safe revert + sequential version labels. Proven: recolor→Undo→base→Redo round-trips.
+- **GATE 3** (`0b7812f`) — right Inspector (controls off the canvas), full-screen, zoom/fit/100% (scales
+  388→582px, overlay stays aligned), creative-size ("1080 · IG Post"), per-layer reset, "Ask AI about this
+  layer" rename. Proven: recolor/undo STILL work post-restructure; zoom scales.
+- **GATE 4 CONTRACT** (`e9640f8`, SIBLING mimik-contracts@0.1.1) — `LayerOp` + `rotation` + per-axis
+  `scale_x`/`scale_y` (BC; defaults preserve behavior). Foundation for all-sides resize.
+
+**Editor files:** `web/components/canvas/{CanvasStage,CanvasEditor,Inspector,ZoomControls,VersionRail}.tsx`,
+`editor-state.ts` (+ .test.mts), `useLayerDrag.ts`. LayerTransform is `{dx,dy,scale}` — G4 extends it.
+Verify scripts: `scratchpad/verify_editor.py` (recolor/hide/discard), `verify_g2.py` (undo/redo),
+`verify_g3_*.py` (zoom/inspector). Web 500 after big edits → `rm -rf web/.next` + restart `npm run dev`.
+
+### ▶ GATE 4 — REMAINING (the operator's explicit ask: resize from ALL sides, smooth)
+G4a (IN FLIGHT): backend render (svg.py applies rotation + non-uniform scale_x/scale_y from layer_overrides;
+revise wiring) ∥ frontend (editor-state LayerTransform → scaleX/scaleY; CanvasStage 8-handle resize = 4
+corners + 4 edges, anchor-opposite, rAF-smooth; canvas-types ApiLayerOp + scale_x/scale_y; toCanvasRevision
+emits them). Rotation contract is ready; rotation UI deferred to G4b (rotated overlay complexity).
+G4b (follow-on): rotation handle, layer tree (reorder/lock/rename/dup), align/distribute/snap/guides,
+full typography, multi-select, keyboard nudge/copy/paste/delete.
+Tool plan: Codex = render math + resize geometry (correctness); AGY = big UI; Opus specs + Playwright-verifies.
+
+### ▶ ALSO STILL OPEN (paused): W4 backend A-05 (⌘K command) + frontend A-07/A-08/A-11/B-12 + gates A-12/B-14.
+
+---
+
+## ► (2026-07-23 pm3) — CANVAS EDITOR REBUILD: GATE 1 DONE + PLAYWRIGHT-PROVEN (correctness)
 
 **Context:** Operator did a ChatGPT-driven usability audit (`~/Documents/Codex/2026-07-23/.../creative-editor-usability-audit.md`)
 scoring the editor 13/40 (pre-alpha). Chose a FULL 4-gate rebuild (safe-template-editor direction, not Figma clone).
