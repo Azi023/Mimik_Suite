@@ -5,10 +5,12 @@ import { AppShell } from "@/components/AppShell";
 import { CanvasEditor } from "@/components/canvas/CanvasEditor";
 import {
   type ApiBrand,
+  type ApiClient,
   type ApiJob,
   type ApiVersionHistory,
   fetchCreativeSvg,
   getBrand,
+  getClient,
   getJob,
   listCreativeVersions,
 } from "@/lib/api";
@@ -88,11 +90,16 @@ export default async function CanvasEditPage({
   }
 
   // Brand palette for the recolor swatches: versions → job → brand.tokens.colors.
+  // The job also pins the creative's OWN client — the editor header must show that
+  // client, never the sidebar's global selection (audit P0-2).
   const job = await getJob(versions.job_id, bearer).catch((): ApiJob | null => null);
-  const brand =
+  const [brand, client] =
     job === null
-      ? null
-      : await getBrand(job.brand_id, bearer).catch((): ApiBrand | null => null);
+      ? [null, null]
+      : await Promise.all([
+          getBrand(job.brand_id, bearer).catch((): ApiBrand | null => null),
+          getClient(job.client_id, bearer).catch((): ApiClient | null => null),
+        ]);
 
   if (job === null || brand === null) {
     return (
@@ -104,6 +111,11 @@ export default async function CanvasEditPage({
     );
   }
 
+  // Client-context guard surfacing: the chip renders only when the sidebar's global
+  // selection points at a DIFFERENT client than the creative's own.
+  const clientMismatch =
+    client !== null && sidebar.activeClient !== null && sidebar.activeClient.id !== client.id;
+
   return (
     <AppShell sidebar={sidebar} title="Canvas editor" crumb={job.title}>
       <CanvasEditor
@@ -111,6 +123,10 @@ export default async function CanvasEditPage({
         svg={svg}
         brandColors={brand.tokens.colors}
         initialVersions={versions}
+        clientId={client?.id ?? null}
+        clientName={client?.name ?? null}
+        brandName={brand.name}
+        clientMismatch={clientMismatch}
       />
     </AppShell>
   );

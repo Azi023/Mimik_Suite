@@ -3558,6 +3558,50 @@ ul {
   line-height: 1.25;
 }
 
+/* The creative's OWN client · brand line under the rail title (never the sidebar selection). */
+.creview__rail-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.creview__context {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+a.creview__context-client {
+  color: var(--ink);
+  text-decoration: none;
+}
+a.creview__context-client:hover,
+a.creview__context-client:focus-visible {
+  text-decoration: underline;
+}
+
+/* Calm informational chip: shown only when the sidebar's global client differs. */
+.creview__context-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-radius: var(--r-full);
+  padding: 4px 10px;
+}
+.creview__context-note-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
 .creview__status {
   display: inline-flex;
   align-items: center;

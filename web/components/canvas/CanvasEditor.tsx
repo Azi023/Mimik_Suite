@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState, type JSX } from "react";
+import Link from "next/link";
 import type { ApiColorRole, ApiVersionHistory } from "@/lib/api";
 import {
   reviseCreativeCanvasAction,
@@ -24,6 +25,16 @@ export interface CanvasEditorProps {
   brandColors: ApiColorRole[];
   /** Persisted history from GET /creatives/{id}/versions (fetched by the page). */
   initialVersions: ApiVersionHistory;
+  /** The creative's OWN client (versions → job.client_id) — NOT the sidebar's global
+   *  selection. Null only when the client record couldn't be loaded (display-only, so
+   *  a failed fetch never blocks editing). */
+  clientId: string | null;
+  clientName: string | null;
+  /** The creative's own brand (job.brand_id) — always resolvable, the page gates on it. */
+  brandName: string;
+  /** True when the sidebar's globally-selected client differs from the creative's client;
+   *  surfaces a calm "whose creative is this" chip so context is never ambiguous. */
+  clientMismatch: boolean;
 }
 
 /** RegionAsk zone per marked layer (layer-subhead → "subhead"; the map is total, no "other"). */
@@ -87,6 +98,10 @@ export function CanvasEditor({
   svg,
   brandColors,
   initialVersions,
+  clientId,
+  clientName,
+  brandName,
+  clientMismatch,
 }: CanvasEditorProps): JSX.Element {
   const [currentId, setCurrentId] = useState<string>(creativeId);
   const [currentSvg, setCurrentSvg] = useState<string>(svg);
@@ -207,7 +222,26 @@ export function CanvasEditor({
 
       <aside className="creview__rail" aria-label="Canvas editor">
         <header className="creview__rail-head">
-          <h1 className="creview__title">Canvas editor</h1>
+          <div className="creview__rail-heading">
+            <h1 className="creview__title">Canvas editor</h1>
+            {/* The creative's OWN client + brand — sourced from the creative's job,
+                never from the sidebar's global selection. */}
+            <p className="creview__context">
+              {clientName !== null && clientId !== null ? (
+                <>
+                  <Link
+                    href={`/clients/${encodeURIComponent(clientId)}/edit`}
+                    className="creview__context-client"
+                  >
+                    {clientName}
+                  </Link>
+                  {brandName !== clientName && <span> · {brandName}</span>}
+                </>
+              ) : (
+                brandName
+              )}
+            </p>
+          </div>
           <span
             className={`creview__status${!busy && pendingRevision === null ? " creview__status--done" : ""}`}
           >
@@ -221,6 +255,13 @@ export function CanvasEditor({
                 : "Up to date"}
           </span>
         </header>
+
+        {clientMismatch && clientName !== null && (
+          <p className="creview__context-note" role="note">
+            <span className="creview__context-note-dot" aria-hidden="true" />
+            You&rsquo;re viewing {clientName}&rsquo;s creative
+          </p>
+        )}
 
         {banner !== "" && (
           <p className="creview__banner" role="status">
