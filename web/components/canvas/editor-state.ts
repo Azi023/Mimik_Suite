@@ -13,6 +13,8 @@ export interface LayerTransform {
   dy: number;
   scaleX: number;
   scaleY: number;
+  /** Degrees about the layer's base-bbox center. Legacy transforms default to 0. */
+  rotation?: number;
 }
 
 export interface LayerBBox {
@@ -20,6 +22,12 @@ export interface LayerBBox {
   y: number;
   w: number;
   h: number;
+}
+
+export interface OrientedLayerBox extends LayerBBox {
+  cx: number;
+  cy: number;
+  rotation: number;
 }
 
 export interface DocOp {
@@ -84,6 +92,7 @@ export const IDENTITY_TRANSFORM: LayerTransform = {
   dy: 0,
   scaleX: 1,
   scaleY: 1,
+  rotation: 0,
 };
 
 export const EDITOR_LAYER_IDS: readonly CanvasLayerId[] = [
@@ -205,6 +214,12 @@ function clampAxisScale(value: number): number {
   return Math.min(3, Math.max(0.1, value));
 }
 
+/** Keep rotation inside the contract's inclusive [-180, 180] degree bound. */
+function clampRotation(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(180, Math.max(-180, value));
+}
+
 export function toCanvasRevision(folded: FoldedState): ApiCanvasRevision {
   const textEdits: ApiTextEdits = {};
   for (const layerId of EDITOR_LAYER_IDS) {
@@ -234,7 +249,7 @@ export function toCanvasRevision(folded: FoldedState): ApiCanvasRevision {
       scale: round(sx === sy ? sx : 1, 4),
       scale_x: round(sx, 4),
       scale_y: round(sy, 4),
-      rotation: 0,
+      rotation: round(clampRotation(transform.rotation ?? 0), 4),
       visible: folded.visible[layerId] ?? true,
       fill_role: folded.fill[layerId] ?? null,
     });
@@ -245,14 +260,50 @@ export function toCanvasRevision(folded: FoldedState): ApiCanvasRevision {
   return revision;
 }
 
-export function transformedBBox(bbox: LayerBBox, transform: LayerTransform): LayerBBox {
+export function orientedBoxOf(
+  bbox: LayerBBox,
+  transform: LayerTransform,
+): OrientedLayerBox {
   const cx = bbox.x + bbox.w / 2;
   const cy = bbox.y + bbox.h / 2;
+  const x = transform.dx + cx + (bbox.x - cx) * transform.scaleX;
+  const y = transform.dy + cy + (bbox.y - cy) * transform.scaleY;
+  const w = bbox.w * transform.scaleX;
+  const h = bbox.h * transform.scaleY;
   return {
-    x: transform.dx + cx + (bbox.x - cx) * transform.scaleX,
-    y: transform.dy + cy + (bbox.y - cy) * transform.scaleY,
-    w: bbox.w * transform.scaleX,
-    h: bbox.h * transform.scaleY,
+    x,
+    y,
+    w,
+    h,
+    cx: x + w / 2,
+    cy: y + h / 2,
+    rotation: transform.rotation ?? 0,
+  };
+}
+
+export function transformedBBox(
+  bbox: LayerBBox,
+  transform: LayerTransform,
+): LayerBBox {
+  const oriented = orientedBoxOf(bbox, transform);
+  if (oriented.rotation === 0) {
+    return {
+      x: oriented.x,
+      y: oriented.y,
+      w: oriented.w,
+      h: oriented.h,
+    };
+  }
+  const radians = (oriented.rotation * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+  const w = oriented.w * cos + oriented.h * sin;
+  const h = oriented.w * sin + oriented.h * cos;
+  return {
+    x: oriented.cx - w / 2,
+    y: oriented.cy - h / 2,
+    w,
+    h,
   };
 }
 
@@ -261,7 +312,8 @@ function isIdentity(transform: LayerTransform): boolean {
     transform.dx === 0 &&
     transform.dy === 0 &&
     transform.scaleX === 1 &&
-    transform.scaleY === 1
+    transform.scaleY === 1 &&
+    (transform.rotation ?? 0) === 0
   );
 }
 
@@ -273,8 +325,10 @@ export function layerTransformAttr(
   if (isIdentity(transform)) return baseTransform;
   const cx = bbox.x + bbox.w / 2;
   const cy = bbox.y + bbox.h / 2;
+  const rotation = transform.rotation ?? 0;
   const local =
     `translate(${transform.dx},${transform.dy}) ` +
+    (rotation === 0 ? "" : `rotate(${rotation},${cx},${cy}) `) +
     `translate(${cx},${cy}) scale(${transform.scaleX},${transform.scaleY}) ` +
     `translate(${-cx},${-cy})`;
   return baseTransform === "" ? local : `${local} ${baseTransform}`;
@@ -289,7 +343,8 @@ function sameTransform(
     left.dx === right.dx &&
     left.dy === right.dy &&
     left.scaleX === right.scaleX &&
-    left.scaleY === right.scaleY
+    left.scaleY === right.scaleY &&
+    (left.rotation ?? 0) === (right.rotation ?? 0)
   );
 }
 

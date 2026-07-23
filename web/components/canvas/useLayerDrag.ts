@@ -26,7 +26,7 @@ const MAX_SCALE = 3;
 
 interface DragSession {
   layerId: CanvasLayerId;
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "rotate";
   pointerId: number;
   startX: number;
   startY: number;
@@ -38,6 +38,11 @@ interface DragSession {
   handle: ResizeHandle | null;
   /** Screen-px -> viewBox-units factor captured at drag start. */
   factor: number;
+  /** Scale/translate center used by rotate gestures. */
+  centerX: number | null;
+  centerY: number | null;
+  /** Pointer angle in radians when a rotate gesture begins. */
+  startAngle: number | null;
   /** Element retaining pointer capture for the duration of the gesture. */
   captureTarget: Element;
   /** False for a click; flips only after the pointer crosses the drag threshold. */
@@ -57,6 +62,11 @@ export function pointerMovedPastThreshold(
 
 function clampScale(value: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+}
+
+function normalizeRotation(value: number): number {
+  const normalized = ((value + 180) % 360 + 360) % 360 - 180;
+  return normalized === -180 && value > 0 ? 180 : normalized;
 }
 
 export function resizeLayerTransform(
@@ -94,7 +104,28 @@ export function resizeLayerTransform(
       ((scaleY - startTransform.scaleY) * height) / 2;
   }
 
-  return { dx, dy, scaleX, scaleY };
+  return { ...startTransform, dx, dy, scaleX, scaleY };
+}
+
+export function rotateLayerTransform(
+  startTransform: LayerTransform,
+  startAngle: number,
+  centerX: number,
+  centerY: number,
+  pointerX: number,
+  pointerY: number,
+  snapToFifteenDegrees: boolean,
+): LayerTransform {
+  const newAngle = Math.atan2(pointerY - centerY, pointerX - centerX);
+  const deltaDegrees = ((newAngle - startAngle) * 180) / Math.PI;
+  const unsnapped = (startTransform.rotation ?? 0) + deltaDegrees;
+  const rotation = snapToFifteenDegrees
+    ? Math.round(unsnapped / 15) * 15
+    : unsnapped;
+  return {
+    ...startTransform,
+    rotation: normalizeRotation(rotation),
+  };
 }
 
 export interface UseLayerDragArgs {
@@ -121,13 +152,42 @@ export interface UseLayerDragResult {
     baseBox: LayerBBox,
     startTransform: LayerTransform,
   ) => void;
+  beginRotate: (
+    layerId: CanvasLayerId,
+    event: ReactPointerEvent<Element>,
+    baseBox: LayerBBox,
+    startTransform: LayerTransform,
+  ) => void;
+}
+
+interface ViewBoxPoint {
+  x: number;
+  y: number;
+}
+
+function screenPointToViewBox(
+  clientX: number,
+  clientY: number,
+  factor: number,
+  target: Element,
+): ViewBoxPoint {
+  const svg = target.closest("svg");
+  if (!(svg instanceof SVGSVGElement)) {
+    return { x: clientX * factor, y: clientY * factor };
+  }
+  const rect = svg.getBoundingClientRect();
+  return {
+    x: svg.viewBox.baseVal.x + (clientX - rect.left) * factor,
+    y: svg.viewBox.baseVal.y + (clientY - rect.top) * factor,
+  };
 }
 
 /**
- * Owns the pointer move / eight-handle resize math for the canvas stage. Screen-pixel
- * deltas are mapped back into viewBox units via `getScreenToViewBox`, and state
- * updates are rAF-coalesced so CanvasStage can update one provisional canonical
- * history op at 60fps. Nothing here owns document state or talks to the server.
+ * Owns the pointer move, eight-handle resize, and rotation math for the canvas
+ * stage. Screen-pixel deltas are mapped back into viewBox units via
+ * `getScreenToViewBox`, and state updates are rAF-coalesced so CanvasStage can
+ * update one provisional canonical history op at 60fps. Nothing here owns
+ * document state or talks to the server.
  */
 export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
   const [draggingLayer, setDraggingLayer] = useState<CanvasLayerId | null>(null);
@@ -175,13 +235,38 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
           dx: session.base.dx + ddx,
           dy: session.base.dy + ddy,
         };
-      } else if (session.baseBox !== null && session.handle !== null) {
+      } else if (
+        session.mode === "resize" &&
+        session.baseBox !== null &&
+        session.handle !== null
+      ) {
         pendingRef.current = resizeLayerTransform(
           session.baseBox,
           session.base,
           session.handle,
           ddx,
           ddy,
+        );
+      } else if (
+        session.mode === "rotate" &&
+        session.centerX !== null &&
+        session.centerY !== null &&
+        session.startAngle !== null
+      ) {
+        const point = screenPointToViewBox(
+          event.clientX,
+          event.clientY,
+          session.factor,
+          session.captureTarget,
+        );
+        pendingRef.current = rotateLayerTransform(
+          session.base,
+          session.startAngle,
+          session.centerX,
+          session.centerY,
+          point.x,
+          point.y,
+          event.shiftKey,
         );
       }
       if (frameRef.current === null) {
@@ -198,7 +283,31 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
       window.cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     }
-    const settled = pendingRef.current ?? session.base;
+    let settled = pendingRef.current ?? session.base;
+    if (
+      session.mode === "rotate" &&
+      session.moved &&
+      event.type === "pointerup" &&
+      session.centerX !== null &&
+      session.centerY !== null &&
+      session.startAngle !== null
+    ) {
+      const point = screenPointToViewBox(
+        event.clientX,
+        event.clientY,
+        session.factor,
+        session.captureTarget,
+      );
+      settled = rotateLayerTransform(
+        session.base,
+        session.startAngle,
+        session.centerX,
+        session.centerY,
+        point.x,
+        point.y,
+        event.shiftKey,
+      );
+    }
     if (session.moved) {
       argsRef.current.onDragMove?.(session.layerId, settled);
     }
@@ -222,7 +331,7 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
   const begin = useCallback(
     (
       layerId: CanvasLayerId,
-      mode: "move" | "resize",
+      mode: "move" | "resize" | "rotate",
       event: ReactPointerEvent<Element>,
       base: LayerTransform,
       baseBox: LayerBBox | null,
@@ -232,6 +341,24 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
+      const factor = argsRef.current.getScreenToViewBox();
+      const centerX =
+        mode === "rotate" && baseBox !== null
+          ? baseBox.x + baseBox.w / 2 + base.dx
+          : null;
+      const centerY =
+        mode === "rotate" && baseBox !== null
+          ? baseBox.y + baseBox.h / 2 + base.dy
+          : null;
+      const startPoint =
+        centerX === null || centerY === null
+          ? null
+          : screenPointToViewBox(
+              event.clientX,
+              event.clientY,
+              factor,
+              event.currentTarget,
+            );
       sessionRef.current = {
         layerId,
         mode,
@@ -241,7 +368,13 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
         base,
         baseBox,
         handle,
-        factor: argsRef.current.getScreenToViewBox(),
+        factor,
+        centerX,
+        centerY,
+        startAngle:
+          startPoint === null || centerX === null || centerY === null
+            ? null
+            : Math.atan2(startPoint.y - centerY, startPoint.x - centerX),
         captureTarget: event.currentTarget,
         moved: false,
       };
@@ -290,6 +423,18 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     [begin],
   );
 
+  const beginRotate = useCallback(
+    (
+      layerId: CanvasLayerId,
+      event: ReactPointerEvent<Element>,
+      baseBox: LayerBBox,
+      startTransform: LayerTransform,
+    ): void => {
+      begin(layerId, "rotate", event, startTransform, baseBox, null);
+    },
+    [begin],
+  );
+
   // Unmount: drop listeners and the queued frame.
   useEffect(() => {
     return (): void => {
@@ -298,5 +443,5 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     };
   }, []);
 
-  return { draggingLayer, beginMove, beginResize };
+  return { draggingLayer, beginMove, beginResize, beginRotate };
 }

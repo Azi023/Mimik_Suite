@@ -30,6 +30,7 @@ import {
   canUndo,
   createEditorBaseState,
   fold,
+  orientedBoxOf,
   redo as redoHistory,
   removeOp as removeHistoryOp,
   toCanvasRevision,
@@ -497,7 +498,7 @@ export function CanvasStage({
     [nextOperationId, setCanonicalHistory],
   );
 
-  const { draggingLayer, beginMove, beginResize } = useLayerDrag({
+  const { draggingLayer, beginMove, beginResize, beginRotate } = useLayerDrag({
     getScreenToViewBox,
     getTransform: getCanonicalTransform,
     onDragStart: (): void => {
@@ -988,7 +989,7 @@ export function CanvasStage({
       : (folded.transform[selectedLayer.id] ?? IDENTITY_TRANSFORM);
   const selectedBox =
     selectedVisible && selectedBaseBox !== null
-      ? transformedBBox(selectedBaseBox, selectedTransform)
+      ? orientedBoxOf(selectedBaseBox, selectedTransform)
       : null;
 
   const hoveredLayer =
@@ -1250,87 +1251,102 @@ export function CanvasStage({
                         overflow: "visible",
                       }}
                     >
-                      <rect
-                        x={selectedBox.x}
-                        y={selectedBox.y}
-                        width={selectedBox.w}
-                        height={selectedBox.h}
-                        fill="transparent"
-                        stroke="var(--accent)"
-                        strokeWidth={1.5 * unit}
-                        style={{
-                          pointerEvents: "all",
-                          touchAction: "none",
-                          cursor: draggingLayer !== null ? "grabbing" : "grab",
-                        }}
-                        onPointerDown={(event): void =>
-                          beginMove(selectedLayer.id, event)
-                        }
-                        onDoubleClick={(event): void => {
-                          event.stopPropagation();
-                          openTextEditor(selectedLayer);
-                        }}
-                      />
-                      <line
-                        x1={selectedBox.x + selectedBox.w / 2}
-                        y1={selectedBox.y}
-                        x2={selectedBox.x + selectedBox.w / 2}
-                        y2={selectedBox.y - 14 * unit}
-                        stroke="var(--accent)"
-                        strokeWidth={1.5 * unit}
-                      />
-                      <circle
-                        cx={selectedBox.x + selectedBox.w / 2}
-                        cy={selectedBox.y - 20 * unit}
-                        r={6.5 * unit}
-                        fill="var(--accent)"
-                        stroke="var(--surface)"
-                        strokeWidth={1.5 * unit}
-                        style={{
-                          pointerEvents: "all",
-                          touchAction: "none",
-                          cursor: draggingLayer !== null ? "grabbing" : "grab",
-                        }}
-                        onPointerDown={(event): void =>
-                          beginMove(selectedLayer.id, event)
-                        }
-                      />
-                      {RESIZE_HANDLES.map((resizeHandle) => (
+                      <g
+                        transform={`rotate(${selectedBox.rotation} ${selectedBox.cx} ${selectedBox.cy})`}
+                      >
                         <rect
-                          key={resizeHandle.handle}
-                          data-resize-handle={resizeHandle.handle}
-                          x={
-                            selectedBox.x +
-                            selectedBox.w * resizeHandle.xFactor -
-                            (RESIZE_HANDLE_SIZE_PX * unit) / 2
-                          }
-                          y={
-                            selectedBox.y +
-                            selectedBox.h * resizeHandle.yFactor -
-                            (RESIZE_HANDLE_SIZE_PX * unit) / 2
-                          }
-                          width={RESIZE_HANDLE_SIZE_PX * unit}
-                          height={RESIZE_HANDLE_SIZE_PX * unit}
-                          rx={RESIZE_HANDLE_RADIUS_PX * unit}
-                          fill="var(--surface)"
+                          x={selectedBox.x}
+                          y={selectedBox.y}
+                          width={selectedBox.w}
+                          height={selectedBox.h}
+                          fill="transparent"
                           stroke="var(--accent)"
                           strokeWidth={1.5 * unit}
                           style={{
                             pointerEvents: "all",
                             touchAction: "none",
-                            cursor: resizeHandle.cursor,
+                            cursor: draggingLayer !== null ? "grabbing" : "grab",
                           }}
                           onPointerDown={(event): void =>
-                            beginResize(
+                            beginMove(selectedLayer.id, event)
+                          }
+                          onDoubleClick={(event): void => {
+                            event.stopPropagation();
+                            openTextEditor(selectedLayer);
+                          }}
+                        />
+                        <line
+                          x1={selectedBox.x + selectedBox.w / 2}
+                          y1={selectedBox.y}
+                          x2={selectedBox.x + selectedBox.w / 2}
+                          y2={selectedBox.y - 14 * unit}
+                          stroke="var(--accent)"
+                          strokeWidth={1.5 * unit}
+                        />
+                        <circle
+                          cx={selectedBox.x + selectedBox.w / 2}
+                          cy={selectedBox.y - 20 * unit}
+                          r={6.5 * unit}
+                          fill="var(--accent)"
+                          stroke="var(--surface)"
+                          strokeWidth={1.5 * unit}
+                          style={{
+                            pointerEvents: "all",
+                            touchAction: "none",
+                            cursor:
+                              draggingLayer === selectedLayer.id
+                                ? "grabbing"
+                                : "grab",
+                          }}
+                          aria-label="Rotate layer"
+                          onPointerDown={(event): void =>
+                            beginRotate(
                               selectedLayer.id,
-                              resizeHandle.handle,
                               event,
                               selectedBaseBox,
                               selectedTransform,
                             )
                           }
                         />
-                      ))}
+                        {RESIZE_HANDLES.map((resizeHandle) => (
+                          <rect
+                            key={resizeHandle.handle}
+                            data-resize-handle={resizeHandle.handle}
+                            x={
+                              selectedBox.x +
+                              selectedBox.w * resizeHandle.xFactor -
+                              (RESIZE_HANDLE_SIZE_PX * unit) / 2
+                            }
+                            y={
+                              selectedBox.y +
+                              selectedBox.h * resizeHandle.yFactor -
+                              (RESIZE_HANDLE_SIZE_PX * unit) / 2
+                            }
+                            width={RESIZE_HANDLE_SIZE_PX * unit}
+                            height={RESIZE_HANDLE_SIZE_PX * unit}
+                            rx={RESIZE_HANDLE_RADIUS_PX * unit}
+                            fill="var(--surface)"
+                            stroke="var(--accent)"
+                            strokeWidth={1.5 * unit}
+                            style={{
+                              pointerEvents: "all",
+                              touchAction: "none",
+                              cursor: resizeHandle.cursor,
+                            }}
+                            // Gate 4a resize deltas remain screen-axis based. Rotation is
+                            // preserved, but resize directions are only exact at 0 degrees.
+                            onPointerDown={(event): void =>
+                              beginResize(
+                                selectedLayer.id,
+                                resizeHandle.handle,
+                                event,
+                                selectedBaseBox,
+                                selectedTransform,
+                              )
+                            }
+                          />
+                        ))}
+                      </g>
                     </svg>
                   )}
 
