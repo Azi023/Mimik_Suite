@@ -4,7 +4,47 @@
 
 ---
 
-## ► LATEST (2026-07-23 pm2) — W4 A-03/A-04/A-06 + FRONTEND REMEDIATION (canvas actually works now)
+## ► LATEST (2026-07-23 pm3) — CANVAS EDITOR REBUILD: GATE 1 DONE + PLAYWRIGHT-PROVEN (correctness)
+
+**Context:** Operator did a ChatGPT-driven usability audit (`~/Documents/Codex/2026-07-23/.../creative-editor-usability-audit.md`)
+scoring the editor 13/40 (pre-alpha). Chose a FULL 4-gate rebuild (safe-template-editor direction, not Figma clone).
+Program tasks = the 4 gates (see below). **Architecture spec: `scratchpad/spec_gate1_canonical_state.md`** (the contract).
+
+### ▶ GATE 1 COMPLETE (correctness) — committed + browser-verified
+- **Core (`d592106`)** — rearchitected CanvasStage around ONE state: `web/components/canvas/editor-state.ts`
+  (DocOp `EditHistory` → `fold` last-write-wins → `applyState` single render → `toCanvasRevision` payload;
+  + unit tests). Preview, hit-testing, pending list, and Apply payload now all read one folded state.
+- **Client-context (`3eeb274`)** — editor header shows the creative's OWN client/brand (was showing the
+  global sidebar selection) + mismatch note.
+- **⚑ THE ROOT-CAUSE FIX (why earlier attempts failed):** the SVG was injected via
+  `dangerouslySetInnerHTML`, and React **re-materialized that subtree on re-render, wiping applyState's
+  imperative DOM mutations** (recolor/hide/text reverted → "pending op added but artwork unchanged"). Fix:
+  inject imperatively (`host.innerHTML = parsed.markup` in a `[parsed]` effect); React never owns it again.
+  Also: recolor must target the paint CHILD (`<text>`/`<rect>`), not the parent `<g>` (child's own `fill`
+  attr overrides inherited fill).
+- **VERIFICATION RECIPE (reuse for Gates 2-4):** the executor's tsc/tests are NOT enough — the bugs were all
+  "compiles but doesn't render." Drive the REAL app with Playwright: `.venv/bin/python scratchpad/verify_editor.py`
+  (needs web dev server up + a fresh `.next`). Proven live: recolor #5A2A6B→#FFFFFF, hide→display:none, text
+  updates, **discard restores base exactly**. If web 500s: `rm -rf web/.next` + restart `npm run dev` (stale cache).
+
+### ▶ REMAINING — GATES 2-4 (tasks 15/16/17; large — recommend a FRESH session per gate for review quality)
+- **G2 safety:** undo/redo (Cmd+Z/Shift+Z) + visible controls, ordered pending-op list w/ per-op remove,
+  before/after press-hold, safe descriptive revert (preview + warn on pending + new head). Builds on the
+  EditHistory model (ops/redo already in the type).
+- **G3 owner usability:** right inspector (move layer props off the canvas), zoom/fit/100%/pan, per-layer
+  reset, image replace+crop+focal (NEEDS BACKEND: upload endpoint + L1 source override), Mark&Tell →
+  "Ask AI about this layer", version labels = timestamp/ordinal (not V1/V1/V1), distraction-free mode.
+- **G4 precision:** X/Y/W/H/**rotation** (NEEDS BACKEND: extend mimik-contracts LayerOp + svg.py render +
+  revise), layer tree reorder/lock/rename/duplicate, align/distribute/snap/guides/safe-areas, full
+  typography, multi-select, keyboard nudge/copy/paste/delete.
+- Tool plan: Codex = correctness logic + backend contract; AGY = big UI build-outs (inspector/layer-tree);
+  Fable = design-polish. Opus specs + reviews + Playwright-verifies each gate before the next builds on it.
+
+### ▶ ALSO STILL OPEN (paused): W4 backend A-05 (⌘K command) + frontend A-07/A-08/A-11/B-12 + gates A-12/B-14.
+
+---
+
+## ► (2026-07-23 pm2) — W4 A-03/A-04/A-06 + FRONTEND REMEDIATION (canvas actually works now)
 
 **State:** Operator tested the local product and reported the FRONTEND felt broken (canvas not clickable,
 dead nav buttons, /creatives 404, hydration error). Ran a full-app QA audit + fixed. **Backend is solid**
