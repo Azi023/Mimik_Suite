@@ -48,7 +48,7 @@ import {
   type SnappedLayerTransform,
 } from "./editor-state";
 import { useLayerDrag, type ResizeHandle } from "./useLayerDrag";
-import { Inspector } from "./Inspector";
+import { Inspector, type InspectorProps } from "./Inspector";
 import { ZoomControls } from "./ZoomControls";
 
 export interface CanvasStageProps {
@@ -1189,17 +1189,46 @@ export function CanvasStage({
     (layer) => overflow[layer.id] === true,
   );
 
+  const inspectorProps: InspectorProps = {
+    layers: layers.map((layer) => ({
+      id: layer.id,
+      isVisible: folded.visible[layer.id] !== false,
+      hasText: TEXT_EDIT_KEY[layer.id] !== undefined,
+      canRecolor: RECOLORABLE.has(layer.id),
+    })),
+    selectedId,
+    onSelect: setSelectedId,
+    onToggleVisible: toggleVisible,
+    onEditText: (id): void => {
+      const layer = layers.find((candidate) => candidate.id === id);
+      if (layer !== undefined) openTextEditor(layer);
+    },
+    brandColors,
+    selectedFillRole:
+      selectedLayer === null ? null : folded.fill[selectedLayer.id],
+    onPickFillRole: pickFillRole,
+    onResetLayer: resetLayer,
+    canResetSelectedLayer:
+      selectedLayer !== null &&
+      history.ops.some((operation) => operation.layer === selectedLayer.id),
+    askText: askText ?? "",
+    onAskTextChange: onAskTextChange ?? ((): void => {}),
+    onAddAsk: onAddAsk ?? ((): void => {}),
+    busy: busy ?? false,
+  };
+
   return (
     <div
       ref={stageRef}
       className="creview__stage"
+      data-canvas-stage-layout=""
+      data-canvas-fullscreen={isFullscreen ? "" : undefined}
       aria-label="Creative canvas"
       tabIndex={0}
       onKeyDown={handleEditorKeyDown}
       onKeyUp={handleEditorKeyUp}
       style={{
         display: "flex",
-        flexDirection: "row",
         gap: "var(--sp-4)",
         ...(isFullscreen ? {
           position: "fixed",
@@ -1210,7 +1239,8 @@ export function CanvasStage({
         } : {})
       }}
     >
-      <div 
+      <div
+        data-canvas-column=""
         style={{ 
           flex: 1, 
           minWidth: 0, 
@@ -1258,7 +1288,18 @@ export function CanvasStage({
           </span>
         </div>
 
-        <div className="creview__canvas-wrap" style={{ flex: 1, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+        <div
+          className="creview__canvas-wrap"
+          data-canvas-wrap=""
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+          }}
+        >
           {showingOriginal && (
             <span className="creview__original-badge" role="status" style={{ zIndex: 10 }}>
               Showing original
@@ -1824,7 +1865,16 @@ export function CanvasStage({
           </div>
         </div>
 
-        <div style={{ position: "absolute", bottom: "16px", left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
+        <div
+          data-canvas-zoom=""
+          style={{
+            position: "absolute",
+            bottom: "16px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 10,
+          }}
+        >
            <ZoomControls
              zoom={zoom}
              onZoomChange={handleZoomChange}
@@ -1836,7 +1886,16 @@ export function CanvasStage({
         </div>
         
         {overflowingLayers.length > 0 && (
-          <div style={{ position: "absolute", top: "16px", left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
+          <div
+            data-canvas-overflow=""
+            style={{
+              position: "absolute",
+              top: "16px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 10,
+            }}
+          >
              <p className="creview__thread-empty" role="status" style={{ margin: 0, background: "var(--surface)", padding: "4px 12px", borderRadius: "var(--r-full)", boxShadow: "var(--shadow-pop)", fontSize: "12px" }}>
                {overflowingLayers.map((layer) => `${LAYER_LABEL[layer.id]} text may overflow`).join(" · ")}
              </p>
@@ -1844,27 +1903,145 @@ export function CanvasStage({
         )}
       </div>
       
-      <Inspector 
-         layers={layers.map(l => ({
-            id: l.id,
-            isVisible: folded.visible[l.id] !== false,
-            hasText: TEXT_EDIT_KEY[l.id] !== undefined,
-            canRecolor: RECOLORABLE.has(l.id)
-         }))}
-         selectedId={selectedId}
-         onSelect={setSelectedId}
-         onToggleVisible={toggleVisible}
-         onEditText={(id) => openTextEditor(layers.find(l => l.id === id)!)}
-         brandColors={brandColors}
-         selectedFillRole={selectedLayer ? folded.fill[selectedLayer.id] : null}
-         onPickFillRole={pickFillRole}
-         onResetLayer={resetLayer}
-         canResetSelectedLayer={selectedLayer ? history.ops.some(op => op.layer === selectedLayer.id) : false}
-         askText={askText ?? ""}
-         onAskTextChange={onAskTextChange ?? (() => {})}
-         onAddAsk={onAddAsk ?? (() => {})}
-         busy={busy ?? false}
-      />
+      <div data-canvas-inspector-desktop="">
+        <Inspector {...inspectorProps} />
+      </div>
+
+      <details
+        data-canvas-inspector-mobile=""
+        onKeyDown={(event): void => {
+          if (event.key === " ") event.stopPropagation();
+        }}
+        onKeyUp={(event): void => {
+          if (event.key === " ") event.stopPropagation();
+        }}
+      >
+        <summary className="btn btn--secondary">
+          Layers &amp; properties
+        </summary>
+        <div data-canvas-inspector-content="">
+          <Inspector {...inspectorProps} />
+        </div>
+      </details>
+
+      <style jsx global>{`
+        [data-canvas-stage-layout] {
+          flex-direction: row;
+        }
+
+        [data-canvas-inspector-desktop] {
+          display: contents;
+        }
+
+        [data-canvas-inspector-mobile] {
+          display: none;
+        }
+
+        @media (max-width: 767px) {
+          [data-canvas-stage-layout] {
+            flex: 0 0 auto;
+            flex-direction: column;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            min-height: 0;
+            box-sizing: border-box;
+            overflow-x: clip;
+          }
+
+          [data-canvas-stage-layout][data-canvas-fullscreen] {
+            height: 100dvh;
+            padding-top: calc(var(--sp-4) + 60px) !important;
+            overflow-y: auto;
+          }
+
+          [data-canvas-column] {
+            flex: 0 0 auto !important;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+          }
+
+          [data-canvas-wrap] {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            min-height: max(320px, 58vh) !important;
+            box-sizing: border-box;
+          }
+
+          [data-canvas-inspector-desktop] {
+            display: none;
+          }
+
+          [data-canvas-inspector-mobile] {
+            display: block;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+          }
+
+          [data-canvas-inspector-mobile] > summary {
+            width: 100%;
+            max-width: 100%;
+            min-height: 44px;
+            box-sizing: border-box;
+          }
+
+          [data-canvas-inspector-content] {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            max-height: min(42vh, 420px);
+            box-sizing: border-box;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+          }
+
+          [data-canvas-inspector-content] > .review-panel {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            height: auto !important;
+            margin: 0;
+            box-sizing: border-box;
+            overflow-y: visible;
+          }
+
+          [data-canvas-zoom] {
+            right: var(--sp-3);
+            bottom: var(--sp-3) !important;
+            left: var(--sp-3) !important;
+            width: auto;
+            max-width: 100%;
+            transform: none !important;
+          }
+
+          [data-canvas-zoom] > div {
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: var(--sp-2) !important;
+            padding: var(--sp-2) !important;
+          }
+
+          [data-canvas-overflow] {
+            right: var(--sp-3);
+            left: var(--sp-3) !important;
+            max-width: 100%;
+            transform: none !important;
+          }
+
+          [data-canvas-overflow] > p {
+            max-width: 100%;
+            overflow-wrap: anywhere;
+            white-space: normal;
+          }
+        }
+      `}</style>
     </div>
   );
 }

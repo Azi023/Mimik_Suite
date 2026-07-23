@@ -288,7 +288,48 @@ export function CanvasEditor({
   }
 
   return (
-    <div className="creview">
+    <div className="creview" data-canvas-editor="">
+      <div
+        data-canvas-mobile-actions=""
+        role="group"
+        aria-label="Canvas edit actions"
+      >
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          title="Undo · ⌘/Ctrl+Z"
+          disabled={busy || !stageSnapshot.canUndo}
+          onClick={(): void => stageControlsRef.current?.undo()}
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          title="Redo · ⌘/Ctrl+Shift+Z"
+          disabled={busy || !stageSnapshot.canRedo}
+          onClick={(): void => stageControlsRef.current?.redo()}
+        >
+          Redo
+        </button>
+        <button
+          type="button"
+          className="btn btn--secondary btn--sm"
+          disabled={!hasPendingChanges || busy}
+          onClick={discard}
+        >
+          Discard
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary btn--sm"
+          disabled={!hasPendingChanges || pendingRevision === null || busy}
+          onClick={(): void => void apply()}
+        >
+          {revising ? "Applying…" : "Apply"}
+        </button>
+      </div>
+
       <CanvasStage
         key={stageKey}
         svg={currentSvg}
@@ -361,7 +402,11 @@ export function CanvasEditor({
               Pending
               <span className="creview__count">{stageSnapshot.history.ops.length}</span>
             </h2>
-            <div className="creview__history-actions" aria-label="Edit history">
+            <div
+              className="creview__history-actions"
+              data-canvas-desktop-history-actions=""
+              aria-label="Edit history"
+            >
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
@@ -427,7 +472,10 @@ export function CanvasEditor({
               </li>
             </ul>
           )}
-          <div className="creview__composer-actions">
+          <div
+            className="creview__composer-actions"
+            data-canvas-desktop-apply-actions=""
+          >
             <button
               type="button"
               className="btn btn--secondary btn--sm"
@@ -500,6 +548,75 @@ export function CanvasEditor({
           reverting={busy}
         />
       </aside>
+
+      <style jsx global>{`
+        [data-canvas-mobile-actions] {
+          display: none;
+        }
+
+        @media (max-width: 767px) {
+          [data-canvas-editor] {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            overflow-x: clip;
+          }
+
+          [data-canvas-mobile-actions] {
+            position: sticky;
+            top: 0;
+            z-index: 60;
+            display: flex;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+            flex-wrap: wrap;
+            gap: var(--sp-2);
+            padding: var(--sp-2) 0;
+            background: var(--canvas);
+          }
+
+          [data-canvas-mobile-actions] > .btn {
+            flex: 1 1 0;
+            min-width: 0;
+            min-height: 44px;
+          }
+
+          [data-canvas-editor]:has([data-canvas-fullscreen])
+            [data-canvas-mobile-actions] {
+            position: fixed;
+            right: 0;
+            left: 0;
+            padding-right: var(--sp-4);
+            padding-left: var(--sp-4);
+          }
+
+          [data-canvas-desktop-history-actions],
+          [data-canvas-desktop-apply-actions] {
+            display: none !important;
+          }
+
+          [data-canvas-editor] > .creview__rail {
+            flex-basis: auto;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            max-height: none;
+            box-sizing: border-box;
+            position: static;
+            overflow-y: visible;
+          }
+
+          [data-canvas-editor] .creview__pending-head,
+          [data-canvas-editor] .creview__composer-actions,
+          [data-canvas-editor] .creview__event {
+            max-width: 100%;
+            min-width: 0;
+            flex-wrap: wrap;
+          }
+        }
+      `}</style>
     </div>
   );
 }
