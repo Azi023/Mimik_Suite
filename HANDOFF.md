@@ -51,9 +51,9 @@ portal `/portal/session` leaks a raw PyJWT error; confirm PROD `JWT_SECRET` ≠ 
     output. **Live adversarial injection test passed** (attack → 201, zero disallowed keys, benign part still applied).
 - **⚠ EXECUTOR: Codex quota EXHAUSTED until Jul 28** → switched to **agy** (`agy -p "$(cat spec.md)" --mode
   accept-edits --dangerously-skip-permissions --print-timeout 30m`; sweep stray `patch*.py` after — none appeared so far).
-- **IN FLIGHT:** A-10 **backend** (`PATCH /admin/accounts/{id}` role+client_scopes, owner-only, cross-tenant→404,
-  cross-tenant scope→422 + test) on agy. Review the tenant-scope hard, then commit.
-- **A-10 frontend (NOT DONE)** — members UI (role picker from `GET /admin/capabilities` + client_scopes editor,
+- **A-10 backend ✅** (`7b4c7f0`) — `PATCH /admin/accounts/{id}` owner-only, role+client_scopes, cross-tenant
+  target→404, cross-tenant scope→422, unknown role→422. 12 tests green.
+- **A-10 frontend (NOT DONE — START HERE)** — members UI (role picker from `GET /admin/capabilities` + client_scopes editor,
   `web/app/members/page.tsx` + `MembersView.tsx` + a `PATCH` helper in `web/lib/api.ts`). Runs on a **Fable agent** (#9).
 - **Then W4+** (per plan wave matrix): A-03 queue service (now safe on the hot file) ∥ B-08 canvas web stage (Fable).
   Plan A Command Center surfaces (A-06 board drag, A-07 calendar, A-08 queue, A-09 ⌘K cmd bar) + Plan B web
