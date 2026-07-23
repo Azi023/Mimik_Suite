@@ -34,6 +34,7 @@ from creative.references import gather as reference_gather
 from creative.render import glo2go_templates
 from creative.style_profile import ImageSource, StyleProfile, get_style_profile
 from creative.vision import text_region as vision_text_region
+from creative.revision.interpreter import interpret_ask
 from mimik_contracts import (
     Brand,
     CopyBlock,
@@ -449,22 +450,15 @@ async def revise_creative(
     params = revision.params or {}
     l1_params = image_layer.recipe.params
 
+    wants_new_image = False
     if revision.ask and revision.ask.instruction:
-        text_lower = revision.ask.instruction.lower()
-        for keyword in ("left", "right", "top", "bottom"):
-            if keyword in text_lower:
-                params["panel_anchor"] = keyword
-                break
-
-        if "smaller" in text_lower:
-            params["subject_zoom"] = 0.8
-        elif "larger" in text_lower:
-            params["subject_zoom"] = 1.2
-
-        if "lighter" in text_lower:
-            params["badge_background_luminance"] = 0.0
-        elif "darker" in text_lower:
-            params["badge_background_luminance"] = 1.0
+        interpreted = interpret_ask(
+            revision.ask,
+            profile_id=str(l1_params.get("style_profile_id", "generic")),
+            current_params=l1_params,
+        )
+        params.update(interpreted.params)
+        wants_new_image = interpreted.wants_new_image
 
         try:
             copy_block = await asyncio.to_thread(
@@ -479,6 +473,16 @@ async def revise_creative(
             logger.warning(
                 "revise: copy redraft failed (%s); applying layout-only change", exc
             )
+            
+        for field_name, new_text in interpreted.text_edits.items():
+            if field_name == "headline":
+                copy_block.headline = new_text
+            elif field_name == "subhead":
+                copy_block.subhead = new_text
+            elif field_name == "cta":
+                copy_block.cta = new_text
+        if interpreted.text_edits:
+            copy_block.status = "edited"
 
     if revision.text_edits:
         edits_dump = revision.text_edits.model_dump(exclude_none=True)
@@ -534,12 +538,35 @@ async def revise_creative(
     artifact_dir.mkdir(parents=True, exist_ok=False)
 
     try:
+        image_path_for_render = Path(image_layer.artifact_ref)
+        if wants_new_image:
+            try:
+                client_row = await repo.get_client(session, tenant_id=principal.tenant_id, client_id=job.client_id)
+                industry = client_row.industry if client_row else None
+                profile = _profile(str(l1_params.get("style_profile_id", "generic")))
+                
+                new_image_path, new_ref_urls, new_source_kind = await _source_image(
+                    brand=brand,
+                    industry=industry,
+                    pillar=str(l1_params.get("pillar", "General")),
+                    topic=str(l1_params.get("topic", "General")),
+                    format_key=manifest.format_key,
+                    profile=profile,
+                    destination_dir=artifact_dir,
+                )
+                image_path_for_render = new_image_path
+                l1_params["image_source"] = new_source_kind
+                image_layer.artifact_ref = str(new_image_path)
+                image_layer.recipe.reference_urls = new_ref_urls
+            except Exception as exc:
+                logger.warning("revise: failed to source new image (%s); keeping existing image", exc)
+
         svg_path, preview_path, profile_render_path = await _render_creative_artifacts(
             brand=brand,
             profile_id=str(l1_params.get("style_profile_id", "generic")),
             copy_block=copy_block,
             format_key=manifest.format_key,
-            image_path=Path(image_layer.artifact_ref),
+            image_path=image_path_for_render,
             artifact_dir=artifact_dir,
             render_params=l1_params,
         )
