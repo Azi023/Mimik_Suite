@@ -29,11 +29,28 @@ usage — operator flagged usage was tight). Every executor output Playwright-li
   422); persists into the server-rendered head. **Known limit (inline-documented): Gate-4a resize deltas are
   screen-axis based → resize direction only exact at 0° rotation.**
 
-### IN FLIGHT (dispatched to Codex, PID 51347, log: $CLAUDE_JOB_DIR/tmp/codex_guides.log):
-- **G4b visual guides** — rulers (top+left) + margins/safe-area overlay + snap-to-guides (center/margins/
-  other layers, Alt to disable, snap-line feedback). Scope: CanvasStage.tsx + editor-state.ts +
-  useLayerDrag.ts. Spec: $CLAUDE_JOB_DIR/tmp/spec_guides.md. **Opus must Playwright-verify + commit when it
-  lands** (recipe pattern: scratchpad/verify_apply_rotation.py — discover live editor href, drive canvas).
+- **`710d520` feat(canvas GATE-4b: guides)** [Codex + Opus verify] — rulers (top+left) + margins/safe-area
+  overlay (5% inset, dashed) + snap-to-guides (center/margins/other-layer edges within ~8px, Alt/Cmd to
+  disable, snap-line feedback). Toggles are pure view state (don't dirty). Verified: rulers 10 labels + hide
+  on toggle; safe-area 3 dashed + hide on toggle; pending stays 0; drag → snap line + top edge locks to the
+  margin guide at exactly 54.0; no rotation/move regression. tsc=0, 18/18 canvas tests.
+
+### ⚠ EXECUTOR GOTCHA (cost a web restart this session):
+- **Codex ran `npm run build`** in web/ → wrote a production `.next/BUILD_ID` that corrupted the running
+  `npm run dev` server → `/creatives` started 500ing. Fix: `kill <web pid>; rm -rf web/.next; cd web &&
+  env NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev`. **In every future executor spec, forbid
+  `npm run build` — allow ONLY `npx tsc --noEmit` + `npm test`/vitest.**
+
+### 🔱 ARCHITECTURE FORK — "layer tree" does NOT cleanly fit the fixed-5-layer SVG master (operator decision):
+The next queued item was "layer tree (reorder/lock/rename/dup)". But the SVG master has FIXED SEMANTIC
+layers (background/panel/headline/subhead/cta/badge) — they are not free-form user layers. So:
+- **reorder** (z-order) — not supported by the contract today; layer order is baked into the master.
+- **rename** — layers have semantic ids, not user names; rename is meaningless in this model.
+- **duplicate** — the 5-layer master has no notion of adding a 2nd headline layer.
+- **lock** — DOES fit (pure view state: block select/drag on a layer).
+So a true Figma-style layer tree needs a MASTER-ARCHITECTURE decision first. The safe subset that fits TODAY
+= a **layer NAVIGATOR** (list the semantic layers, select, toggle visibility, LOCK) — the Inspector already
+lists layers, so this is small. Surfaced to operator; do not build reorder/rename/dup until decided.
 
 ### PRODUCT DECISIONS — OPERATOR SIGNED OFF THIS SESSION (build these):
 - **(a) Aspect-ratio / format switch → "Editor re-render switcher".** In the editor, operator picks a target
@@ -45,8 +62,15 @@ usage — operator flagged usage was tight). Every executor output Playwright-li
   name) + Inspector recolor UI + the client-facing gate. Verify the client gate explicitly.
 
 ### REMAINING G4b QUEUE (SEQUENTIAL — they all mutate editor-state.ts so canvas features CANNOT be
-### parallelized; only disjoint-scope work parallelizes, as round 1 did shell‖rotation):
-layer tree (reorder/lock/rename/dup) → align/distribute → multi-select → keyboard nudge/copy/paste/delete.
+### parallelized; only disjoint-scope work parallelizes, as round 1 did shell‖rotation). Fit-checked order:
+1. **Keyboard nudge + delete** (CLEAN FIT, small): arrow = 1u transform op, Shift+arrow = 10u, Delete =
+   visible:false op, on the selected layer. Verifiable, no arch change. ← do this next.
+2. **Layer navigator (list/select/visibility/LOCK)** — the fitting subset of "layer tree" (see fork above).
+3. **Multi-select** (arch change: selectedId is single today → needs a selection SET; nudge/delete then
+   apply to all selected). Non-trivial; spec carefully.
+4. **Align / distribute** (needs multi-select first).
+5. **copy/paste** of a layer's transform/overrides.
+Deferred pending operator: reorder/rename/duplicate (master-architecture decision).
 
 ### DEPLOY-HARDENING BACKLOG (deploy still HELD):
 - `NEXT_PUBLIC_DEV_TOKEN` is inlined into the CLIENT bundle (Next `NEXT_PUBLIC_` semantics) → the dev
