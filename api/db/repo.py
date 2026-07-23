@@ -406,6 +406,25 @@ async def list_creative_versions(
     return list((await session.execute(stmt)).scalars())
 
 
+async def list_creative_docs_in_window(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    start: datetime,
+    end: datetime,
+) -> list[CreativeDocRow]:
+    """Creative documents created in an inclusive tenant-scoped time window."""
+    stmt = (
+        select(CreativeDocRow)
+        .where(
+            CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.created_at.between(start, end),
+        )
+        .order_by(CreativeDocRow.created_at, CreativeDocRow.id)
+    )
+    return list((await session.execute(stmt)).scalars())
+
+
 async def count_client_versions(
     session: AsyncSession, *, tenant_id: str, job_id: str, since: datetime
 ) -> int:

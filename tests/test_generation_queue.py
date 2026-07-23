@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from mimik_contracts import (
     QueueStats,
     TaskStatus,
     TaskType,
+    UsageReport,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -87,6 +89,50 @@ async def _seed_client(
         client.id,
         brand.id,
     )
+
+
+def _auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _bootstrap_route_tenant(
+    client: AsyncClient,
+    *,
+    suffix: str,
+) -> tuple[str, str, str, str]:
+    tenant_response = await client.post(
+        "/tenants",
+        json={"name": f"Route tenant {suffix}", "slug": f"route-tenant-{suffix}"},
+        headers=superadmin_headers(),
+    )
+    assert tenant_response.status_code == 201, tenant_response.text
+    payload = tenant_response.json()
+    tenant_id = payload["tenant"]["id"]
+    owner_token = payload["access_token"]
+    client_response = await client.post(
+        "/clients",
+        json={"name": f"Route client {suffix}", "industry": "Consulting"},
+        headers=_auth(owner_token),
+    )
+    assert client_response.status_code == 201, client_response.text
+    client_id = client_response.json()["id"]
+    brand_response = await client.post(
+        "/brands",
+        json={
+            "client_id": client_id,
+            "name": f"Route brand {suffix}",
+            "slug": f"route-brand-{suffix}",
+            "tokens": {
+                "colors": [
+                    {"name": "primary", "hex": "#112233"},
+                    {"name": "ground", "hex": "#FFFFFF"},
+                ]
+            },
+        },
+        headers=_auth(owner_token),
+    )
+    assert brand_response.status_code == 201, brand_response.text
+    return tenant_id, owner_token, client_id, brand_response.json()["id"]
 
 
 def _stub_generation_pipeline(
@@ -451,3 +497,159 @@ async def test_synchronous_generate_endpoint_remains_unchanged(
     assert len(jobs.json()) == 1
     assert jobs.json()[0]["id"] == response.json()["creative"]["job_id"]
     assert jobs.json()[0]["status"] == JobStatus.INTERNAL_REVIEW.value
+
+
+async def test_ops_queue_routes_enqueue_list_and_report_stats(client: AsyncClient) -> None:
+    _tenant_id, owner_token, client_id, _brand_id = await _bootstrap_route_tenant(
+        client,
+        suffix="queue",
+    )
+
+    enqueue_response = await client.post(
+        "/ops/queue",
+        json={
+            "client_id": client_id,
+            "topic": "Route queue request",
+            "pillar": "Education",
+            "format_key": "ig_post",
+        },
+        headers=_auth(owner_token),
+    )
+    assert enqueue_response.status_code == 201, enqueue_response.text
+    queued = GenerationQueueItem.model_validate(enqueue_response.json())
+
+    list_response = await client.get("/ops/queue", headers=_auth(owner_token))
+    stats_response = await client.get("/ops/queue/stats", headers=_auth(owner_token))
+
+    assert list_response.status_code == 200, list_response.text
+    listed = [GenerationQueueItem.model_validate(item) for item in list_response.json()]
+    assert [item.id for item in listed] == [queued.id]
+    assert listed[0].job_id == queued.job_id
+    assert listed[0].client_id == client_id
+    assert listed[0].topic == "Route queue request"
+
+    assert stats_response.status_code == 200, stats_response.text
+    assert QueueStats.model_validate(stats_response.json()) == QueueStats(
+        pending=1,
+        in_progress=0,
+        done_today=0,
+        failed_today=0,
+    )
+
+
+async def test_ops_queue_accepts_admin_as_team_role(client: AsyncClient) -> None:
+    from api.core.security import create_access_token
+
+    tenant_id, _owner_token, client_id, _brand_id = await _bootstrap_route_tenant(
+        client,
+        suffix="admin",
+    )
+    admin_token = create_access_token(tenant_id=tenant_id, role="admin")
+
+    response = await client.post(
+        "/ops/queue",
+        json={"client_id": client_id, "topic": "Admin request"},
+        headers=_auth(admin_token),
+    )
+
+    assert response.status_code == 201, response.text
+    assert GenerationQueueItem.model_validate(response.json()).client_id == client_id
+
+
+async def test_ops_queue_and_usage_routes_forbid_client_role(client: AsyncClient) -> None:
+    from api.core.security import create_access_token
+
+    tenant_id, _owner_token, client_id, _brand_id = await _bootstrap_route_tenant(
+        client,
+        suffix="client-role",
+    )
+    client_token = create_access_token(tenant_id=tenant_id, role="client")
+    headers = _auth(client_token)
+
+    responses = [
+        await client.post(
+            "/ops/queue",
+            json={"client_id": client_id, "topic": "Forbidden request"},
+            headers=headers,
+        ),
+        await client.get("/ops/queue", headers=headers),
+        await client.get("/ops/queue/stats", headers=headers),
+        await client.get("/ops/usage", headers=headers),
+    ]
+
+    assert [response.status_code for response in responses] == [403, 403, 403, 403]
+
+
+async def test_ops_queue_cross_tenant_enqueue_is_404(client: AsyncClient) -> None:
+    _tenant_a, owner_a, _client_a, _brand_a = await _bootstrap_route_tenant(
+        client,
+        suffix="scope-a",
+    )
+    _tenant_b, _owner_b, client_b, _brand_b = await _bootstrap_route_tenant(
+        client,
+        suffix="scope-b",
+    )
+
+    response = await client.post(
+        "/ops/queue",
+        json={"client_id": client_b, "topic": "Cross-tenant request"},
+        headers=_auth(owner_a),
+    )
+
+    assert response.status_code == 404
+
+
+async def test_ops_usage_defaults_to_current_utc_month_and_rejects_reverse_window(
+    client: AsyncClient,
+) -> None:
+    _tenant_id, owner_token, _client_id, brand_id = await _bootstrap_route_tenant(
+        client,
+        suffix="usage",
+    )
+    job_response = await client.post(
+        "/jobs",
+        json={
+            "brand_id": brand_id,
+            "title": "Usage route creative",
+            "format_key": "ig_post",
+        },
+        headers=_auth(owner_token),
+    )
+    assert job_response.status_code == 201, job_response.text
+    creative_response = await client.post(
+        f"/jobs/{job_response.json()['id']}/creatives",
+        json={
+            "template_key": "centered_hero",
+            "copy_block": {"headline": "Usage test", "cta": "Review"},
+        },
+        headers=_auth(owner_token),
+    )
+    assert creative_response.status_code == 201, creative_response.text
+
+    before = datetime.now(timezone.utc)
+    usage_response = await client.get("/ops/usage", headers=_auth(owner_token))
+    after = datetime.now(timezone.utc)
+
+    assert usage_response.status_code == 200, usage_response.text
+    report = UsageReport.model_validate(usage_response.json())
+    assert report.window_start == before.replace(
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    assert before <= report.window_end <= after
+    assert report.renders == 1
+    assert report.by_image_source == {"unknown": 1}
+    assert report.by_profile == {"unknown": 1}
+
+    reverse_response = await client.get(
+        "/ops/usage",
+        params={
+            "start": (after + timedelta(days=1)).isoformat(),
+            "end": after.isoformat(),
+        },
+        headers=_auth(owner_token),
+    )
+    assert reverse_response.status_code == 422

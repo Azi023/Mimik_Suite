@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_min: int = 60
     client_revision_daily_quota: int = 5
+    generation_monthly_cap: int | None = None
     generation_worker_enabled: bool = True
     app_env: str = "dev"
 

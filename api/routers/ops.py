@@ -20,6 +20,8 @@ from api.core.auth import Principal, get_principal, require_role
 from api.db import repo
 from api.db.mappers import to_job
 from api.db.session import get_session
+from api.routers.jobs import _TEAM
+from api.services import generation_queue, usage
 from api.services.approval_flow import ApprovalFlowError, submit_approval
 from mimik_contracts import (
     Actor,
@@ -28,8 +30,11 @@ from mimik_contracts import (
     BoardCard,
     BoardResponse,
     CalendarEntry,
+    GenerationQueueItem,
     Job,
     JobStatus,
+    QueueStats,
+    UsageReport,
 )
 
 router = APIRouter(tags=["ops"])
@@ -96,6 +101,77 @@ class TransitionRequest(BaseModel):
     to_status: JobStatus
     note: str | None = None
     creative_doc_id: str | None = None
+
+
+class EnqueueGenerationRequest(BaseModel):
+    client_id: str
+    topic: str
+    pillar: str | None = None
+    format_key: str = "ig_post"
+
+
+@router.get("/ops/queue", response_model=list[GenerationQueueItem])
+async def get_queue(
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> list[GenerationQueueItem]:
+    return await generation_queue.list_queue(
+        session,
+        tenant_id=principal.tenant_id,
+    )
+
+
+@router.get("/ops/queue/stats", response_model=QueueStats)
+async def get_queue_stats(
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> QueueStats:
+    return await generation_queue.queue_stats(
+        session,
+        tenant_id=principal.tenant_id,
+    )
+
+
+@router.post("/ops/queue", response_model=GenerationQueueItem, status_code=201)
+async def enqueue_generation(
+    body: EnqueueGenerationRequest,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> GenerationQueueItem:
+    return await generation_queue.enqueue_generation(
+        session,
+        principal=principal,
+        client_id=body.client_id,
+        topic=body.topic,
+        pillar=body.pillar,
+        format_key=body.format_key,
+    )
+
+
+@router.get("/ops/usage", response_model=UsageReport)
+async def get_usage(
+    start: datetime | None = None,
+    end: datetime | None = None,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> UsageReport:
+    now = _now()
+    window_start = start or now.replace(
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    window_end = end or now
+    if window_start > window_end:
+        raise HTTPException(status_code=422, detail="start must be <= end")
+    return await usage.usage_report(
+        session,
+        tenant_id=principal.tenant_id,
+        window_start=window_start,
+        window_end=window_end,
+    )
 
 
 @router.get("/ops/board", response_model=BoardResponse)
