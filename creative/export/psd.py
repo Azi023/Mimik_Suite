@@ -12,7 +12,8 @@ import numpy as np
 import numpy.typing as npt
 from mimik_contracts import PRESETS
 from playwright.async_api import async_playwright
-from pytoshop import enums
+from pytoshop import enums, tagged_block
+from pytoshop import layers as psd_layer_records
 from pytoshop.user import nested_layers
 
 from creative.export.svg import render_creative_svg
@@ -238,6 +239,61 @@ def _to_pytoshop_layer(name: str, cropped: _CroppedLayer) -> nested_layers.Image
     )
 
 
+def _empty_layer_record(image_layer: nested_layers.Image) -> psd_layer_records.LayerRecord:
+    """Build a raw layer record for a fully-transparent (empty optional) slot.
+
+    ``nested_layers.nested_layers_to_psd`` silently drops any layer whose alpha channel
+    is entirely zero, which would erase empty optional slots (missing subhead/cta/logo).
+    Building the record directly bypasses that drop so the named slot survives round-trip.
+    """
+    channels = {
+        channel_id: psd_layer_records.ChannelImageData(
+            image=pixels,
+            compression=enums.Compression.raw,
+        )
+        for channel_id, pixels in image_layer.channels.items()
+    }
+    return psd_layer_records.LayerRecord(
+        top=image_layer.top,
+        left=image_layer.left,
+        bottom=image_layer.bottom,
+        right=image_layer.right,
+        name=image_layer.name,
+        channels=channels,
+        blocks=[tagged_block.UnicodeLayerName(name=image_layer.name)],
+    )
+
+
+def _restore_empty_layers(
+    document: object,
+    ordered_layers: list[tuple[nested_layers.Image, bool]],
+) -> None:
+    """Rebuild the document's layer stack in ``ordered_layers`` order (bottom to top),
+    re-inserting the empty named slots that pytoshop's high-level helper dropped."""
+    layer_info = document.layer_and_mask_info.layer_info  # type: ignore[attr-defined]
+    records = layer_info.layer_records
+    group_block = document.image_resources.get_block(  # type: ignore[attr-defined]
+        enums.ImageResourceID.layers_group_info
+    )
+    group_ids = group_block.group_ids
+    record_by_name = {record.name: record for record in records}
+    group_id_by_name = {
+        record.name: group_id for record, group_id in zip(records, group_ids)
+    }
+
+    new_records: list[psd_layer_records.LayerRecord] = []
+    new_group_ids: list[int] = []
+    for image_layer, is_empty in ordered_layers:
+        if is_empty:
+            new_records.append(_empty_layer_record(image_layer))
+            new_group_ids.append(0)
+        else:
+            new_records.append(record_by_name[image_layer.name])
+            new_group_ids.append(group_id_by_name[image_layer.name])
+    records[:] = new_records
+    group_ids[:] = new_group_ids
+
+
 async def render_creative_psd(
     *,
     format_key: str,
@@ -271,7 +327,8 @@ async def render_creative_psd(
         text_region=text_region,
     )
     fmt = PRESETS[format_key]
-    psd_layers: list[nested_layers.Image] = []
+    # Bottom-to-top stacking order: (image_layer, is_empty). Empty = fully transparent slot.
+    ordered_layers: list[tuple[nested_layers.Image, bool]] = []
     for svg_layer_id, psd_layer_name in _LAYER_NAMES:
         layer_svg = _isolate_svg_layer(svg, svg_layer_id)
         layer_png = await _rasterize_layer_svg_to_png(
@@ -291,16 +348,21 @@ async def render_creative_psd(
             pixels,
             keep_canvas=psd_layer_name == "background",
         )
-        psd_layers.append(_to_pytoshop_layer(psd_layer_name, cropped))
+        is_empty = not bool(cropped.pixels[:, :, 3].any())
+        ordered_layers.append((_to_pytoshop_layer(psd_layer_name, cropped), is_empty))
 
-    # pytoshop's nested-layer list follows Photoshop's panel order (top to bottom).
+    # pytoshop drops any all-transparent layer, so build the document from the visible
+    # layers (top-to-bottom, Photoshop panel order) then splice the empty named slots
+    # back in — every semantic layer survives as a REAL, named PSD layer.
+    visible_layers = [layer for layer, is_empty in ordered_layers if not is_empty]
     document = nested_layers.nested_layers_to_psd(
-        list(reversed(psd_layers)),
+        list(reversed(visible_layers)),
         color_mode=enums.ColorMode.rgb,
         # pytoshop 1.2.1 ships without its compiled `packbits` module, so the default RLE
         # compressor raises NameError; `raw` avoids that codec path and writes cleanly.
         compression=enums.Compression.raw,
     )
+    _restore_empty_layers(document, ordered_layers)
     output = io.BytesIO()
     document.write(output)
     return output.getvalue()

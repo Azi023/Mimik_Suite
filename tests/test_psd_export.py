@@ -236,7 +236,7 @@ async def test_render_creative_psd_emits_six_named_layers(
             left + 1,
             top + 1,
         )
-        assert int(layer.channels[-1].max()) == 255
+        assert int(layer.channels[-1].image.max()) == 255
     assert set(rasterized_layer_ids) == SVG_LAYER_IDS
 
 
@@ -270,5 +270,5 @@ async def test_render_creative_psd_keeps_empty_optional_layers(
     layers = nested_layers.psd_to_nested_layers(document)
     layers_by_name = {layer.name: layer for layer in layers}
     assert {layer.name for layer in layers} == LAYER_NAMES
-    assert int(layers_by_name["subhead"].channels[-1].max()) == 0
-    assert int(layers_by_name["cta"].channels[-1].max()) == 0
+    assert int(layers_by_name["subhead"].channels[-1].image.max()) == 0
+    assert int(layers_by_name["cta"].channels[-1].image.max()) == 0
