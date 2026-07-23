@@ -8,7 +8,12 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { CanvasLayerId } from "./canvas-types";
-import type { LayerBBox, LayerTransform } from "./editor-state";
+import type {
+  LayerBBox,
+  LayerTransform,
+  SnapLines,
+  SnappedLayerTransform,
+} from "./editor-state";
 
 export type ResizeHandle =
   | "n"
@@ -50,6 +55,7 @@ interface DragSession {
 }
 
 const MOVE_THRESHOLD_PX = 3;
+export const MOVE_SNAP_THRESHOLD_PX = 8;
 
 export function pointerMovedPastThreshold(
   startX: number,
@@ -133,12 +139,44 @@ export interface UseLayerDragArgs {
   getScreenToViewBox: () => number;
   /** Canonical folded transform when a pointer session begins. */
   getTransform: (layerId: CanvasLayerId) => LayerTransform;
+  /** Resolves move-only snapping against the stage's current guide geometry. */
+  getMoveSnap?: (
+    layerId: CanvasLayerId,
+    transform: LayerTransform,
+    threshold: number,
+  ) => SnappedLayerTransform;
   /** Fired when pointerdown begins a possible drag; no op exists yet. */
   onDragStart?: (layerId: CanvasLayerId) => void;
   /** rAF-coalesced live transform for the canonical provisional history op. */
   onDragMove?: (layerId: CanvasLayerId, transform: LayerTransform) => void;
   /** Fired once per drag, on release, with the layer's settled transform. */
   onDragEnd?: (layerId: CanvasLayerId, transform: LayerTransform) => void;
+  /** View-only feedback for active X/Y snap lines. Null clears the overlay. */
+  onSnapChange?: (lines: SnapLines | null) => void;
+}
+
+function moveTransformAtPointer(
+  session: DragSession,
+  event: PointerEvent,
+  args: UseLayerDragArgs,
+): SnappedLayerTransform {
+  const rawTransform: LayerTransform = {
+    ...session.base,
+    dx:
+      session.base.dx +
+      (event.clientX - session.startX) * session.factor,
+    dy:
+      session.base.dy +
+      (event.clientY - session.startY) * session.factor,
+  };
+  if (event.altKey || event.metaKey || args.getMoveSnap === undefined) {
+    return { transform: rawTransform, lines: { x: null, y: null } };
+  }
+  return args.getMoveSnap(
+    session.layerId,
+    rawTransform,
+    MOVE_SNAP_THRESHOLD_PX * session.factor,
+  );
 }
 
 export interface UseLayerDragResult {
@@ -200,6 +238,7 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
 
   const sessionRef = useRef<DragSession | null>(null);
   const pendingRef = useRef<LayerTransform | null>(null);
+  const pendingSnapRef = useRef<SnapLines | null>(null);
   const frameRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -209,6 +248,7 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     const pending = pendingRef.current;
     if (session === null || pending === null) return;
     argsRef.current.onDragMove?.(session.layerId, pending);
+    argsRef.current.onSnapChange?.(pendingSnapRef.current);
   }, []);
 
   const handlePointerMove = useCallback(
@@ -230,16 +270,22 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
       const ddx = (event.clientX - session.startX) * session.factor;
       const ddy = (event.clientY - session.startY) * session.factor;
       if (session.mode === "move") {
-        pendingRef.current = {
-          ...session.base,
-          dx: session.base.dx + ddx,
-          dy: session.base.dy + ddy,
-        };
+        const snapped = moveTransformAtPointer(
+          session,
+          event,
+          argsRef.current,
+        );
+        pendingRef.current = snapped.transform;
+        pendingSnapRef.current =
+          (snapped.lines.x !== null || snapped.lines.y !== null)
+            ? snapped.lines
+            : null;
       } else if (
         session.mode === "resize" &&
         session.baseBox !== null &&
         session.handle !== null
       ) {
+        pendingSnapRef.current = null;
         pendingRef.current = resizeLayerTransform(
           session.baseBox,
           session.base,
@@ -253,6 +299,7 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
         session.centerY !== null &&
         session.startAngle !== null
       ) {
+        pendingSnapRef.current = null;
         const point = screenPointToViewBox(
           event.clientX,
           event.clientY,
@@ -284,7 +331,13 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
       frameRef.current = null;
     }
     let settled = pendingRef.current ?? session.base;
-    if (
+    if (session.mode === "move" && session.moved && event.type === "pointerup") {
+      settled = moveTransformAtPointer(
+        session,
+        event,
+        argsRef.current,
+      ).transform;
+    } else if (
       session.mode === "rotate" &&
       session.moved &&
       event.type === "pointerup" &&
@@ -320,9 +373,11 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
     }
     sessionRef.current = null;
     pendingRef.current = null;
+    pendingSnapRef.current = null;
     abortRef.current?.abort();
     abortRef.current = null;
     setDraggingLayer(null);
+    argsRef.current.onSnapChange?.(null);
     if (session.moved) {
       argsRef.current.onDragEnd?.(session.layerId, settled);
     }
@@ -379,7 +434,9 @@ export function useLayerDrag(args: UseLayerDragArgs): UseLayerDragResult {
         moved: false,
       };
       pendingRef.current = null;
+      pendingSnapRef.current = null;
       setDraggingLayer(layerId);
+      argsRef.current.onSnapChange?.(null);
       argsRef.current.onDragStart?.(layerId);
       const controller = new AbortController();
       abortRef.current = controller;

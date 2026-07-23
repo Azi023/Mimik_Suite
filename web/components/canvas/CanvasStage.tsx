@@ -33,6 +33,7 @@ import {
   orientedBoxOf,
   redo as redoHistory,
   removeOp as removeHistoryOp,
+  snapLayerTransform,
   toCanvasRevision,
   transformedBBox,
   undo as undoHistory,
@@ -43,6 +44,8 @@ import {
   type FoldedState,
   type LayerBBox,
   type LayerTransform,
+  type SnapLines,
+  type SnappedLayerTransform,
 } from "./editor-state";
 import { useLayerDrag, type ResizeHandle } from "./useLayerDrag";
 import { Inspector } from "./Inspector";
@@ -140,6 +143,10 @@ const FALLBACK_VIEWBOX: ViewBox = { x: 0, y: 0, w: 1080, h: 1080 };
 const EMPTY_HISTORY: EditHistory = { ops: [], redo: [] };
 const RESIZE_HANDLE_SIZE_PX = 11;
 const RESIZE_HANDLE_RADIUS_PX = 2;
+const SAFE_AREA_INSET_RATIO = 0.05;
+const RULER_SIZE_PX = 20;
+const RULER_LABEL_SPACING_PX = 84;
+const RULER_MINOR_DIVISIONS = 5;
 
 interface ResizeHandleDefinition {
   handle: ResizeHandle;
@@ -298,7 +305,36 @@ function textAlignForAnchor(
   return "left";
 }
 
+function niceRulerStep(target: number): number {
+  if (!Number.isFinite(target) || target <= 0) return 100;
+  const magnitude = 10 ** Math.floor(Math.log10(target));
+  const normalized = target / magnitude;
+  const factor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return factor * magnitude;
+}
 
+function rulerValues(start: number, end: number, step: number): number[] {
+  if (!Number.isFinite(step) || step <= 0) return [];
+  const values: number[] = [];
+  const first = Math.ceil(start / step) * step;
+  for (let value = first; value <= end + step * 1e-6; value += step) {
+    values.push(Number(value.toFixed(6)));
+    if (values.length >= 500) break;
+  }
+  return values;
+}
+
+function isMajorRulerValue(value: number, majorStep: number): boolean {
+  const multiple = value / majorStep;
+  return Math.abs(multiple - Math.round(multiple)) < 1e-6;
+}
+
+function formatRulerValue(value: number, majorStep: number): string {
+  const decimals =
+    majorStep >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(majorStep)));
+  const rounded = Number(value.toFixed(decimals));
+  return Object.is(rounded, -0) ? "0" : String(rounded);
+}
 
 /**
  * Bounded inline-SVG editor. EditHistory is the only artwork state: the DOM,
@@ -334,6 +370,9 @@ export function CanvasStage({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSpaceDown, setIsSpaceDown] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [showRulers, setShowRulers] = useState(true);
+  const [showSafeArea, setShowSafeArea] = useState(true);
+  const [snapLines, setSnapLines] = useState<SnapLines | null>(null);
 
   const [mounted, setMounted] = useState(false);
   const [stageWidth, setStageWidth] = useState(0);
@@ -498,9 +537,69 @@ export function CanvasStage({
     [nextOperationId, setCanonicalHistory],
   );
 
+  const layerBox = useCallback(
+    (layer: CanvasLayerInfo): LayerBBox | null =>
+      measured[layer.id] ?? layer.bbox,
+    [measured],
+  );
+
+  const getMoveSnap = useCallback(
+    (
+      layerId: CanvasLayerId,
+      transform: LayerTransform,
+      threshold: number,
+    ): SnappedLayerTransform => {
+      const movingLayer =
+        layers.find((layer) => layer.id === layerId) ?? null;
+      const movingBox = movingLayer === null ? null : layerBox(movingLayer);
+      if (movingBox === null) {
+        return { transform, lines: { x: null, y: null } };
+      }
+
+      const inset =
+        Math.min(viewBox.w, viewBox.h) * SAFE_AREA_INSET_RATIO;
+      const xGuides = [
+        viewBox.x + viewBox.w / 2,
+        viewBox.x + inset,
+        viewBox.x + viewBox.w - inset,
+      ];
+      const yGuides = [
+        viewBox.y + viewBox.h / 2,
+        viewBox.y + inset,
+        viewBox.y + viewBox.h - inset,
+      ];
+
+      for (const layer of layers) {
+        if (
+          layer.id === layerId ||
+          foldedRef.current.visible[layer.id] === false
+        ) {
+          continue;
+        }
+        const base = layerBox(layer);
+        if (base === null) continue;
+        const box = transformedBBox(
+          base,
+          foldedRef.current.transform[layer.id] ?? IDENTITY_TRANSFORM,
+        );
+        xGuides.push(box.x, box.x + box.w / 2, box.x + box.w);
+        yGuides.push(box.y, box.y + box.h / 2, box.y + box.h);
+      }
+
+      return snapLayerTransform(
+        movingBox,
+        transform,
+        { x: xGuides, y: yGuides },
+        threshold,
+      );
+    },
+    [layerBox, layers, viewBox.h, viewBox.w, viewBox.x, viewBox.y],
+  );
+
   const { draggingLayer, beginMove, beginResize, beginRotate } = useLayerDrag({
     getScreenToViewBox,
     getTransform: getCanonicalTransform,
+    getMoveSnap,
     onDragStart: (): void => {
       activeDragOpIdRef.current = nextOperationId();
     },
@@ -509,14 +608,9 @@ export function CanvasStage({
       upsertTransformOperation(layerId, transform);
       activeDragOpIdRef.current = null;
     },
+    onSnapChange: setSnapLines,
   });
   draggingLayerRef.current = draggingLayer;
-
-  const layerBox = useCallback(
-    (layer: CanvasLayerInfo): LayerBBox | null =>
-      measured[layer.id] ?? layer.bbox,
-    [measured],
-  );
 
   // Own the SVG injection imperatively (NOT via dangerouslySetInnerHTML). React must never
   // re-materialize this subtree, or a re-render would wipe applyState's live edits (the exact
@@ -1012,6 +1106,20 @@ export function CanvasStage({
   const unit =
     stageWidth > 0 ? viewBox.w / (stageWidth * visualZoom) : 1;
   const pxPerUnit = stageWidth > 0 ? stageWidth / viewBox.w : 0;
+  const safeAreaInset =
+    Math.min(viewBox.w, viewBox.h) * SAFE_AREA_INSET_RATIO;
+  const rulerMajorStep = niceRulerStep(unit * RULER_LABEL_SPACING_PX);
+  const rulerMinorStep = rulerMajorStep / RULER_MINOR_DIVISIONS;
+  const rulerXValues = rulerValues(
+    viewBox.x,
+    viewBox.x + viewBox.w,
+    rulerMinorStep,
+  );
+  const rulerYValues = rulerValues(
+    viewBox.y,
+    viewBox.y + viewBox.h,
+    rulerMinorStep,
+  );
 
   const editingLayer =
     editing === null
@@ -1111,6 +1219,44 @@ export function CanvasStage({
               Showing original
             </span>
           )}
+
+          <div
+            role="group"
+            aria-label="Canvas alignment aids"
+            style={{
+              position: "absolute",
+              top: "12px",
+              right: "12px",
+              zIndex: 12,
+              display: "flex",
+              gap: "4px",
+              padding: "3px",
+              borderRadius: "var(--r-sm)",
+              background: "var(--surface)",
+              boxShadow: "var(--shadow-pop)",
+            }}
+            onPointerDown={(event): void => event.stopPropagation()}
+            onKeyDown={(event): void => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              aria-pressed={showRulers}
+              title="Toggle canvas rulers"
+              onClick={(): void => setShowRulers((current) => !current)}
+            >
+              Rulers
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              aria-pressed={showSafeArea}
+              title="Toggle margins and center guides"
+              onClick={(): void => setShowSafeArea((current) => !current)}
+            >
+              Safe area
+            </button>
+          </div>
           
           <div
             className="creview__canvas creview__canvas--locked"
@@ -1159,6 +1305,180 @@ export function CanvasStage({
                     overflow: "visible",
                   }}
                 >
+                  {showSafeArea && (
+                    <g
+                      data-canvas-safe-area=""
+                      aria-hidden="true"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      <rect
+                        x={viewBox.x + safeAreaInset}
+                        y={viewBox.y + safeAreaInset}
+                        width={Math.max(viewBox.w - safeAreaInset * 2, 0)}
+                        height={Math.max(viewBox.h - safeAreaInset * 2, 0)}
+                        fill="none"
+                        stroke="var(--ink)"
+                        strokeOpacity="0.28"
+                        strokeWidth={unit}
+                        strokeDasharray={`${6 * unit} ${5 * unit}`}
+                      />
+                      <line
+                        x1={viewBox.x + viewBox.w / 2}
+                        y1={viewBox.y + safeAreaInset}
+                        x2={viewBox.x + viewBox.w / 2}
+                        y2={viewBox.y + viewBox.h - safeAreaInset}
+                        stroke="var(--ink)"
+                        strokeOpacity="0.2"
+                        strokeWidth={unit}
+                        strokeDasharray={`${5 * unit} ${5 * unit}`}
+                      />
+                      <line
+                        x1={viewBox.x + safeAreaInset}
+                        y1={viewBox.y + viewBox.h / 2}
+                        x2={viewBox.x + viewBox.w - safeAreaInset}
+                        y2={viewBox.y + viewBox.h / 2}
+                        stroke="var(--ink)"
+                        strokeOpacity="0.2"
+                        strokeWidth={unit}
+                        strokeDasharray={`${5 * unit} ${5 * unit}`}
+                      />
+                    </g>
+                  )}
+
+                  {showRulers && (
+                    <g
+                      data-canvas-rulers=""
+                      aria-hidden="true"
+                      style={{
+                        pointerEvents: "none",
+                        fontFamily: "var(--font-mono, monospace)",
+                      }}
+                    >
+                      <rect
+                        x={viewBox.x}
+                        y={viewBox.y}
+                        width={viewBox.w}
+                        height={RULER_SIZE_PX * unit}
+                        fill="var(--surface)"
+                        fillOpacity="0.92"
+                      />
+                      <rect
+                        x={viewBox.x}
+                        y={viewBox.y}
+                        width={RULER_SIZE_PX * unit}
+                        height={viewBox.h}
+                        fill="var(--surface)"
+                        fillOpacity="0.92"
+                      />
+                      {rulerXValues.map((value) => {
+                        const major = isMajorRulerValue(
+                          value,
+                          rulerMajorStep,
+                        );
+                        const tickLength = (major ? 8 : 4) * unit;
+                        return (
+                          <g key={`ruler-x-${value}`}>
+                            <line
+                              data-ruler-axis="x"
+                              x1={value}
+                              y1={
+                                viewBox.y +
+                                RULER_SIZE_PX * unit -
+                                tickLength
+                              }
+                              x2={value}
+                              y2={viewBox.y + RULER_SIZE_PX * unit}
+                              stroke="var(--ink)"
+                              strokeOpacity={major ? 0.62 : 0.34}
+                              strokeWidth={unit}
+                            />
+                            {major &&
+                              value >
+                                viewBox.x + (RULER_SIZE_PX + 3) * unit && (
+                                <text
+                                  x={value + 3 * unit}
+                                  y={viewBox.y + 9 * unit}
+                                  fill="var(--ink)"
+                                  fillOpacity="0.72"
+                                  fontSize={9 * unit}
+                                  fontWeight="600"
+                                >
+                                  {formatRulerValue(value, rulerMajorStep)}
+                                </text>
+                              )}
+                          </g>
+                        );
+                      })}
+                      {rulerYValues.map((value) => {
+                        const major = isMajorRulerValue(
+                          value,
+                          rulerMajorStep,
+                        );
+                        const tickLength = (major ? 8 : 4) * unit;
+                        const labelX = viewBox.x + 8 * unit;
+                        const labelY = value - 3 * unit;
+                        return (
+                          <g key={`ruler-y-${value}`}>
+                            <line
+                              data-ruler-axis="y"
+                              x1={
+                                viewBox.x +
+                                RULER_SIZE_PX * unit -
+                                tickLength
+                              }
+                              y1={value}
+                              x2={viewBox.x + RULER_SIZE_PX * unit}
+                              y2={value}
+                              stroke="var(--ink)"
+                              strokeOpacity={major ? 0.62 : 0.34}
+                              strokeWidth={unit}
+                            />
+                            {major &&
+                              value >
+                                viewBox.y + (RULER_SIZE_PX + 3) * unit && (
+                                <text
+                                  x={labelX}
+                                  y={labelY}
+                                  fill="var(--ink)"
+                                  fillOpacity="0.72"
+                                  fontSize={9 * unit}
+                                  fontWeight="600"
+                                  transform={`rotate(-90 ${labelX} ${labelY})`}
+                                >
+                                  {formatRulerValue(value, rulerMajorStep)}
+                                </text>
+                              )}
+                          </g>
+                        );
+                      })}
+                      <rect
+                        x={viewBox.x}
+                        y={viewBox.y}
+                        width={RULER_SIZE_PX * unit}
+                        height={RULER_SIZE_PX * unit}
+                        fill="var(--surface)"
+                      />
+                      <line
+                        x1={viewBox.x}
+                        y1={viewBox.y + RULER_SIZE_PX * unit}
+                        x2={viewBox.x + viewBox.w}
+                        y2={viewBox.y + RULER_SIZE_PX * unit}
+                        stroke="var(--ink)"
+                        strokeOpacity="0.28"
+                        strokeWidth={unit}
+                      />
+                      <line
+                        x1={viewBox.x + RULER_SIZE_PX * unit}
+                        y1={viewBox.y}
+                        x2={viewBox.x + RULER_SIZE_PX * unit}
+                        y2={viewBox.y + viewBox.h}
+                        stroke="var(--ink)"
+                        strokeOpacity="0.28"
+                        strokeWidth={unit}
+                      />
+                    </g>
+                  )}
+
                   {layers.map((layer) => {
                     const base = layerBox(layer);
                     if (base === null) return null;
@@ -1199,6 +1519,38 @@ export function CanvasStage({
                       />
                     );
                   })}
+                  {snapLines !== null && (
+                    <g
+                      data-canvas-snap-lines=""
+                      aria-hidden="true"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {snapLines.x !== null && (
+                        <line
+                          data-snap-axis="x"
+                          x1={snapLines.x}
+                          y1={viewBox.y}
+                          x2={snapLines.x}
+                          y2={viewBox.y + viewBox.h}
+                          stroke="var(--accent)"
+                          strokeOpacity="0.95"
+                          strokeWidth={1.5 * unit}
+                        />
+                      )}
+                      {snapLines.y !== null && (
+                        <line
+                          data-snap-axis="y"
+                          x1={viewBox.x}
+                          y1={snapLines.y}
+                          x2={viewBox.x + viewBox.w}
+                          y2={snapLines.y}
+                          stroke="var(--accent)"
+                          strokeOpacity="0.95"
+                          strokeWidth={1.5 * unit}
+                        />
+                      )}
+                    </g>
+                  )}
                 </svg>
 
                 {hoveredLayer !== null && hoveredBox !== null && !isSpaceDown && (

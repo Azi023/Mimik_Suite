@@ -30,6 +30,21 @@ export interface OrientedLayerBox extends LayerBBox {
   rotation: number;
 }
 
+export interface AlignmentGuides {
+  x: readonly number[];
+  y: readonly number[];
+}
+
+export interface SnapLines {
+  x: number | null;
+  y: number | null;
+}
+
+export interface SnappedLayerTransform {
+  transform: LayerTransform;
+  lines: SnapLines;
+}
+
 export interface DocOp {
   id: string;
   layer: CanvasLayerId;
@@ -304,6 +319,66 @@ export function transformedBBox(
     y: oriented.cy - h / 2,
     w,
     h,
+  };
+}
+
+interface AxisSnapMatch {
+  delta: number;
+  guide: number;
+}
+
+function closestAxisSnap(
+  anchors: readonly number[],
+  guides: readonly number[],
+  threshold: number,
+): AxisSnapMatch | null {
+  let closest: AxisSnapMatch | null = null;
+  for (const guide of guides) {
+    if (!Number.isFinite(guide)) continue;
+    for (const anchor of anchors) {
+      const delta = guide - anchor;
+      if (Math.abs(delta) > threshold) continue;
+      if (closest === null || Math.abs(delta) < Math.abs(closest.delta)) {
+        closest = { delta, guide };
+      }
+    }
+  }
+  return closest;
+}
+
+/**
+ * Snap the visual axis-aligned edges/center of a transformed layer to the
+ * closest guide on each axis. Scale and rotation pass through unchanged.
+ */
+export function snapLayerTransform(
+  bbox: LayerBBox,
+  transform: LayerTransform,
+  guides: AlignmentGuides,
+  threshold: number,
+): SnappedLayerTransform {
+  const visualBox = transformedBBox(bbox, transform);
+  const boundedThreshold =
+    Number.isFinite(threshold) ? Math.max(0, threshold) : 0;
+  const xMatch = closestAxisSnap(
+    [visualBox.x, visualBox.x + visualBox.w / 2, visualBox.x + visualBox.w],
+    guides.x,
+    boundedThreshold,
+  );
+  const yMatch = closestAxisSnap(
+    [visualBox.y, visualBox.y + visualBox.h / 2, visualBox.y + visualBox.h],
+    guides.y,
+    boundedThreshold,
+  );
+  return {
+    transform: {
+      ...transform,
+      dx: transform.dx + (xMatch?.delta ?? 0),
+      dy: transform.dy + (yMatch?.delta ?? 0),
+    },
+    lines: {
+      x: xMatch?.guide ?? null,
+      y: yMatch?.guide ?? null,
+    },
   };
 }
 
