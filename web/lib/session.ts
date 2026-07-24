@@ -209,6 +209,46 @@ export async function hasSession(): Promise<boolean> {
   return (await getSessionToken()) !== null;
 }
 
+/**
+ * Best-effort read of the signed-in identity's `email` claim from the access token — for DISPLAY
+ * only (e.g. "signed in as …" on the invite-accept screen). The token is never trusted here: the API
+ * re-verifies it on every call and is the authority on the email. Returns null when unauthenticated
+ * or the claim is absent/undecodable.
+ */
+export async function getSessionEmail(): Promise<string | null> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return null;
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+  try {
+    const payloadJson = Buffer.from(parts[1], "base64url").toString("utf8");
+    const payload = JSON.parse(payloadJson) as { email?: unknown };
+    return typeof payload.email === "string" && payload.email !== "" ? payload.email : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sanitize a post-auth return path (the login `?next=` round-trip). Allows ONLY a same-origin
+ * relative path (starts with a single "/"); an absolute URL, a protocol-relative "//", a
+ * backslash-trick "/\\", or a missing value collapses to "" so the caller falls back to its default
+ * landing route. This blocks open-redirect through the `next` parameter.
+ */
+export function sanitizeNextPath(value: string | null | undefined): string {
+  if (typeof value !== "string" || value === "") {
+    return "";
+  }
+  if (!value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) {
+    return "";
+  }
+  return value;
+}
+
 /** Clear both session cookies (logout). */
 export async function clearSession(): Promise<void> {
   const store = await cookies();

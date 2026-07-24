@@ -1599,6 +1599,48 @@ ul {
   background: var(--auth-brand-hover);
 }
 
+.auth-form__submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Anchor rendered as the primary button (Link CTAs on the invite-accept screen). */
+.auth-form__submit--link {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+
+/* Vertical stack of recovery actions (sign out / sign in again) in an error state. */
+.auth-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
+.auth-actions > form {
+  display: contents;
+}
+
+/* Quiet, link-style secondary action (e.g. "Not you? Sign out"). */
+.auth-form__secondary {
+  align-self: center;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.auth-form__secondary:hover {
+  color: var(--ink);
+}
+
 @media (max-width: 720px) {
   .auth {
     grid-template-columns: 1fr;

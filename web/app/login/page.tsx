@@ -1,13 +1,17 @@
 import type { JSX } from "react";
 import { redirect } from "next/navigation";
-import { hasSession } from "@/lib/session";
+import { hasSession, sanitizeNextPath } from "@/lib/session";
 
 // Auth state is per-request — never a build-time snapshot.
 export const dynamic = "force-dynamic";
 
 interface LoginPageProps {
-  /** `?error=` set by the login route handler on a failed attempt. */
-  searchParams: Promise<{ error?: string }>;
+  /**
+   * `?error=` is set by the login route handler on a failed attempt. `?next=` is the same-origin
+   * path to return to after a successful sign-in (e.g. an invite-accept round-trip); it is
+   * sanitized before use and threaded through the form + any error re-render.
+   */
+  searchParams: Promise<{ error?: string; next?: string }>;
 }
 
 /**
@@ -20,10 +24,12 @@ interface LoginPageProps {
  * Already-authenticated visitors are bounced straight to the board.
  */
 export default async function LoginPage({ searchParams }: LoginPageProps): Promise<JSX.Element> {
+  const { error, next } = await searchParams;
+  const safeNext = sanitizeNextPath(next);
   if (await hasSession()) {
-    redirect("/");
+    // Already authenticated: honor an in-flight return path (e.g. invite-accept), else the board.
+    redirect(safeNext !== "" ? safeNext : "/");
   }
-  const { error } = await searchParams;
 
   return (
     <main className="auth">
@@ -41,6 +47,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps): Promi
             <h1 className="auth-form__title">Sign in</h1>
             <p className="auth-form__sub">Welcome back. Enter your details to continue.</p>
           </div>
+
+          {safeNext !== "" && <input type="hidden" name="next" value={safeNext} />}
 
           {error !== undefined && error !== "" && (
             <p className="auth-form__error" role="alert">

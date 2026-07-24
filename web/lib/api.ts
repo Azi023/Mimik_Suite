@@ -1592,3 +1592,19 @@ export function revokeInvitation(
     sessionToken,
   );
 }
+
+/**
+ * POST /invitations/accept — redeem a signed invite token as the INVITED Supabase identity and get
+ * back the provisioned `UserAccount` (201). The backend re-checks every guard against the DB row:
+ * the invite must still be PENDING and unexpired, and the caller's Supabase-verified email must match
+ * the invited email. `sessionToken` MUST be a real Supabase session bearer — the dev bootstrap token
+ * is refused server-side (it carries no provider identity to bind). Throws `ApiError` on non-2xx:
+ * 400 invalid/expired token · 404 not found · 403 email mismatch · 410 expired · 409 already-accepted
+ * / revoked / identity already has an account · 401 invalid session.
+ */
+export function acceptInvitation(
+  token: string,
+  sessionToken?: string,
+): Promise<ApiUserAccount> {
+  return apiPost<ApiUserAccount>("/invitations/accept", { token }, sessionToken);
+}
