@@ -3,7 +3,7 @@ import { ClientSwitcher } from "./client-switcher";
 import Link from "next/link";
 import type { Client } from "@/lib/view-models";
 import { ThemeToggle } from "./ThemeToggle";
-import { ChevronDownIcon, PlusIcon } from "./icons";
+import { PlusIcon } from "./icons";
 
 /**
  * Top bar: page title, invite control, the client-switcher
