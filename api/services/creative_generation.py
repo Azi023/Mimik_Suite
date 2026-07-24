@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -32,6 +34,9 @@ from creative.adapters import (
     generate_with_fallback,
 )
 from creative.copy import l0 as copy_l0
+from creative.critique import CRITIC_PASS_THRESHOLD, run_critique
+from creative.critique.gate import GateDecision, RetryDirective, decide_gate
+from creative.critique.report import CritiqueReport
 from creative.export import svg as svg_export
 from creative.pipeline import build_manifest
 from creative.qa.checks import QAReport
@@ -58,6 +63,8 @@ from mimik_contracts import (
     PRESETS,
     PreferenceSignal,
     PreferenceSource,
+    TaskStatus,
+    TaskType,
 )
 
 
@@ -70,6 +77,10 @@ _PEXELS_IMAGE_HOST = "images.pexels.com"
 _TEAM_ROLES = frozenset({"owner", "admin", "ops", "designer", "team"})
 _PROFILE_IDS = frozenset({"glo2go-aesthetics", "simply-nikah", "island-cart"})
 _GLO2GO_ARCHETYPE = "single_photo_education_hero"
+
+# Safe rollout mirror of LIVE_QA_BLOCKING. The critic always runs and is persisted, but
+# regeneration/parking is advisory until an operator deliberately flips this module flag.
+CRITIC_GATING_ENABLED = False
 
 # M-05 A/B variants: at most two renders per concept for the pick UI. Kept small on purpose —
 # the pick signal is only meaningful as "A vs B"; more renders dilute the revealed preference.
@@ -741,6 +752,201 @@ async def _render_variants(
     return primary, records
 
 
+@dataclass
+class _CriticRenderOutcome:
+    primary: tuple[Path, Path, Path | None, QAReport, dict]
+    variant_records: list[CreativeVariant]
+    report: CritiqueReport
+    decision: GateDecision
+    regenerations: int = 0
+    parked: bool = False
+    history: list[CritiqueReport] = field(default_factory=list)
+
+
+def _critique_safely(preview_path: Path, *, brand: Brand) -> CritiqueReport:
+    """Run the advisory critic without letting critic infrastructure break generation."""
+    try:
+        return run_critique(
+            preview_path.read_bytes(),
+            brand=brand,
+            threshold=CRITIC_PASS_THRESHOLD,
+        )
+    except Exception as exc:  # noqa: BLE001 — advisory instrumentation must degrade, not outage
+        logger.warning("design critic failed to score rendered creative: %s", exc)
+        return CritiqueReport(
+            advisory=True,
+            verdict="PASS_WITH_WARNING",
+            warnings=[f"Critic unavailable: {exc.__class__.__name__}"],
+            summary="Design critic unavailable; generation retained for human review.",
+        )
+
+
+def _qa_has_guardrail_breach(qa_report: QAReport) -> bool:
+    """Identify mechanical QA findings that are style-profile guardrail breaches."""
+    guardrail_markers = (
+        "source:",
+        "guardrail:",
+        "modesty:",
+        "face:",
+        "owner:",
+        "product:",
+        "price:",
+    )
+    return any(failure.casefold().startswith(guardrail_markers) for failure in qa_report.failures)
+
+
+def _critic_constraints(report: CritiqueReport) -> list[str]:
+    """Structured art-direction constraints derived only from named critic evidence."""
+    constraints: list[str] = []
+    for axis in report.axes:
+        if axis.score is None or axis.score > 2 or not axis.rejection_is_evidence_based:
+            continue
+        finding = axis.findings[0] if axis.findings else "correct the named failure"
+        constraints.append(
+            f"{axis.axis} — {axis.rejection_element}: {finding}; matched {axis.anchor}."
+        )
+    return constraints
+
+
+def _retry_render_params(
+    current_params: dict,
+    *,
+    directive: RetryDirective,
+    report: CritiqueReport,
+    profile_id: str,
+    copy_block: CopyBlock,
+    regeneration: int,
+) -> dict:
+    """Carry findings into the next render and apply the selected free design lever."""
+    params = dict(current_params)
+    params["critic_retry_attempt"] = regeneration
+    params["critic_retry_directive"] = directive.value
+    params["critic_constraints"] = _critic_constraints(report)
+    if directive is RetryDirective.SWAP_ARCHETYPE:
+        if profile_id == "simply-nikah":
+            current = str(
+                params.get("nikah_archetype") or _suggest_nikah(copy_block)[0]
+            )
+            params["nikah_archetype"] = (
+                "protection_symbol_hero"
+                if current == "highlighted_word_hero"
+                else "highlighted_word_hero"
+            )
+        else:
+            params["text_alignment"] = (
+                "center" if params.get("text_alignment", "left") == "left" else "left"
+            )
+    return params
+
+
+async def _render_with_critic_gate(
+    *,
+    brand: Brand,
+    profile_id: str,
+    copy_block: CopyBlock,
+    format_key: str,
+    image_path: Path,
+    artifact_dir: Path,
+    base_params: dict,
+    source_kind: str,
+    levers: list[_VariantLever],
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
+) -> _CriticRenderOutcome:
+    """Render once in advisory mode, or enforce the capped critic retry ladder when enabled."""
+    regenerations = 0
+    current_dir = artifact_dir
+    current_params = dict(base_params)
+    history: list[CritiqueReport] = []
+
+    while True:
+        primary, records = await _render_variants(
+            brand=brand,
+            profile_id=profile_id,
+            copy_block=copy_block,
+            format_key=format_key,
+            image_path=image_path,
+            artifact_dir=current_dir,
+            base_params=current_params,
+            source_kind=source_kind,
+            levers=levers,
+            heading_font_ref=heading_font_ref,
+            body_font_ref=body_font_ref,
+        )
+        report = _critique_safely(primary[1], brand=brand)
+        report.guardrail_breach = _qa_has_guardrail_breach(primary[3])
+        report.advisory = not CRITIC_GATING_ENABLED
+        decision = decide_gate(
+            report,
+            threshold=CRITIC_PASS_THRESHOLD,
+            regenerations=regenerations,
+        )
+        history.append(report)
+        logger.info(
+            "design critic profile=%s score=%s verdict=%s advisory=%s "
+            "dominant_axis=%s directive=%s",
+            profile_id,
+            report.craft_score,
+            report.verdict,
+            report.advisory,
+            decision.dominant_failing_axis,
+            decision.retry_directive.value,
+        )
+
+        if not CRITIC_GATING_ENABLED or decision.passed:
+            return _CriticRenderOutcome(
+                primary=primary,
+                variant_records=records,
+                report=report,
+                decision=decision,
+                regenerations=regenerations,
+                history=history,
+            )
+
+        if decision.retry_directive in {
+            RetryDirective.QUARANTINE,
+            RetryDirective.NEEDS_ART_DIRECTION,
+        }:
+            return _CriticRenderOutcome(
+                primary=primary,
+                variant_records=records,
+                report=report,
+                decision=decision,
+                regenerations=regenerations,
+                parked=True,
+                history=history,
+            )
+
+        if decision.retry_directive is RetryDirective.FINISH_ESCALATION:
+            # Slice 4 owns the adapter/spend-approved illustration implementation. Never call
+            # a paid image backend from the critic; park with the requested branch recorded.
+            report.warnings.append(
+                "Finish escalation blocked: no automatically approved image backend; "
+                "human art direction or explicit spend approval required."
+            )
+            return _CriticRenderOutcome(
+                primary=primary,
+                variant_records=records,
+                report=report,
+                decision=decision,
+                regenerations=regenerations,
+                parked=True,
+                history=history,
+            )
+
+        regenerations += 1
+        current_params = _retry_render_params(
+            primary[4],
+            directive=decision.retry_directive,
+            report=report,
+            profile_id=profile_id,
+            copy_block=copy_block,
+            regeneration=regenerations,
+        )
+        current_dir = artifact_dir / f"critic-retry-{regenerations}"
+        current_dir.mkdir(parents=True, exist_ok=False)
+
+
 # Legacy ReviseCreativeRequest was removed; the router maps it to CanvasRevision
 
 
@@ -813,6 +1019,32 @@ def _qa_params(qa_report: QAReport | None) -> dict[str, object]:
     }
 
 
+def _critique_params(outcome: _CriticRenderOutcome | None) -> dict[str, object]:
+    """Persist critic verdict/history beside QA in L5 for a versioned audit trail."""
+    if outcome is None:
+        return {}
+    return {
+        "critic_passed": outcome.decision.passed,
+        "critic_verdict": outcome.report.verdict,
+        "critic_score": outcome.report.craft_score,
+        "critic_threshold": CRITIC_PASS_THRESHOLD,
+        "critic_advisory": outcome.report.advisory,
+        "critic_dominant_failing_axis": outcome.decision.dominant_failing_axis,
+        "critic_retry_directive": outcome.decision.retry_directive.value,
+        "critic_regenerations": outcome.regenerations,
+        "critic_parked": outcome.parked,
+        "critic_history": [
+            {
+                "attempt": attempt,
+                "actor": "design-critic",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "report": report.model_dump(mode="json"),
+            }
+            for attempt, report in enumerate(outcome.history)
+        ],
+    }
+
+
 def _set_rendered_artifacts(
     manifest: CreativeManifest,
     *,
@@ -820,6 +1052,7 @@ def _set_rendered_artifacts(
     preview_path: Path,
     profile_render_path: Path | None,
     qa_report: QAReport | None = None,
+    critique_outcome: _CriticRenderOutcome | None = None,
 ) -> None:
     artifact_params = {
         "svg_ref": str(svg_path),
@@ -830,6 +1063,7 @@ def _set_rendered_artifacts(
             else {}
         ),
         **_qa_params(qa_report),
+        **_critique_params(critique_outcome),
     }
     l5_layer = manifest.layer(LayerKind.L5_FINISH)
     if l5_layer is None:
@@ -853,6 +1087,16 @@ def _set_rendered_artifacts(
             "qa_passed",
             "qa_failures",
             "qa_needs_scrim",
+            "critic_passed",
+            "critic_verdict",
+            "critic_score",
+            "critic_threshold",
+            "critic_advisory",
+            "critic_dominant_failing_axis",
+            "critic_retry_directive",
+            "critic_regenerations",
+            "critic_parked",
+            "critic_history",
         }
     }
     l5_layer.recipe = LayerRecipe(params={**retained_params, **artifact_params})
@@ -1365,7 +1609,7 @@ async def generate_client_creative(
         brand_font_ref = await _resolve_brand_font(
             session, tenant_id=principal.tenant_id, brand=brand
         )
-        primary, variant_records = await _render_variants(
+        critique_outcome = await _render_with_critic_gate(
             brand=brand,
             profile_id=profile_id,
             copy_block=copy_block,
@@ -1378,6 +1622,8 @@ async def generate_client_creative(
             heading_font_ref=brand_font_ref,
             body_font_ref=brand_font_ref,
         )
+        primary = critique_outcome.primary
+        variant_records = critique_outcome.variant_records
         # The primary (variant 0) render populates the active layers; its params include variant
         # 0's lever override (none for single-generate).
         svg_path, preview_path, profile_render_path, qa_report, l1_params = primary
@@ -1411,6 +1657,7 @@ async def generate_client_creative(
                             else {}
                         ),
                         **_qa_params(qa_report),
+                        **_critique_params(critique_outcome),
                     }
                 ),
                 artifact_ref=str(preview_path),
@@ -1440,7 +1687,33 @@ async def generate_client_creative(
             job_id=job.id,
             manifest=manifest.model_dump(mode="json"),
         )
-        job.status = JobStatus.INTERNAL_REVIEW.value
+        if critique_outcome.parked:
+            job.status = JobStatus.BLOCKED.value
+            await repo.create_task(
+                session,
+                tenant_id=principal.tenant_id,
+                client_id=client_id,
+                job_id=job.id,
+                type=TaskType.CHANGE_REQUEST.value,
+                status=TaskStatus.OPEN.value,
+                title=f"NEEDS_ART_DIRECTION: {topic}",
+                detail=json.dumps(
+                    {
+                        "reason": critique_outcome.decision.retry_directive.value,
+                        "dominant_failing_axis": (
+                            critique_outcome.decision.dominant_failing_axis
+                        ),
+                        "regenerations": critique_outcome.regenerations,
+                        "critic_history": [
+                            report.model_dump(mode="json")
+                            for report in critique_outcome.history
+                        ],
+                    }
+                ),
+                created_by={"id": "design-critic", "role": ActorRole.SYSTEM.value},
+            )
+        else:
+            job.status = JobStatus.INTERNAL_REVIEW.value
         job.generation_started_at = None
         await session.commit()
     except HTTPException:

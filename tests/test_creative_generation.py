@@ -184,6 +184,16 @@ async def test_generate_creative_creates_record_and_preview(
     assert creative["manifest"]["layers"][0]["recipe"]["params"]["style_profile_id"] == (
         "glo2go-aesthetics"
     )
+    finish_params = next(
+        layer["recipe"]["params"]
+        for layer in creative["manifest"]["layers"]
+        if layer["kind"] == "L5_finish"
+    )
+    assert "qa_passed" in finish_params
+    assert finish_params["critic_advisory"] is True
+    assert finish_params["critic_threshold"] == 3.8
+    assert finish_params["critic_regenerations"] == 0
+    assert len(finish_params["critic_history"]) == 1
 
     jobs = await client.get(f"/jobs?client_id={client_id}", headers=_auth(owner))
     assert jobs.status_code == 200

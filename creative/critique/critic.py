@@ -1,4 +1,4 @@
-"""Design critic orchestrator — Slice 1 (A1 + A5, advisory-only).
+"""Design critic orchestrator.
 
 `run_critique` scores a rendered PNG on the two Slice-1 axes and returns a `CritiqueReport`.
 It does NOT gate generation, does NOT regenerate, and never touches the generation path — it
@@ -14,6 +14,7 @@ from mimik_contracts import Brand
 
 from .color_diff import critique_a1
 from .iconography import critique_a5
+from .calibration import CRITIC_PASS_THRESHOLD
 from .report import AxisScore, CritiqueReport
 
 
@@ -47,6 +48,7 @@ def run_critique(
     brand: Brand,
     vision_generate: Callable[[str], str] | None = None,
     exempt_mask: npt.NDArray | None = None,
+    threshold: float = CRITIC_PASS_THRESHOLD,
 ) -> CritiqueReport:
     """Score one rendered creative on A1 (objective color) + A5 (vision iconography).
 
@@ -58,4 +60,38 @@ def run_critique(
     a1 = critique_a1(png_bytes, _brand_palette(brand), exempt_mask=exempt_mask)
     a5 = critique_a5(png_bytes, generate=vision_generate)
     axes = [a1, a5]
-    return CritiqueReport(advisory=True, axes=axes, summary=_summarize(axes))
+    known = [axis for axis in axes if axis.score is not None]
+    craft_score = (
+        sum(axis.score for axis in known if axis.score is not None) / len(known)
+        if known
+        else None
+    )
+    failing = [axis for axis in known if axis.score is not None and axis.score <= 2]
+    dominant = min(failing, key=lambda axis: axis.score or 5).axis if failing else None
+    invalid = [axis for axis in failing if not axis.rejection_is_evidence_based]
+    warnings: list[str] = []
+    if invalid:
+        warnings.append(
+            "Taste-only rejection ignored: every rejecting axis must name element + axis + anchor."
+        )
+        verdict = "PASS_WITH_WARNING"
+    elif any(axis.hard_fail for axis in axes):
+        verdict = "HARD_FAIL"
+    elif craft_score is None:
+        verdict = "PASS_WITH_WARNING"
+        warnings.append("No graded axes were available; advisory result retained.")
+    elif craft_score >= threshold:
+        verdict = "PASS"
+    elif craft_score >= threshold - 0.4:
+        verdict = "BORDERLINE"
+    else:
+        verdict = "FAIL"
+    return CritiqueReport(
+        advisory=True,
+        axes=axes,
+        craft_score=craft_score,
+        verdict=verdict,
+        dominant_failing_axis=dominant,
+        warnings=warnings,
+        summary=_summarize(axes),
+    )

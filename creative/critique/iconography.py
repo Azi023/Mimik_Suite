@@ -77,7 +77,9 @@ _VALID_VERDICTS = {_INSTANT, _GENERIC, _UNRECOGNIZABLE, _GLITCH}
 
 def _score_symbols(symbols: list[dict]) -> AxisScore:
     findings: list[str] = []
+    observations: list[str] = []
     verdicts: list[str] = []
+    rejection_element: str | None = None
     for sym in symbols:
         name = str(sym.get("name", "unnamed")).strip() or "unnamed"
         verdict = str(sym.get("verdict", "")).strip().lower()
@@ -85,7 +87,12 @@ def _score_symbols(symbols: list[dict]) -> AxisScore:
         if verdict not in _VALID_VERDICTS:
             verdict = _UNRECOGNIZABLE  # an un-parseable verdict is a failure to name, not a pass
         verdicts.append(verdict)
+        observations.append(
+            f"Symbol '{name}' was observed as {verdict}"
+            + (f" because {reason}." if reason else ".")
+        )
         if verdict != _INSTANT:
+            rejection_element = rejection_element or f"symbol '{name}'"
             findings.append(f"symbol '{name}' → {verdict}" + (f": {reason}" if reason else ""))
 
     if not verdicts:
@@ -95,6 +102,7 @@ def _score_symbols(symbols: list[dict]) -> AxisScore:
             objective=False,
             score=5,
             findings=["A5: no distinct symbols detected on the canvas — nothing to fail."],
+            observations=["No distinct iconographic element was observed."],
             anchor="every motif instantly reads (no iconography present)",
         )
 
@@ -117,6 +125,8 @@ def _score_symbols(symbols: list[dict]) -> AxisScore:
         objective=False,
         score=score,
         findings=findings or ["every symbol named instantly."],
+        observations=observations,
+        rejection_element=rejection_element if score <= 2 else None,
         anchor=anchor,
         hard_fail=has_glitch,  # ◆ F2-class glitch is a showstopper regardless of the mean
     )

@@ -284,6 +284,11 @@ def critique_a1(
         objective=True,
         score=score,
         findings=findings,
+        observations=[
+            f"{len(considered)} dominant rendered color clusters were compared with brand tokens.",
+            f"Off-brand coverage measured {pct:.1f}%.",
+        ],
+        rejection_element="dominant rendered palette" if score <= 2 else None,
         anchor=anchor,
         hard_fail=hard_fail,
     )
