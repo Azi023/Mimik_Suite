@@ -75,9 +75,6 @@ export interface Client {
   vertical: string;
 }
 
-/** The active workspace label. */
-export const workspaceName = "Mimik Studio";
-
 export const FORMAT_TONE: Record<JobFormat, TagTone> = {
   "IG Reel": "purple",
   "IG Post": "blue",

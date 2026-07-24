@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { redirect } from "next/navigation";
 import { hasSession, sanitizeNextPath } from "@/lib/session";
+import { DEFAULT_BRANDING } from "@/lib/branding";
 
 // Auth state is per-request — never a build-time snapshot.
 export const dynamic = "force-dynamic";
@@ -31,12 +32,16 @@ export default async function LoginPage({ searchParams }: LoginPageProps): Promi
     redirect(safeNext !== "" ? safeNext : "/");
   }
 
+  // Pre-auth: the tenant is unknown (no session yet), so this uses the platform default branding.
+  // True per-tenant login branding needs a host/subdomain signal — see the follow-up in lib/branding.ts.
+  const branding = DEFAULT_BRANDING;
+
   return (
     <main className="auth">
       <aside className="auth-brand" aria-hidden="true">
         <div className="auth-brand__inner">
-          <span className="auth-brand__mark">M</span>
-          <h2 className="auth-brand__headline">Mimik Suite</h2>
+          <span className="auth-brand__mark">{branding.short_name.slice(0, 1).toUpperCase()}</span>
+          <h2 className="auth-brand__headline">{branding.product_name}</h2>
           <p className="auth-brand__tagline">Done-for-you creative, on autopilot.</p>
         </div>
       </aside>

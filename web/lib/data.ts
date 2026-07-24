@@ -38,6 +38,11 @@ import {
   type SidebarProject,
   type TagTone,
 } from "./view-models";
+import {
+  DEFAULT_BRANDING,
+  resolveTenantBranding,
+  type TenantBranding,
+} from "./branding";
 
 /** Everything the board page renders. */
 export interface BoardData {
@@ -50,6 +55,8 @@ export interface BoardData {
 export interface SidebarData {
   groups: SidebarGroup[];
   activeClient: Client | null;
+  /** The current tenant's white-label branding (product name, wordmark/logo, accent). */
+  branding: TenantBranding;
 }
 
 /** Prefilled values for the client details + brand brief editor. */
@@ -319,8 +326,8 @@ function toSidebarGroups(
   return [{ id: "all-clients", label: "All clients", projects: all }];
 }
 
-function emptySidebarData(): SidebarData {
-  return { groups: [], activeClient: null };
+function emptySidebarData(branding: TenantBranding = DEFAULT_BRANDING): SidebarData {
+  return { groups: [], activeClient: null, branding };
 }
 
 /** Load the selected client and the brand attached to its latest brief. */
@@ -357,18 +364,20 @@ export async function getSidebarData(
     return emptySidebarData();
   }
   try {
-    const [clients, board] = await Promise.all([
+    const [clients, board, branding] = await Promise.all([
       listClients(sessionToken),
       fetchBoard(sessionToken),
+      resolveTenantBranding(sessionToken),
     ]);
     if (clients.length === 0) {
-      return emptySidebarData();
+      return emptySidebarData(branding);
     }
     const counts = jobCountsByClient(board);
     const activeClient = clients.find((client) => client.id === selectedClientId) ?? clients[0];
     return {
       groups: toSidebarGroups(clients, counts, selectedClientId),
       activeClient: toActiveClient(activeClient),
+      branding,
     };
   } catch (error) {
     console.warn(

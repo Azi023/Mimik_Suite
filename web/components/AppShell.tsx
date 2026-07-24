@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useEffect, type JSX, type ReactNode } from "react";
+import { useCallback, useState, useEffect, type CSSProperties, type JSX, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import type { SidebarData } from "@/lib/data";
 import { MobileNavDrawer } from "./MobileNavDrawer";
@@ -48,10 +48,20 @@ export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JS
 
   const toggleChrome = useCallback(() => setChromeCollapsed(c => !c), []);
 
+  const { branding } = sidebar;
+  // Expose the tenant accent as `--brand-primary` on the shell root when set (a no-op for Mimik,
+  // whose primary_color is null). TODO(white-label): remap the shadcn `--accent` token (and pick a
+  // paired `--accent-ink` for contrast) to `--brand-primary` so the accent fully rebrands — left
+  // out here because overriding `--accent` without a matching ink can break on-accent text contrast.
+  const shellStyle: CSSProperties | undefined =
+    branding.primary_color !== null
+      ? ({ "--brand-primary": branding.primary_color } as CSSProperties)
+      : undefined;
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={shellStyle}>
       {!chromeCollapsed ? (
-        <Sidebar groups={sidebar.groups} onCollapse={isEditor ? toggleChrome : undefined} />
+        <Sidebar groups={sidebar.groups} branding={branding} onCollapse={isEditor ? toggleChrome : undefined} />
       ) : (
         <div className="collapsed-rail" style={{ 
           width: 48, 
@@ -74,7 +84,7 @@ export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JS
           </button>
         </div>
       )}
-      <MobileNavDrawer groups={sidebar.groups} open={mobileNavOpen} onClose={closeMobileNav} />
+      <MobileNavDrawer groups={sidebar.groups} branding={branding} open={mobileNavOpen} onClose={closeMobileNav} />
       <div className="app-main">
         <TopBar
           activeClient={sidebar.activeClient}

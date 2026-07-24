@@ -3,7 +3,8 @@
 import { useMemo, useState, type JSX } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { navItems, workspaceName, type NavItem, type SidebarGroup } from "@/lib/view-models";
+import { navItems, type NavItem, type SidebarGroup } from "@/lib/view-models";
+import type { TenantBranding } from "@/lib/branding";
 import {
   CalendarIcon,
   ChevronDownIcon,
@@ -31,6 +32,8 @@ import {
  */
 interface SidebarProps {
   groups: SidebarGroup[];
+  /** Current tenant's white-label branding (drives the rail logo bubble + aria-label). */
+  branding: TenantBranding;
   onCollapse?: () => void;
   /** Expands labels and stacks the contextual client list inside the mobile drawer. */
   mobile?: boolean;
@@ -45,7 +48,10 @@ const NAV_ROUTES: Partial<Record<NavItem["id"], string>> = {
   "brand-briefs": "/briefs",
 };
 
-export function Sidebar({ groups, onCollapse, mobile = false }: SidebarProps): JSX.Element {
+export function Sidebar({ groups, branding, onCollapse, mobile = false }: SidebarProps): JSX.Element {
+  // Logo bubble: a tenant logo image when provided, else a neutral text wordmark of the tenant's
+  // OWN short name (first letter) — never another tenant's logo.
+  const logoInitial = branding.short_name.slice(0, 1).toUpperCase();
   const pathname = usePathname();
   const showSubbar = pathname.startsWith("/clients");
   const railItems = navItems.filter((item) => item.id !== "settings");
@@ -209,8 +215,13 @@ export function Sidebar({ groups, onCollapse, mobile = false }: SidebarProps): J
           className={`rail rail-dynamic${railIsExpanded ? " is-expanded" : ""}`}
           aria-label="Primary"
         >
-          <Link className="rail__logo" href="/" aria-label={workspaceName}>
-            M
+          <Link className="rail__logo" href="/" aria-label={branding.product_name}>
+            {branding.logo_ref !== null ? (
+              // eslint-disable-next-line @next/next/no-img-element -- logo may be an external/data URI
+              <img className="rail__logo-img" src={branding.logo_ref} alt="" />
+            ) : (
+              logoInitial
+            )}
           </Link>
 
           <nav className="rail__nav" aria-label="Sections">

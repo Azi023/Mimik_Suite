@@ -1,9 +1,12 @@
 import type { JSX } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DEFAULT_BRANDING } from "@/lib/branding";
 
+// The global 404 can render outside any tenant session, so it uses the platform default name
+// (not a hardcoded literal). Per-tenant 404 titles would need a resolved session — a follow-up.
 export const metadata: Metadata = {
-  title: "Not found — Mimik Studio",
+  title: `Not found — ${DEFAULT_BRANDING.short_name} Studio`,
 };
 
 /**

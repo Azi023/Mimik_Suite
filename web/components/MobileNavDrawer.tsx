@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, type JSX, type MouseEvent } from "react";
 import type { SidebarGroup } from "@/lib/view-models";
+import type { TenantBranding } from "@/lib/branding";
 import { Sidebar } from "./Sidebar";
 
 /**
@@ -14,6 +15,8 @@ import { Sidebar } from "./Sidebar";
  */
 interface MobileNavDrawerProps {
   groups: SidebarGroup[];
+  /** Current tenant's white-label branding, threaded to the reused <Sidebar>. */
+  branding: TenantBranding;
   open: boolean;
   onClose: () => void;
 }
@@ -21,7 +24,7 @@ interface MobileNavDrawerProps {
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function MobileNavDrawer({ groups, open, onClose }: MobileNavDrawerProps): JSX.Element {
+export function MobileNavDrawer({ groups, branding, open, onClose }: MobileNavDrawerProps): JSX.Element {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -163,7 +166,7 @@ export function MobileNavDrawer({ groups, open, onClose }: MobileNavDrawerProps)
             Close
           </button>
         </div>
-        <Sidebar groups={groups} mobile />
+        <Sidebar groups={groups} branding={branding} mobile />
       </div>
     </div>
   );

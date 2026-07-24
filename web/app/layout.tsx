@@ -2,6 +2,8 @@ import type { JSX, ReactNode } from "react";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { themeScript } from "./theme-script";
+import { getSessionToken } from "@/lib/session";
+import { resolveTenantBranding } from "@/lib/branding";
 import "./globals.css";
 
 /** Inter, self-hosted at build time via next/font. Exposed as --font-inter. */
@@ -11,10 +13,19 @@ const inter = Inter({
   variable: "--font-inter",
 });
 
-export const metadata: Metadata = {
-  title: "Mimik Studio — Board",
-  description: "Mimik Suite creative ops dashboard.",
-};
+/**
+ * Document title/description are per-tenant: resolved from the caller's own tenant branding so the
+ * browser tab reads "Jasmin Suite …" for Jasmine, "Mimik Suite …" for Mimik. Pre-auth (no session)
+ * falls back to the platform default. Per-request, never a build-time snapshot.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const sessionToken = await getSessionToken();
+  const branding = await resolveTenantBranding(sessionToken ?? undefined);
+  return {
+    title: `${branding.short_name} Studio — Board`,
+    description: `${branding.product_name} creative ops dashboard.`,
+  };
+}
 
 export default function RootLayout({
   children,

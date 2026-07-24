@@ -10,6 +10,8 @@ interface AcceptInvitationPanelProps {
   token: string;
   /** The signed-in identity's email (display only), or null when the claim is unavailable. */
   email: string | null;
+  /** The current tenant's white-label product name (e.g. "Mimik Suite" / "Jasmin Suite"). */
+  productName: string;
 }
 
 type Phase =
@@ -51,7 +53,7 @@ function errorHeading(kind: AcceptErrorKind): string {
  * state — success routes into the app, while every failure shows the backend's own error detail plus
  * the recovery path that fits it (re-auth, switch account, or go to the dashboard).
  */
-export function AcceptInvitationPanel({ token, email }: AcceptInvitationPanelProps): JSX.Element {
+export function AcceptInvitationPanel({ token, email, productName }: AcceptInvitationPanelProps): JSX.Element {
   const [phase, setPhase] = useState<Phase>({ status: "idle" });
   const [busy, setBusy] = useState(false);
 
@@ -77,7 +79,7 @@ export function AcceptInvitationPanel({ token, email }: AcceptInvitationPanelPro
         <div className="auth-form__head">
           <h1 className="auth-form__title">You&apos;re in</h1>
           <p className="auth-form__sub">
-            Your account is ready{email !== null ? ` for ${email}` : ""}. Welcome to Mimik Suite.
+            Your account is ready{email !== null ? ` for ${email}` : ""}. Welcome to {productName}.
           </p>
         </div>
         <Link className="auth-form__submit auth-form__submit--link" href="/">
@@ -136,11 +138,11 @@ export function AcceptInvitationPanel({ token, email }: AcceptInvitationPanelPro
         <p className="auth-form__sub">
           {email !== null ? (
             <>
-              You&apos;re signed in as <strong>{email}</strong>. Accept to join your Mimik Suite
-              workspace. This must match the address the invite was sent to.
+              You&apos;re signed in as <strong>{email}</strong>. Accept to join your {productName}
+              {" "}workspace. This must match the address the invite was sent to.
             </>
           ) : (
-            "Accept to join your Mimik Suite workspace. Your signed-in email must match the address the invite was sent to."
+            `Accept to join your ${productName} workspace. Your signed-in email must match the address the invite was sent to.`
           )}
         </p>
       </div>

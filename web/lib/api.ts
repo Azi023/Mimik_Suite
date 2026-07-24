@@ -912,6 +912,9 @@ export function getJobAuditTrail(jobId: string, sessionToken?: string): Promise<
 /** GET /me — the caller's own identity (role lives in UserAccount, not the provider token). */
 export interface ApiMe {
   tenant_id: string;
+  /** The caller's OWN tenant slug/name — stable white-label branding key (never cross-tenant). */
+  tenant_slug: string | null;
+  tenant_name: string | null;
   role: string;
   client_id: string | null;
   user_id: string | null;

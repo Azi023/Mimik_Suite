@@ -1,6 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import Link from "next/link";
 import { getSessionEmail, getSessionToken } from "@/lib/session";
+import { resolveTenantBranding, type TenantBranding } from "@/lib/branding";
 import { AcceptInvitationPanel } from "./AcceptInvitationPanel";
 
 // The signed-in identity is per-request — never a build-time snapshot.
@@ -13,13 +14,19 @@ interface InviteAcceptPageProps {
 
 /** Split-screen frame mirroring the login reference (dark brand panel + content), reused so the
  *  invite flow reads as the same product surface. */
-function AuthFrame({ children }: { children: ReactNode }): JSX.Element {
+function AuthFrame({
+  children,
+  branding,
+}: {
+  children: ReactNode;
+  branding: TenantBranding;
+}): JSX.Element {
   return (
     <main className="auth">
       <aside className="auth-brand" aria-hidden="true">
         <div className="auth-brand__inner">
-          <span className="auth-brand__mark">M</span>
-          <h2 className="auth-brand__headline">Mimik Suite</h2>
+          <span className="auth-brand__mark">{branding.short_name.slice(0, 1).toUpperCase()}</span>
+          <h2 className="auth-brand__headline">{branding.product_name}</h2>
           <p className="auth-brand__tagline">You&apos;ve been invited to the workspace.</p>
         </div>
       </aside>
@@ -45,16 +52,21 @@ export default async function InviteAcceptPage({
   const { token } = await searchParams;
   const trimmedToken = typeof token === "string" ? token.trim() : "";
 
+  const sessionToken = await getSessionToken();
+  // Signed-in invitees (branch c) get their own tenant's branding; pre-auth branches fall back to
+  // the platform default (the tenant is unknown until the invitee signs in).
+  const branding = await resolveTenantBranding(sessionToken ?? undefined);
+
   // (a) The link arrived without a token — nothing to redeem.
   if (trimmedToken === "") {
     return (
-      <AuthFrame>
+      <AuthFrame branding={branding}>
         <div className="auth-form">
           <div className="auth-form__head">
             <h1 className="auth-form__title">Invitation link incomplete</h1>
             <p className="auth-form__sub">
-              This link is missing its invitation token. Ask your Mimik contact to send a fresh
-              invite.
+              This link is missing its invitation token. Ask your {branding.short_name} contact to
+              send a fresh invite.
             </p>
           </div>
         </div>
@@ -62,13 +74,11 @@ export default async function InviteAcceptPage({
     );
   }
 
-  const sessionToken = await getSessionToken();
-
   // (b) Not signed in — send to login, carrying the invite through the round-trip.
   if (sessionToken === null) {
     const next = `/invite/accept?token=${encodeURIComponent(trimmedToken)}`;
     return (
-      <AuthFrame>
+      <AuthFrame branding={branding}>
         <div className="auth-form">
           <div className="auth-form__head">
             <h1 className="auth-form__title">Sign in to accept</h1>
@@ -91,8 +101,12 @@ export default async function InviteAcceptPage({
   // (c) Signed in — the client panel drives the explicit accept + all outcome states.
   const email = await getSessionEmail();
   return (
-    <AuthFrame>
-      <AcceptInvitationPanel token={trimmedToken} email={email} />
+    <AuthFrame branding={branding}>
+      <AcceptInvitationPanel
+        token={trimmedToken}
+        email={email}
+        productName={branding.product_name}
+      />
     </AuthFrame>
   );
 }
