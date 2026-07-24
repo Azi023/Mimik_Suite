@@ -32,6 +32,7 @@ from creative.knowledge.feedback import load_rules
 from creative.render import nikah_primitives as prim
 from creative.render.builtin_fonts import builtin_arabic_font_path, contains_arabic
 from creative.render.fonts import embed_font_face, font_family_stack
+from creative.render.nikah_vectors import get_vector
 from creative.render.templates import (
     LayoutTemplate,
     TemplateContext,
@@ -647,23 +648,33 @@ def _render_hero_fragment(comp: _NikahComposition) -> str:
     half = box / 2
     symbol = comp.hero_symbol
     inner: list[str] = []
-    if symbol == "hands_heart":
-        inner.append(prim.hands_forming_heart(cx, cy, box, fill=p["pink"], sleeve_fill=p["plum"]))
-    elif symbol == "heart":
-        inner.append(prim.heart(cx, cy, box, fill=p["pink"]))
-    elif symbol == "crescent":
-        inner.append(prim.crescent(cx, cy, half, fill=p["pink"]))
-    elif symbol == "shield_crescent":
-        lattice_id = "nk-hero-lattice"
-        inner.append(f"<defs>{prim.lattice_pattern(lattice_id, tile=90, stroke=p['plum'], stroke_width=2.5, opacity=0.10)}</defs>")
+    bundled_vector = {
+        "hands_heart": "dua_hands",
+        "crescent": "crescent",
+    }.get(symbol)
+    if bundled_vector is not None:
         inner.append(
-            prim.shield(
-                cx, cy, box * 0.72, box,
-                fill=p["blush"], stroke=p["plum"], stroke_width=max(2.0, box * 0.012),
-                fill_pattern_id=lattice_id,
+            get_vector(
+                bundled_vector,
+                x=cx - half,
+                y=cy - half,
+                scale=box / 100,
+                fill=p["pink"],
             )
         )
-        inner.append(prim.crescent(cx + box * 0.26, cy - box * 0.30, box * 0.16, fill=p["pink"]))
+    elif symbol == "heart":
+        inner.append(prim.heart(cx, cy, box, fill=p["pink"]))
+    elif symbol == "shield_crescent":
+        inner.append(
+            prim.shield_crescent(
+                cx,
+                cy,
+                box,
+                fill=p["pink"],
+                shield_fill=p["blush"],
+                stroke=p["plum"],
+            )
+        )
     elif symbol == "heart_shield":
         inner.append(
             prim.shield(

@@ -217,35 +217,62 @@ def hands_forming_heart(
     fill: str,
     sleeve_fill: str | None = None,
 ) -> str:
-    """Two sleeve-covered silhouette hands meeting in a heart — faceless, fully modest.
-
-    Composed from two half-heart 'cupped hand' shapes with a hairline central seam and two angled
-    forearm cuffs. Zero facial features by construction. Stamps ``data-figure``/``data-faceless``.
-    """
+    """Two cupped dua hands whose inner contours form a heart-shaped opening."""
     s = size
-    gap = s * 0.012
     cuff = sleeve_fill or fill
-    left = _half_heart(cx - gap, cy, s, side="left")
-    right = _half_heart(cx + gap, cy, s, side="right")
-    # Two forearm cuffs angled outward from below the heart's point.
-    cuff_w = s * 0.20
-    cuff_h = s * 0.16
-    cuff_y = cy + 0.30 * s
-    cuffs = (
-        f'<rect x="{_f(cx - 0.30 * s)}" y="{_f(cuff_y)}" width="{_f(cuff_w)}" height="{_f(cuff_h)}" '
-        f'rx="{_f(cuff_w * 0.4)}" fill="{escape(cuff, quote=True)}" '
-        f'transform="rotate(-32 {_f(cx)} {_f(cuff_y)})"/>'
-        f'<rect x="{_f(cx + 0.10 * s)}" y="{_f(cuff_y)}" width="{_f(cuff_w)}" height="{_f(cuff_h)}" '
-        f'rx="{_f(cuff_w * 0.4)}" fill="{escape(cuff, quote=True)}" '
-        f'transform="rotate(32 {_f(cx)} {_f(cuff_y)})"/>'
+    left_hand = (
+        f"M {_f(cx - 0.03 * s)} {_f(cy + 0.30 * s)} "
+        f"C {_f(cx - 0.18 * s)} {_f(cy + 0.22 * s)}, {_f(cx - 0.34 * s)} {_f(cy + 0.06 * s)}, "
+        f"{_f(cx - 0.37 * s)} {_f(cy - 0.10 * s)} "
+        f"C {_f(cx - 0.39 * s)} {_f(cy - 0.22 * s)}, {_f(cx - 0.31 * s)} {_f(cy - 0.28 * s)}, "
+        f"{_f(cx - 0.25 * s)} {_f(cy - 0.20 * s)} "
+        f"L {_f(cx - 0.18 * s)} {_f(cy - 0.02 * s)} "
+        f"C {_f(cx - 0.14 * s)} {_f(cy + 0.05 * s)}, {_f(cx - 0.08 * s)} {_f(cy + 0.08 * s)}, "
+        f"{_f(cx)} {_f(cy + 0.18 * s)} "
+        f"C {_f(cx - 0.06 * s)} {_f(cy + 0.10 * s)}, {_f(cx - 0.10 * s)} {_f(cy + 0.02 * s)}, "
+        f"{_f(cx - 0.09 * s)} {_f(cy - 0.08 * s)} "
+        f"L {_f(cx - 0.08 * s)} {_f(cy - 0.30 * s)} "
+        f"C {_f(cx - 0.08 * s)} {_f(cy - 0.38 * s)}, {_f(cx - 0.02 * s)} {_f(cy - 0.40 * s)}, "
+        f"{_f(cx + 0.01 * s)} {_f(cy - 0.33 * s)} "
+        f"L {_f(cx + 0.02 * s)} {_f(cy - 0.06 * s)} "
+        f"C {_f(cx + 0.02 * s)} {_f(cy + 0.08 * s)}, {_f(cx - 0.01 * s)} {_f(cy + 0.20 * s)}, "
+        f"{_f(cx - 0.03 * s)} {_f(cy + 0.30 * s)} Z"
+    )
+    # Mirror the left hand rather than maintaining two divergent silhouettes.
+    right_transform = f"translate({_f(2 * cx)} 0) scale(-1 1)"
+    left_cuff = (
+        f"M {_f(cx - 0.31 * s)} {_f(cy + 0.20 * s)} "
+        f"L {_f(cx - 0.04 * s)} {_f(cy + 0.31 * s)} "
+        f"L {_f(cx - 0.10 * s)} {_f(cy + 0.48 * s)} "
+        f"L {_f(cx - 0.39 * s)} {_f(cy + 0.35 * s)} Z"
     )
     return (
         '<g data-role="hands-heart" data-figure="true" data-faceless="true">'
-        f"{cuffs}"
-        f'<path d="{left}" fill="{escape(fill, quote=True)}"/>'
-        f'<path d="{right}" fill="{escape(fill, quote=True)}"/>'
-        f'<line x1="{_f(cx)}" y1="{_f(cy - 0.13 * s)}" x2="{_f(cx)}" y2="{_f(cy + 0.32 * s)}" '
-        f'stroke="{escape(cuff, quote=True)}" stroke-width="{_f(s * 0.006)}" opacity="0.35"/>'
+        f'<path d="{left_cuff}" fill="{escape(cuff, quote=True)}"/>'
+        f'<path d="{left_cuff}" fill="{escape(cuff, quote=True)}" transform="{right_transform}"/>'
+        f'<path d="{left_hand}" fill="{escape(fill, quote=True)}"/>'
+        f'<path d="{left_hand}" fill="{escape(fill, quote=True)}" transform="{right_transform}"/>'
+        "</g>"
+    )
+
+
+def shield_crescent(
+    cx: float,
+    cy: float,
+    size: float,
+    *,
+    fill: str,
+    shield_fill: str,
+    stroke: str,
+) -> str:
+    """A centred crescent fully contained within a soft heater shield."""
+    shield_width = size * 0.72
+    stroke_width = max(2.0, size * 0.012)
+    moon_radius = size * 0.18
+    return (
+        '<g data-role="shield-crescent" data-figure="true" data-faceless="true">'
+        f"{shield(cx, cy, shield_width, size, fill=shield_fill, stroke=stroke, stroke_width=stroke_width)}"
+        f"{crescent(cx, cy - size * 0.06, moon_radius, fill=fill, rotation=-18)}"
         "</g>"
     )
 

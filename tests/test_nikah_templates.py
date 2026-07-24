@@ -10,6 +10,7 @@ from xml.etree import ElementTree
 import pytest
 
 from creative.render.compositor import browser_available, png_size
+from creative.render import nikah_primitives as prim
 from creative.render.nikah_templates import (
     NikahTemplateContext,
     build_nikah_svg,
@@ -148,7 +149,7 @@ def test_nikah_ltr_default_matches_frozen_pre_rtl_serialization() -> None:
         direction="ltr",
     )
     assert hashlib.sha256(default_svg.encode()).hexdigest() == (
-        "32f8c826e6a7e13bf6b90ba801fbfdcc8548094221163e259082ff16959d805f"
+        "be95530fc68caecc2213acd5981c64f51b5fe3346f73a8660a8ba6c133959d36"
     )
 
 
@@ -243,6 +244,54 @@ def test_figure_primitive_stamps_faceless_and_figure_attrs() -> None:
     assert 'data-faceless="true"' in svg
     hero_layer = svg.split('id="layer-hero"', 1)[1].split('id="layer-wordmark"', 1)[0]
     assert 'data-figure="true"' in hero_layer  # the figure lives inside the hero group
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    (
+        prim.hands_forming_heart(
+            100,
+            100,
+            120,
+            fill="#FD62AD",
+            sleeve_fill="#2B0A2E",
+        ),
+        prim.shield_crescent(
+            100,
+            100,
+            120,
+            fill="#FD62AD",
+            shield_fill="#F9C6DE",
+            stroke="#2B0A2E",
+        ),
+    ),
+)
+def test_fixed_figure_primitives_are_nonblank_and_faceless(fragment: str) -> None:
+    root = ElementTree.fromstring(fragment)
+    assert root.attrib["data-figure"] == "true"
+    assert root.attrib["data-faceless"] == "true"
+    assert len(list(root.iter())) >= 4
+    assert fragment.count("<path") >= 2
+
+
+def test_hero_resolution_prefers_bundled_vectors_then_falls_back_to_primitive() -> None:
+    hands = build_nikah_svg(
+        "highlighted_word_hero",
+        copy=_HIGHLIGHT_COPY,
+        format_key="carousel",
+        hero_symbol="hands_heart",
+    )
+    shield = build_nikah_svg(
+        "protection_symbol_hero",
+        copy=_PROTECTION_COPY,
+        format_key="carousel",
+        hero_symbol="shield_crescent",
+    )
+
+    assert 'data-vector="dua_hands"' in hands
+    assert 'data-role="shield-crescent"' in shield
+    assert modesty_report(hands, source_kind="generated_vector") == []
+    assert modesty_report(shield, source_kind="generated_vector") == []
 
 
 # ---------------------------------------------------------------------------------------------
