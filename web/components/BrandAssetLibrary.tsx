@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef, useState, useTransition, type JSX } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ApiBrandAsset, AssetKind } from "@/lib/api";
-import type { AssetActionResult } from "@/app/assets/actions";
+import { type ApiBrandAsset, type ApiFontLibraryEntry, type AssetKind, assetRawUrl } from "@/lib/api";
+import type { AssetActionResult, FontLibraryResult } from "@/app/assets/actions";
 
 type UploadAction = (
   brandId: string,
@@ -12,6 +13,15 @@ type UploadAction = (
   formData: FormData,
 ) => Promise<AssetActionResult>;
 type AssetAction = (assetId: string) => Promise<AssetActionResult>;
+type FontLibraryAction = () => Promise<FontLibraryResult>;
+type MaterializeFontAction = (brandId: string, fontKey: string) => Promise<AssetActionResult>;
+
+/** Kinds whose stored bytes are images the browser can render as a thumbnail (fonts are not). */
+const IMAGE_KINDS: ReadonlySet<AssetKind> = new Set<AssetKind>([
+  "logo",
+  "imagery",
+  "reference_creative",
+]);
 
 interface ClientOption {
   id: string;
@@ -28,6 +38,10 @@ interface BrandAssetLibraryProps {
   approveAction: AssetAction;
   knockoutAction: AssetAction;
   ingestAction: AssetAction;
+  /** Lazy-load the built-in font catalog (team-gated, server-side) for the Fonts picker. */
+  fontLibraryAction: FontLibraryAction;
+  /** Materialize a chosen built-in font as an approved FONT asset for the brand. */
+  materializeFontAction: MaterializeFontAction;
 }
 
 /** The four asset kinds, in the order they appear on the page, with their upload affordances. */
@@ -72,9 +86,11 @@ const SECTIONS: readonly SectionSpec[] = [
  * product photos, and reference creatives — so the engine can composite on top of them. Assets are
  * brand-scoped; the client selector at the top switches which client's brand library is shown
  * (server-resolved via the page). Each kind has its own upload control and per-asset actions
- * (approve; knockout for logos; ingest for references). There is no public byte URL for stored
- * assets, so cards show a kind tile + filename/mime rather than a rendered thumbnail; ingested
- * references additionally show the observed palette and mood (real study data, never invented).
+ * (approve; knockout for logos; ingest for references). Image kinds render a real thumbnail via the
+ * same-origin `/api/assets/{id}/raw` proxy (auth stays server-side); fonts and non-image assets keep
+ * the kind glyph. The Fonts section also offers a built-in-font picker that materializes a catalog
+ * font as an approved brand asset. Ingested references additionally show the observed palette and
+ * mood (real study data, never invented).
  */
 export function BrandAssetLibrary({
   clients,
@@ -85,6 +101,8 @@ export function BrandAssetLibrary({
   approveAction,
   knockoutAction,
   ingestAction,
+  fontLibraryAction,
+  materializeFontAction,
 }: BrandAssetLibraryProps): JSX.Element {
   const router = useRouter();
 
@@ -164,6 +182,8 @@ export function BrandAssetLibrary({
             approveAction={approveAction}
             knockoutAction={knockoutAction}
             ingestAction={ingestAction}
+            fontLibraryAction={fontLibraryAction}
+            materializeFontAction={materializeFontAction}
           />
         ))}
       </div>
@@ -187,6 +207,8 @@ interface AssetSectionProps {
   approveAction: AssetAction;
   knockoutAction: AssetAction;
   ingestAction: AssetAction;
+  fontLibraryAction: FontLibraryAction;
+  materializeFontAction: MaterializeFontAction;
 }
 
 function AssetSection({
@@ -197,6 +219,8 @@ function AssetSection({
   approveAction,
   knockoutAction,
   ingestAction,
+  fontLibraryAction,
+  materializeFontAction,
 }: AssetSectionProps): JSX.Element {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -252,6 +276,14 @@ function AssetSection({
         <p className="tasks__error" role="alert">
           {error}
         </p>
+      )}
+
+      {spec.kind === "font" && (
+        <BuiltinFontPicker
+          brandId={brandId}
+          loadAction={fontLibraryAction}
+          materializeAction={materializeFontAction}
+        />
       )}
 
       {assets.length === 0 ? (
@@ -312,9 +344,7 @@ function AssetCard({
 
   return (
     <div className="assetcard">
-      <div className={`assetcard__tile assetcard__tile--${asset.kind}`} aria-hidden="true">
-        <KindGlyph kind={asset.kind} />
-      </div>
+      <AssetThumb asset={asset} />
 
       <div className="assetcard__body">
         <p className="assetcard__name" title={asset.filename}>
@@ -399,6 +429,160 @@ function AssetCard({
   );
 }
 
+/**
+ * The asset tile. For image kinds (logo, imagery, reference_creative) it renders a REAL thumbnail
+ * proxied through `/api/assets/{id}/raw` (auth attached server-side). The kind glyph shows while the
+ * image loads and stays as the honest fallback for fonts, non-image mimes, or a failed/absent byte
+ * stream (e.g. an asset whose bytes were never stored). No invented imagery — glyph or the real file.
+ */
+function AssetThumb({ asset }: { asset: ApiBrandAsset }): JSX.Element {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const isImage = IMAGE_KINDS.has(asset.kind) && asset.mime.startsWith("image/");
+
+  if (!isImage || failed) {
+    return (
+      <div className={`assetcard__tile assetcard__tile--${asset.kind}`} aria-hidden="true">
+        <KindGlyph kind={asset.kind} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`assetcard__tile assetcard__tile--${asset.kind} assetcard__tile--img`}>
+      {!loaded && <KindGlyph kind={asset.kind} />}
+      <Image
+        className="assetcard__thumb"
+        src={assetRawUrl(asset.id)}
+        alt=""
+        width={48}
+        height={48}
+        unoptimized
+        style={{ opacity: loaded ? 1 : 0 }}
+        onLoad={(): void => setLoaded(true)}
+        onError={(): void => setFailed(true)}
+      />
+    </div>
+  );
+}
+
+interface BuiltinFontPickerProps {
+  brandId: string;
+  loadAction: FontLibraryAction;
+  materializeAction: MaterializeFontAction;
+}
+
+/**
+ * "Choose a built-in font" — lazily loads the team-gated catalog (GET /fonts/library, server-side)
+ * on open, then on select materializes the font as an approved brand FONT asset
+ * (POST /brands/{id}/fonts/{key}) and refreshes so it appears in the grid. Real empty/error/loading
+ * states; the catalog is never faked.
+ */
+function BuiltinFontPicker({
+  brandId,
+  loadAction,
+  materializeAction,
+}: BuiltinFontPickerProps): JSX.Element {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [fonts, setFonts] = useState<ApiFontLibraryEntry[] | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  function toggle(): void {
+    const next = !open;
+    setOpen(next);
+    if (next && fonts === null) {
+      setError("");
+      startTransition(async () => {
+        const result = await loadAction();
+        if (result.ok && result.fonts !== undefined) {
+          setFonts(result.fonts);
+        } else {
+          setError(result.error ?? "Couldn't load the built-in fonts.");
+        }
+      });
+    }
+  }
+
+  function choose(key: string): void {
+    setError("");
+    setPendingKey(key);
+    startTransition(async () => {
+      const result = await materializeAction(brandId, key);
+      setPendingKey(null);
+      if (result.ok) {
+        setOpen(false);
+        router.refresh();
+      } else {
+        setError(result.error ?? "Couldn't add that font.");
+      }
+    });
+  }
+
+  return (
+    <div className="fontpick">
+      <button
+        type="button"
+        className="btn btn--secondary btn--sm"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        {open ? "Hide built-in fonts" : "Choose a built-in font"}
+      </button>
+
+      {open && (
+        <div className="fontpick__panel">
+          {pending && fonts === null ? (
+            <p className="fontpick__note">Loading built-in fonts…</p>
+          ) : error !== "" && fonts === null ? (
+            <p className="tasks__error" role="alert">
+              {error}
+            </p>
+          ) : fonts !== null && fonts.length === 0 ? (
+            <p className="fontpick__note">No built-in fonts are available.</p>
+          ) : fonts !== null ? (
+            <>
+              <ul className="fontpick__list">
+                {fonts.map((font) => (
+                  <li key={font.key} className="fontpick__item">
+                    <div className="fontpick__meta">
+                      <span
+                        className="fontpick__preview"
+                        style={{ fontFamily: `${font.family}, sans-serif` }}
+                      >
+                        {font.preview_text !== "" ? font.preview_text : font.family}
+                      </span>
+                      <span className="fontpick__name">
+                        {font.family}
+                        <span className="fontpick__cat">{font.category}</span>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      disabled={pending}
+                      onClick={(): void => choose(font.key)}
+                    >
+                      {pendingKey === font.key ? "Adding…" : "Add"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {error !== "" && (
+                <p className="tasks__error" role="alert">
+                  {error}
+                </p>
+              )}
+            </>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A simple line glyph per asset kind — an honest placeholder, since stored bytes aren't served. */
 function KindGlyph({ kind }: { kind: AssetKind }): JSX.Element {
   switch (kind) {
@@ -474,6 +658,34 @@ const STYLES = `
     flex-shrink: 0; width: 48px; height: 48px; border-radius: 8px;
     display: flex; align-items: center; justify-content: center;
     background: var(--surface); color: var(--muted); border: 1px solid var(--line);
+  }
+  .assetcard__tile--img { position: relative; overflow: hidden; padding: 0; }
+  .assetcard__thumb {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transition: opacity 120ms ease;
+  }
+  .assetcard__tile--logo.assetcard__tile--img .assetcard__thumb { object-fit: contain; padding: 4px; }
+  .fontpick { margin-bottom: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+  .fontpick__panel {
+    border: 1px solid var(--line); border-radius: var(--r-sm, 10px);
+    background: var(--surface-2); padding: var(--sp-3);
+  }
+  .fontpick__note { font-size: 12px; color: var(--muted); }
+  .fontpick__list { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .fontpick__item {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: var(--sp-2) 0; border-bottom: 1px solid var(--line);
+  }
+  .fontpick__item:last-child { border-bottom: 0; }
+  .fontpick__meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+  .fontpick__preview {
+    font-size: 16px; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .fontpick__name { font-size: 11px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .fontpick__cat {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 1px 6px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line);
   }
   .assetcard__body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
   .assetcard__name {

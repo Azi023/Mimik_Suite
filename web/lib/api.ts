@@ -1436,6 +1436,63 @@ export function ingestReference(assetId: string, sessionToken?: string): Promise
   );
 }
 
+/**
+ * Authenticated raw asset-bytes fetch used ONLY by the same-origin Next route proxy
+ * (`/api/assets/{id}/raw`). Mirrors `fetchCreativeArtifact`: the bearer never reaches the
+ * browser — the proxy attaches it server-side and streams the bytes back same-origin.
+ */
+export async function fetchAssetRaw(assetId: string, sessionToken?: string): Promise<Response> {
+  const path = `/assets/${encodeURIComponent(assetId)}/raw`;
+  const headers: Record<string, string> = { Accept: "*/*" };
+  const token = resolveBearer(sessionToken);
+  if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw await apiError(response, `GET ${path} -> ${response.status}`);
+  }
+  return response;
+}
+
+/** Same-origin proxy URL for an asset's raw bytes — the `<img src>` the browser loads. Auth is
+ *  attached server-side by the `/api/assets/[id]/raw` route; no token is ever exposed client-side. */
+export function assetRawUrl(assetId: string): string {
+  return `/api/assets/${encodeURIComponent(assetId)}/raw`;
+}
+
+/** GET /fonts/library entry — one built-in font available to materialize into a brand. */
+export interface ApiFontLibraryEntry {
+  key: string;
+  family: string;
+  category: string;
+  preview_text: string;
+}
+
+/** GET /fonts/library — the built-in font catalog (team-gated). */
+export function fetchFontLibrary(sessionToken?: string): Promise<ApiFontLibraryEntry[]> {
+  return apiGet<ApiFontLibraryEntry[]>("/fonts/library", sessionToken);
+}
+
+/**
+ * POST /brands/{brand_id}/fonts/{font_key} — materialize a built-in font as an approved FONT
+ * BrandAsset for the brand; returns the created asset (201). Team-gated (403 for a client
+ * principal); an unknown font_key 404s and a foreign brand 404s cross-tenant.
+ */
+export function materializeBuiltinFont(
+  brandId: string,
+  fontKey: string,
+  sessionToken?: string,
+): Promise<ApiBrandAsset> {
+  return apiPost<ApiBrandAsset>(
+    `/brands/${encodeURIComponent(brandId)}/fonts/${encodeURIComponent(fontKey)}`,
+    {},
+    sessionToken,
+  );
+}
+
 /* ---------------------------------------------------------------------------
    Members / roles / invitations (the admin panel).
 --------------------------------------------------------------------------- */

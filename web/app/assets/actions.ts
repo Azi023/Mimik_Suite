@@ -3,10 +3,13 @@
 import { revalidatePath } from "next/cache";
 import {
   ApiError,
+  type ApiFontLibraryEntry,
   type AssetKind,
   approveAsset,
+  fetchFontLibrary,
   ingestReference,
   knockoutLogo,
+  materializeBuiltinFont,
   uploadBrandAsset,
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
@@ -131,5 +134,56 @@ export async function ingestReferenceAction(assetId: string): Promise<AssetActio
       ok: false,
       error: messageForStatus(error, "Couldn't ingest that reference. Try again."),
     };
+  }
+}
+
+/** Result of a lazy built-in-font-library load — the picker fetches this on open. */
+export interface FontLibraryResult {
+  ok: boolean;
+  fonts?: ApiFontLibraryEntry[];
+  error?: string;
+}
+
+/**
+ * Load the built-in font catalog (GET /fonts/library) server-side so the picker never touches a
+ * bearer. Team-gated at the API; a client-role session 403s here (surfaced as a real error state).
+ */
+export async function loadFontLibraryAction(): Promise<FontLibraryResult> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return { ok: false, error: "Your session has expired — sign in again." };
+  }
+  try {
+    const fonts = await fetchFontLibrary(token);
+    return { ok: true, fonts };
+  } catch (error) {
+    return {
+      ok: false,
+      error: messageForStatus(error, "Couldn't load the built-in fonts. Try again."),
+    };
+  }
+}
+
+/**
+ * Materialize a built-in font (POST /brands/{id}/fonts/{key}) as an approved FONT asset for the
+ * brand. `fontKey` is a catalog key (data, never an instruction). Team-gated at the API.
+ */
+export async function materializeBuiltinFontAction(
+  brandId: string,
+  fontKey: string,
+): Promise<AssetActionResult> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return { ok: false, error: "Your session has expired — sign in again." };
+  }
+  if (brandId.trim() === "" || fontKey.trim() === "") {
+    return { ok: false, error: "Pick a font to add." };
+  }
+  try {
+    await materializeBuiltinFont(brandId, fontKey, token);
+    revalidatePath("/assets");
+    return { ok: true, message: "Font added to the brand library." };
+  } catch (error) {
+    return { ok: false, error: messageForStatus(error, "Couldn't add that font. Try again.") };
   }
 }

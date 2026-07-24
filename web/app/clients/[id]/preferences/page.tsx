@@ -85,7 +85,9 @@ export default async function PreferencesPage({
               {data.ranker_active ? "Active" : "Learning"}
             </span>
             <span className="prefs__card-label">
-              {data.ranker_active ? "Ranker is steering picks" : "Not enough signals yet"}
+              {data.ranker_active
+                ? "Orders A/B variants by this client's learned preferences"
+                : "Not enough signals yet"}
             </span>
           </div>
         </div>
