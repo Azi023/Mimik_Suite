@@ -48,6 +48,7 @@ from mimik_contracts import (
     CopyBlock,
     CreativeDoc,
     CreativeManifest,
+    CreativeVariant,
     JobStatus,
     Layer,
     LayerKind,
@@ -66,6 +67,10 @@ _PEXELS_IMAGE_HOST = "images.pexels.com"
 _TEAM_ROLES = frozenset({"owner", "admin", "ops", "designer", "team"})
 _PROFILE_IDS = frozenset({"glo2go-aesthetics", "simply-nikah", "island-cart"})
 _GLO2GO_ARCHETYPE = "single_photo_education_hero"
+
+# M-05 A/B variants: at most two renders per concept for the pick UI. Kept small on purpose —
+# the pick signal is only meaningful as "A vs B"; more renders dilute the revealed preference.
+_MAX_VARIANTS = 2
 
 
 class GenerateCreativeRequest(BaseModel):
@@ -327,6 +332,62 @@ _NIKAH_PROTECTION_KEYWORDS = (
 )
 
 
+class _VariantLever(BaseModel):
+    """One FREE design lever that distinguishes an A/B variant render (M-05).
+
+    ``params`` are render-param overrides merged onto the base L1 params before rendering — a
+    real composition change (SN archetype, template alignment), never a paid backend call.
+    ``key``/``value`` are the structured lever so a downstream PICK signal is scored as an
+    attribute by the taste-ranker rather than parsed from free text."""
+
+    label: str
+    key: str
+    value: str
+    params: dict[str, object] = Field(default_factory=dict)
+
+
+def _plan_variants(profile_id: str, count: int) -> list[_VariantLever]:
+    """Choose ``count`` distinct free design levers for a concept, profile-aware.
+
+    Single-generate (count<=1) uses the natural render (no override) so it stays byte-identical
+    to today. For >=2, Simply Nikah varies by its two nikah archetypes (the strongest SN lever);
+    every other profile varies by headline alignment — a genuine, free composition lever already
+    plumbed through the compositor."""
+    if count <= 1:
+        return [_VariantLever(label="natural", key="natural", value="default")]
+    if profile_id == "simply-nikah":
+        levers = [
+            _VariantLever(
+                label="nikah_archetype=highlighted_word_hero",
+                key="nikah_archetype",
+                value="highlighted_word_hero",
+                params={"nikah_archetype": "highlighted_word_hero"},
+            ),
+            _VariantLever(
+                label="nikah_archetype=protection_symbol_hero",
+                key="nikah_archetype",
+                value="protection_symbol_hero",
+                params={"nikah_archetype": "protection_symbol_hero"},
+            ),
+        ]
+    else:
+        levers = [
+            _VariantLever(
+                label="text_alignment=left",
+                key="text_alignment",
+                value="left",
+                params={"text_alignment": "left"},
+            ),
+            _VariantLever(
+                label="text_alignment=center",
+                key="text_alignment",
+                value="center",
+                params={"text_alignment": "center"},
+            ),
+        ]
+    return levers[:count]
+
+
 def _suggest_nikah(copy_block: CopyBlock) -> tuple[str, str | None, str]:
     """Pick a Simply Nikah archetype (+ highlight word + hero symbol) from the copy.
 
@@ -343,12 +404,37 @@ def _suggest_nikah(copy_block: CopyBlock) -> tuple[str, str | None, str]:
     return "protection_symbol_hero", None, "shield_crescent"
 
 
+def _nikah_variant_selection(
+    archetype: str, copy_block: CopyBlock
+) -> tuple[str, str | None, str]:
+    """Resolve a FORCED Simply Nikah archetype (M-05 variant lever) into the render inputs.
+
+    Mirrors _suggest_nikah's output shape but honours a caller-chosen archetype. For the
+    highlighted-word archetype the template requires a 'highlight' substring of the headline, so
+    derive it (trailing two words, or the whole headline when short) to keep the render valid."""
+    if archetype == "highlighted_word_hero":
+        words = (copy_block.headline or "").split()
+        highlight = " ".join(words[-2:]) if len(words) >= 2 else (copy_block.headline or None)
+        return "highlighted_word_hero", highlight, "hands_heart"
+    return "protection_symbol_hero", None, "shield_crescent"
+
+
 async def _render_nikah_artifacts(
-    *, copy_block: CopyBlock, format_key: str, brand: Brand
+    *,
+    copy_block: CopyBlock,
+    format_key: str,
+    brand: Brand,
+    archetype_override: str | None = None,
 ) -> tuple[str, bytes]:
     """Render a Simply Nikah creative through the vector engine (M-01). Returns (svg, png)
-    so live QA can read the semantic-layer geometry. SN never takes a photo."""
-    archetype, highlight, hero_symbol = _suggest_nikah(copy_block)
+    so live QA can read the semantic-layer geometry. SN never takes a photo.
+
+    ``archetype_override`` (M-05) forces a specific archetype for A/B variants; None keeps the
+    copy-driven _suggest_nikah default so the single-generate path is unchanged."""
+    if archetype_override is not None:
+        archetype, highlight, hero_symbol = _nikah_variant_selection(archetype_override, copy_block)
+    else:
+        archetype, highlight, hero_symbol = _suggest_nikah(copy_block)
     copy: dict[str, str] = {"headline": copy_block.headline}
     if copy_block.subhead:
         copy["sub"] = copy_block.subhead
@@ -393,7 +479,10 @@ async def _render_creative_artifacts(
     if profile_id == "simply-nikah":
         try:
             nikah_render = await _render_nikah_artifacts(
-                copy_block=copy_block, format_key=format_key, brand=brand
+                copy_block=copy_block,
+                format_key=format_key,
+                brand=brand,
+                archetype_override=render_params.get("nikah_archetype"),
             )
             effective_source_kind = "generated_vector"
         except Exception as exc:  # noqa: BLE001 — never let a render fault break generation
@@ -471,6 +560,62 @@ async def _render_creative_artifacts(
         if LIVE_QA_BLOCKING:
             raise LiveQABlocked(qa_report)
     return svg_path, preview_path, profile_render_path, qa_report
+
+
+async def _render_variants(
+    *,
+    brand: Brand,
+    profile_id: str,
+    copy_block: CopyBlock,
+    format_key: str,
+    image_path: Path,
+    artifact_dir: Path,
+    base_params: dict,
+    source_kind: str,
+    levers: list[_VariantLever],
+) -> tuple[tuple[Path, Path, Path | None, QAReport, dict], list[CreativeVariant]]:
+    """Render each planned lever from ONE shared source image (M-05).
+
+    Variant 0 renders into the canonical ``artifact_dir`` so it is the "active" creative the
+    preview/svg endpoints serve; further variants render into ``variant-N`` subdirs. Every
+    variant flows through _render_creative_artifacts, so brand-QA runs per variant. Returns the
+    primary render tuple (incl. its effective L1 params) plus a CreativeVariant record per lever.
+    Free: the paid/stock source image is fetched once by the caller and reused for all variants."""
+    primary: tuple[Path, Path, Path | None, QAReport, dict] | None = None
+    records: list[CreativeVariant] = []
+    for index, lever in enumerate(levers):
+        variant_dir = artifact_dir if index == 0 else artifact_dir / f"variant-{index}"
+        if index != 0:
+            variant_dir.mkdir(parents=True, exist_ok=False)
+        variant_params = {**base_params, **lever.params}
+        svg_path, preview_path, profile_render_path, qa_report = await _render_creative_artifacts(
+            brand=brand,
+            profile_id=profile_id,
+            copy_block=copy_block,
+            format_key=format_key,
+            image_path=image_path,
+            artifact_dir=variant_dir,
+            render_params=variant_params,
+            source_kind=source_kind,
+        )
+        records.append(
+            CreativeVariant(
+                lever=lever.label,
+                lever_key=lever.key,
+                lever_value=lever.value,
+                svg_ref=str(svg_path),
+                preview_ref=str(preview_path),
+                profile_render_ref=(
+                    str(profile_render_path) if profile_render_path is not None else None
+                ),
+                qa_passed=qa_report.passed,
+                qa_failures=list(qa_report.failures),
+            )
+        )
+        if index == 0:
+            primary = (svg_path, preview_path, profile_render_path, qa_report, variant_params)
+    assert primary is not None  # _plan_variants always yields at least one lever
+    return primary, records
 
 
 # Legacy ReviseCreativeRequest was removed; the router maps it to CanvasRevision
@@ -959,6 +1104,7 @@ async def generate_client_creative(
     client_id: str,
     body: GenerateCreativeRequest,
     job_id: str | None = None,
+    variants: int = 1,
 ) -> GeneratedCreative:
     if principal.role not in _TEAM_ROLES:
         raise HTTPException(status_code=403, detail="Creative generation is a team action")
@@ -1052,7 +1198,7 @@ async def generate_client_creative(
             logger.warning("generate: copy draft failed (%s); using topic fallback", exc)
             copy_block = CopyBlock(headline=topic, source_model="fallback")
         text_region = await _safe_text_region(image_path, source_kind=source_kind)
-        l1_params = {
+        base_l1_params = {
             **art_request.params,
             "topic": topic,
             "pillar": pillar,
@@ -1061,16 +1207,24 @@ async def generate_client_creative(
             "text_region": text_region,
         }
 
-        svg_path, preview_path, profile_render_path, qa_report = await _render_creative_artifacts(
+        # M-05: one source image, N variant renders differing only by a free design lever. For
+        # variants==1 the plan is a single "natural" render, so this is byte-identical to before.
+        variant_count = max(1, min(variants, _MAX_VARIANTS))
+        levers = _plan_variants(profile_id, variant_count)
+        primary, variant_records = await _render_variants(
             brand=brand,
             profile_id=profile_id,
             copy_block=copy_block,
             format_key=body.format_key,
             image_path=image_path,
             artifact_dir=artifact_dir,
-            render_params=l1_params,
+            base_params=base_l1_params,
             source_kind=source_kind,
+            levers=levers,
         )
+        # The primary (variant 0) render populates the active layers; its params include variant
+        # 0's lever override (none for single-generate).
+        svg_path, preview_path, profile_render_path, qa_report, l1_params = primary
 
         manifest = build_manifest(
             brand,
@@ -1106,6 +1260,11 @@ async def generate_client_creative(
                 artifact_ref=str(preview_path),
             )
         )
+        # M-05: attach the A/B set only when >=2 were rendered, so single-generate manifests stay
+        # exactly as before (empty variants list). No variant is selected yet — record_variant_pick
+        # captures the pick. All variants share this creative's tenant + job (locked #2).
+        if variant_count >= 2:
+            manifest.variants = variant_records
 
         if job is None:
             job = await repo.create_job(
@@ -1144,3 +1303,149 @@ async def generate_client_creative(
         raise
 
     return generated_creative_response(to_creative_doc(creative_row))
+
+
+async def generate_client_creative_variants(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    client_id: str,
+    body: GenerateCreativeRequest,
+    job_id: str | None = None,
+    variants: int = _MAX_VARIANTS,
+) -> GeneratedCreative:
+    """M-05 A/B entry point: generate a concept as an A/B variant SET (default 2).
+
+    Thin, named wrapper over generate_client_creative so callers reach variant generation by
+    intent rather than a magic int. Returns the primary (variant 0) creative; the full set —
+    each variant's design lever + per-variant QA verdict — rides on ``manifest.variants`` for the
+    pick UI, and record_variant_pick captures the choice."""
+    return await generate_client_creative(
+        session,
+        principal=principal,
+        client_id=client_id,
+        body=body,
+        job_id=job_id,
+        variants=variants,
+    )
+
+
+def _artifact_within_root(ref: str | None) -> Path | None:
+    """A stored artifact ref is UNTRUSTED (the manifest is editable data, and these bytes get
+    copied into servable creative dirs). Return the resolved path only when it's a regular file
+    contained in the creatives root; otherwise None so the caller drops it — a crafted ref like
+    an absolute system path or a data URI must never be promoted into a served artifact."""
+    if not ref:
+        return None
+    candidate = Path(ref).resolve()
+    if CREATIVE_ARTIFACT_ROOT.resolve() in candidate.parents and candidate.is_file():
+        return candidate
+    return None
+
+
+async def record_variant_pick(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    creative_id: str,
+    variant_id: str,
+) -> GeneratedCreative:
+    """Capture which A/B variant the team picked (M-05 → M-06 learning loop).
+
+    Non-destructive + audited (#8): promotes the chosen variant onto a NEW creative version
+    (actor + timestamp recorded on the row via ``created_by``), leaving the variant-set version
+    intact. Tenant + client scope is enforced through get_scoped_creative (#2). Emits EXACTLY ONE
+    PreferenceSource.PICK signal through the shared _record_signal_best_effort path (the same seam
+    used by edit/rejection/approval) — the winning lever becomes the signal's salient attribute,
+    so this is the pick fuel the taste-ranker consumes. No re-render and no paid call (#7): the
+    chosen variant is already rendered; its artifacts are copied into the new version's dir."""
+    if principal.role not in _TEAM_ROLES:
+        raise HTTPException(status_code=403, detail="Recording a variant pick is a team action")
+
+    scoped = await get_scoped_creative(session, principal=principal, creative_id=creative_id)
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    creative_row, job = scoped
+
+    manifest = CreativeManifest.model_validate(creative_row.manifest)
+    if not manifest.variants:
+        raise HTTPException(status_code=422, detail="Creative has no variant set to pick from")
+    chosen = next((v for v in manifest.variants if v.variant_id == variant_id), None)
+    if chosen is None:
+        raise HTTPException(
+            status_code=422, detail="variant_id not found in this creative's variant set"
+        )
+
+    # Mark the selection on the (new-version) manifest: exactly one variant flagged selected.
+    for variant in manifest.variants:
+        variant.selected = variant.variant_id == chosen.variant_id
+    manifest.variant_selected_id = chosen.variant_id
+
+    new_creative_id = str(uuid4())
+    artifact_dir = creative_artifact_path(new_creative_id, "preview.png").parent
+    artifact_dir.mkdir(parents=True, exist_ok=False)
+
+    try:
+        # Copy (never move — non-destructive) the picked variant's artifacts into the new version's
+        # dir so its preview/svg endpoints resolve; fall back to the existing refs if a source
+        # artifact is missing on disk.
+        promoted_svg = artifact_dir / "creative.svg"
+        promoted_preview = artifact_dir / "preview.png"
+        # Only promote refs that resolve to a real file INSIDE the creatives root; an out-of-root
+        # ref is dropped (never copied, never persisted) rather than trusted (see _artifact_within_root).
+        safe_svg = _artifact_within_root(chosen.svg_ref)
+        safe_preview = _artifact_within_root(chosen.preview_ref)
+        safe_profile = _artifact_within_root(chosen.profile_render_ref)
+        svg_ref: str | None = None
+        preview_ref: str | None = None
+        if safe_svg is not None:
+            await asyncio.to_thread(shutil.copyfile, safe_svg, promoted_svg)
+            svg_ref = str(promoted_svg)
+        if safe_preview is not None:
+            await asyncio.to_thread(shutil.copyfile, safe_preview, promoted_preview)
+            preview_ref = str(promoted_preview)
+
+        _set_rendered_artifacts(
+            manifest,
+            svg_path=Path(svg_ref) if svg_ref else promoted_svg,
+            preview_path=Path(preview_ref) if preview_ref else promoted_preview,
+            profile_render_path=safe_profile,
+            qa_report=QAReport(passed=chosen.qa_passed, failures=list(chosen.qa_failures)),
+        )
+        image_layer = manifest.layer(LayerKind.L1_BASE)
+        if image_layer is not None:
+            image_layer.recipe.params["variant_lever_key"] = chosen.lever_key
+            image_layer.recipe.params["variant_lever_value"] = chosen.lever_value
+
+        new_row = await repo.create_creative_doc(
+            session,
+            tenant_id=principal.tenant_id,
+            id=new_creative_id,
+            job_id=job.id,
+            manifest=manifest.model_dump(mode="json"),
+            parent_id=creative_id,
+            created_by=_actor_dict(principal),
+            revision_note=f"pick variant {chosen.lever}",
+        )
+        await _record_signal_best_effort(
+            session,
+            tenant_id=principal.tenant_id,
+            job=job,
+            doc=new_row,
+            source=PreferenceSource.PICK,
+            actor=_actor(principal),
+            detail=chosen.lever,
+            extra_attributes={
+                "variant_id": chosen.variant_id,
+                "variant_lever_key": chosen.lever_key,
+                "variant_lever_value": chosen.lever_value,
+                "variant_count": str(len(manifest.variants)),
+            },
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        shutil.rmtree(artifact_dir, ignore_errors=True)
+        raise
+
+    return generated_creative_response(to_creative_doc(new_row))
