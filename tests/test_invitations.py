@@ -7,11 +7,23 @@ so an invite is addressed to that email to make the identity-match check pass.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import pytest
+
+from api.core import config
+from api.services.email import EmailResult
 from conftest import superadmin_headers
 from httpx import AsyncClient
 
 # Reuse the Supabase keypair/JWKS fixture verbatim.
 from test_auth_supabase import supabase_env  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def _pin_email_provider_none(monkeypatch) -> None:
+    """Invitation tests must never depend on ambient email configuration."""
+    monkeypatch.setattr(config.get_settings(), "email_provider", "none")
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -45,6 +57,23 @@ async def test_create_returns_pending_invite_and_accept_url(client: AsyncClient)
     assert body["invitation"]["role"] == "designer"
     # The copyable link carries a token to the accept route.
     assert "/invite/accept?token=" in body["accept_url"]
+
+
+async def test_create_emails_the_copyable_accept_link(client: AsyncClient, monkeypatch) -> None:
+    send = AsyncMock(return_value=EmailResult(provider="none", status="recorded"))
+    monkeypatch.setattr("api.routers.invitations.send_email", send)
+
+    _tid, owner = await _tenant_owner(client)
+    resp = await _invite(client, owner, "designer@example.com", role="designer")
+
+    assert resp.status_code == 201, resp.text
+    accept_url = resp.json()["accept_url"]
+    assert "/invite/accept?token=" in accept_url
+    send.assert_awaited_once_with(
+        to="designer@example.com",
+        subject="You're invited to Mimik Suite",
+        body_text=f"You're invited to Mimik Suite.\n\nAccept your invitation:\n{accept_url}",
+    )
 
 
 async def test_list_is_tenant_scoped(client: AsyncClient) -> None:
@@ -112,6 +141,46 @@ async def test_resend_issues_fresh_link(client: AsyncClient) -> None:
     inv = (await _invite(client, owner, "x@example.com")).json()["invitation"]
     resp = await client.post(f"/invitations/{inv['id']}/resend", headers=_auth(owner))
     assert resp.status_code == 200
+    assert "/invite/accept?token=" in resp.json()["accept_url"]
+
+
+async def test_resend_emails_the_fresh_accept_link(client: AsyncClient, monkeypatch) -> None:
+    send = AsyncMock(return_value=EmailResult(provider="none", status="recorded"))
+    monkeypatch.setattr("api.routers.invitations.send_email", send)
+
+    _tid, owner = await _tenant_owner(client)
+    inv = (await _invite(client, owner, "x@example.com")).json()["invitation"]
+    send.reset_mock()
+
+    resp = await client.post(f"/invitations/{inv['id']}/resend", headers=_auth(owner))
+
+    assert resp.status_code == 200
+    accept_url = resp.json()["accept_url"]
+    assert "/invite/accept?token=" in accept_url
+    send.assert_awaited_once_with(
+        to="x@example.com",
+        subject="You're invited to Mimik Suite",
+        body_text=f"You're invited to Mimik Suite.\n\nAccept your invitation:\n{accept_url}",
+    )
+
+
+async def test_smtp_failure_does_not_break_invitation_creation(
+    client: AsyncClient, monkeypatch
+) -> None:
+    settings = config.get_settings()
+    monkeypatch.setattr(settings, "email_provider", "smtp")
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_from", "hello@example.com")
+
+    def fail_send(*args, **kwargs) -> None:
+        raise OSError("SMTP unavailable")
+
+    monkeypatch.setattr("api.services.email._send_smtp", fail_send)
+
+    _tid, owner = await _tenant_owner(client)
+    resp = await _invite(client, owner, "x@example.com")
+
+    assert resp.status_code == 201, resp.text
     assert "/invite/accept?token=" in resp.json()["accept_url"]
 
 

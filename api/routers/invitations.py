@@ -1,10 +1,10 @@
-"""Invitations: invite a colleague/client by email, hand back a copyable signed accept-link,
+"""Invitations: email a colleague/client a signed accept-link, keep it copyable in the response,
 and let the matching Supabase identity accept it to be provisioned a UserAccount.
 
 Additive to the existing auth (admin.py provisions accounts directly; this is the self-serve
-accept path). Email delivery is deferred — the accept-link is returned for the admin to copy.
-Tenant isolation is enforced at the data layer: every read/write is filtered by the caller's
-tenant_id, so one tenant can never see or mutate another's invites (IDOR defence).
+accept path). Email delivery is best-effort, so the link remains usable when email is off or
+fails. Tenant isolation is enforced at the data layer: every read/write is filtered by the
+caller's tenant_id, so one tenant can never see or mutate another's invites (IDOR defence).
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from api.core.supabase_auth import SupabaseAuthError, verify_supabase_jwt
 from api.db import repo
 from api.db.mappers import _utc, to_invitation, to_user_account
 from api.db.session import get_session
+from api.services.email import send_email
 from mimik_contracts import ActorRole, Invitation, InvitationStatus, UserAccount
 
 _bearer = HTTPBearer(auto_error=True)
@@ -89,6 +90,14 @@ def _accept_url(token: str) -> str:
     return f"{base}/invite/accept?token={token}"
 
 
+async def _send_invitation_email(*, email: str, accept_url: str) -> None:
+    await send_email(
+        to=email,
+        subject="You're invited to Mimik Suite",
+        body_text=f"You're invited to Mimik Suite.\n\nAccept your invitation:\n{accept_url}",
+    )
+
+
 def _expiry() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=INVITE_TTL_HOURS)
 
@@ -130,7 +139,9 @@ async def create_invitation(
     token = issue_invite_token(
         invitation_id=row.id, tenant_id=row.tenant_id, email=row.email
     )
-    return InvitationCreated(invitation=to_invitation(row), accept_url=_accept_url(token))
+    accept_url = _accept_url(token)
+    await _send_invitation_email(email=row.email, accept_url=accept_url)
+    return InvitationCreated(invitation=to_invitation(row), accept_url=accept_url)
 
 
 @router.get("", response_model=list[Invitation])
@@ -180,7 +191,9 @@ async def resend_invitation(
     token = issue_invite_token(
         invitation_id=row.id, tenant_id=row.tenant_id, email=row.email
     )
-    return InvitationCreated(invitation=to_invitation(row), accept_url=_accept_url(token))
+    accept_url = _accept_url(token)
+    await _send_invitation_email(email=row.email, accept_url=accept_url)
+    return InvitationCreated(invitation=to_invitation(row), accept_url=accept_url)
 
 
 @router.post("/accept", response_model=UserAccount, status_code=201)

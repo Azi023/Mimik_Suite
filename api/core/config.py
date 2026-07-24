@@ -130,6 +130,17 @@ class Settings(BaseSettings):
     whatsapp_template_lang: str = "en"
     whatsapp_api_base: str = "https://graph.facebook.com/v21.0"  # overridable for tests
 
+    # Email outbound. "none" (default) records the delivery attempt without network access;
+    # "console" logs the full message for development; "smtp" uses STARTTLS when enabled.
+    # SMTP_PASSWORD is a secret — provide it via env only, never commit or log it.
+    email_provider: str = "none"  # none | smtp | console
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""  # SECRET — env only
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+
 
 _settings: Settings | None = None
 
