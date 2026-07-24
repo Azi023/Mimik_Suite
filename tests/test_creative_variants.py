@@ -326,6 +326,288 @@ async def test_single_generate_path_unchanged_no_variants(
     assert manifest.layer(LayerKind.L5_FINISH) is not None
 
 
+async def test_format_variants_reuse_copy_source_and_profile_as_audited_siblings(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_generation(monkeypatch)
+    setup = await _create_setup(client)
+    principal = _team_principal(setup.tenant_id)
+
+    generator, session = await _session()
+    try:
+        original = await creative_generation.generate_client_creative(
+            session,
+            principal=principal,
+            client_id=setup.client_id,
+            body=GenerateCreativeRequest(topic="hydration"),
+        )
+    finally:
+        await generator.aclose()
+
+    render_calls: list[dict[str, object]] = []
+
+    async def capture_render(**kwargs: object) -> tuple[Path, Path, None, QAReport]:
+        render_calls.append(kwargs)
+        artifact_dir = kwargs["artifact_dir"]
+        assert isinstance(artifact_dir, Path)
+        svg_path = artifact_dir / "creative.svg"
+        preview_path = artifact_dir / "preview.png"
+        svg_path.write_text("<svg/>", encoding="utf-8")
+        preview_path.write_bytes(b"preview")
+        return svg_path, preview_path, None, QAReport(passed=True, failures=[])
+
+    monkeypatch.setattr(
+        creative_generation, "_render_creative_artifacts", capture_render
+    )
+
+    generator, session = await _session()
+    try:
+        variants = await creative_generation.generate_format_variants(
+            session,
+            principal=principal,
+            creative_id=original.creative.id,
+            format_keys=["ig_story", "fb_post"],
+        )
+    finally:
+        await generator.aclose()
+
+    assert [item.creative.manifest.format_key for item in variants] == [
+        "ig_story",
+        "fb_post",
+    ]
+    assert [call["format_key"] for call in render_calls] == ["ig_story", "fb_post"]
+    assert all(
+        call["copy_block"] == original.creative.manifest.copy_block
+        for call in render_calls
+    )
+    assert len({str(call["image_path"]) for call in render_calls}) == 1
+
+    generator, session = await _session()
+    try:
+        original_row = await repo.get_creative_doc(
+            session,
+            tenant_id=setup.tenant_id,
+            creative_doc_id=original.creative.id,
+        )
+        assert original_row is not None
+        for generated in variants:
+            row = await repo.get_creative_doc(
+                session,
+                tenant_id=setup.tenant_id,
+                creative_doc_id=generated.creative.id,
+            )
+            assert row is not None
+            assert row.job_id == original_row.job_id
+            assert row.parent_id == original.creative.id
+            assert row.created_by == {"id": "designer-1", "role": "team"}
+            manifest = CreativeManifest.model_validate(row.manifest)
+            image_layer = manifest.layer(LayerKind.L1_BASE)
+            assert image_layer is not None
+            assert image_layer.artifact_ref == (
+                original.creative.manifest.layer(LayerKind.L1_BASE).artifact_ref
+            )
+            assert image_layer.recipe.params["derived_from"] == original.creative.id
+            assert image_layer.recipe.params["format_variant"] is True
+            assert (
+                image_layer.recipe.params["style_profile_id"]
+                == original.creative.manifest.layer(
+                    LayerKind.L1_BASE
+                ).recipe.params["style_profile_id"]
+            )
+    finally:
+        await generator.aclose()
+
+
+async def test_format_variants_are_idor_safe(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    render_calls = _stub_generation(monkeypatch)
+    setup = await _create_setup(client)
+
+    generator, session = await _session()
+    try:
+        original = await creative_generation.generate_client_creative(
+            session,
+            principal=_team_principal(setup.tenant_id),
+            client_id=setup.client_id,
+            body=GenerateCreativeRequest(topic="hydration"),
+        )
+    finally:
+        await generator.aclose()
+
+    renders_before = len(render_calls)
+    generator, session = await _session()
+    try:
+        with pytest.raises(Exception) as exc_info:
+            await creative_generation.generate_format_variants(
+                session,
+                principal=_team_principal("intruder-tenant"),
+                creative_id=original.creative.id,
+                format_keys=["ig_story"],
+            )
+        assert getattr(exc_info.value, "status_code", None) == 404
+    finally:
+        await generator.aclose()
+
+    assert len(render_calls) == renders_before
+
+
+async def test_three_slide_carousel_is_one_consistent_set_with_distinct_copy(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_generation(monkeypatch)
+    setup = await _create_setup(client)
+    principal = _team_principal(setup.tenant_id)
+
+    generator, session = await _session()
+    try:
+        original = await creative_generation.generate_client_creative(
+            session,
+            principal=principal,
+            client_id=setup.client_id,
+            body=GenerateCreativeRequest(topic="hydration"),
+        )
+    finally:
+        await generator.aclose()
+
+    render_calls: list[dict[str, object]] = []
+
+    async def capture_render(**kwargs: object) -> tuple[Path, Path, None, QAReport]:
+        render_calls.append(kwargs)
+        artifact_dir = kwargs["artifact_dir"]
+        assert isinstance(artifact_dir, Path)
+        svg_path = artifact_dir / "creative.svg"
+        preview_path = artifact_dir / "preview.png"
+        svg_path.write_text("<svg/>", encoding="utf-8")
+        preview_path.write_bytes(b"preview")
+        return svg_path, preview_path, None, QAReport(passed=True, failures=[])
+
+    monkeypatch.setattr(
+        creative_generation, "_render_creative_artifacts", capture_render
+    )
+    slide_copy = [
+        CopyBlock(headline="Why hydration matters", subhead="Start with the basics"),
+        CopyBlock(headline="What dry skin signals", subhead="Notice the early signs"),
+        CopyBlock(headline="Build a better routine", cta="Book a consultation"),
+    ]
+
+    generator, session = await _session()
+    try:
+        slides = await creative_generation.generate_carousel_slides(
+            session,
+            principal=principal,
+            creative_id=original.creative.id,
+            copy_blocks=slide_copy,
+        )
+    finally:
+        await generator.aclose()
+
+    assert len(slides) == 3
+    assert [call["format_key"] for call in render_calls] == ["carousel"] * 3
+    assert [call["copy_block"] for call in render_calls] == slide_copy
+    assert len({str(call["image_path"]) for call in render_calls}) == 1
+    assert len({str(call["profile_id"]) for call in render_calls}) == 1
+    assert len({str(call["heading_font_ref"]) for call in render_calls}) == 1
+    assert len({str(call["body_font_ref"]) for call in render_calls}) == 1
+
+    manifests = [item.creative.manifest for item in slides]
+    image_params = [
+        manifest.layer(LayerKind.L1_BASE).recipe.params for manifest in manifests
+    ]
+    set_ids = {str(params["carousel_set_id"]) for params in image_params}
+    assert len(set_ids) == 1
+    assert [params["carousel_slide_index"] for params in image_params] == [1, 2, 3]
+    assert all(params["carousel_slide_count"] == 3 for params in image_params)
+    assert all(
+        params["carousel_system"] == image_params[0]["carousel_system"]
+        for params in image_params
+    )
+    assert image_params[0]["carousel_system"]["width"] == 1080
+    assert image_params[0]["carousel_system"]["height"] == 1350
+    assert [manifest.copy_block for manifest in manifests] == slide_copy
+    assert all(manifest.format_key == "carousel" for manifest in manifests)
+    assert all(
+        Path(manifest.layer(LayerKind.L5_FINISH).recipe.params["svg_ref"]).is_file()
+        and Path(
+            manifest.layer(LayerKind.L5_FINISH).recipe.params["preview_ref"]
+        ).is_file()
+        for manifest in manifests
+    )
+
+
+async def test_carousel_freezes_copy_driven_nikah_archetype_across_slides(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_generation(monkeypatch)
+    setup = await _create_setup(
+        client,
+        tenant_slug="nikah-carousel",
+        brand_slug="simply-nikah",
+        industry="matrimonial",
+    )
+    principal = _team_principal(setup.tenant_id)
+
+    generator, session = await _session()
+    try:
+        original = await creative_generation.generate_client_creative(
+            session,
+            principal=principal,
+            client_id=setup.client_id,
+            body=GenerateCreativeRequest(topic="trust"),
+        )
+    finally:
+        await generator.aclose()
+
+    render_params: list[dict[str, object]] = []
+
+    async def capture_render(**kwargs: object) -> tuple[Path, Path, None, QAReport]:
+        render_params.append(dict(kwargs["render_params"]))
+        artifact_dir = kwargs["artifact_dir"]
+        assert isinstance(artifact_dir, Path)
+        svg_path = artifact_dir / "creative.svg"
+        preview_path = artifact_dir / "preview.png"
+        svg_path.write_text("<svg/>", encoding="utf-8")
+        preview_path.write_bytes(b"preview")
+        return svg_path, preview_path, None, QAReport(passed=True, failures=[])
+
+    monkeypatch.setattr(
+        creative_generation, "_render_creative_artifacts", capture_render
+    )
+
+    generator, session = await _session()
+    try:
+        await creative_generation.generate_carousel_slides(
+            session,
+            principal=principal,
+            creative_id=original.creative.id,
+            copy_blocks=[
+                CopyBlock(headline="A gentle path to marriage"),
+                CopyBlock(headline="Protect your privacy"),
+                CopyBlock(headline="Meet with clear intention"),
+            ],
+        )
+    finally:
+        await generator.aclose()
+
+    assert [params["nikah_archetype"] for params in render_params] == [
+        "protection_symbol_hero",
+        "protection_symbol_hero",
+        "protection_symbol_hero",
+    ]
+
+
 async def _list_signals(*, tenant_id: str, client_id: str):
     generator, session = await _session()
     try:

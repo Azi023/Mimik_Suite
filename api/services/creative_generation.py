@@ -1759,6 +1759,248 @@ async def generate_client_creative_variants(
     )
 
 
+@dataclass(frozen=True)
+class _DerivedRender:
+    format_key: str
+    copy_block: CopyBlock
+    params: dict[str, object]
+    revision_note: str
+
+
+async def _render_derived_creatives(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    creative_id: str,
+    renders: list[_DerivedRender],
+) -> list[GeneratedCreative]:
+    """Render append-only siblings from one scoped creative and its already-sourced image."""
+    if principal.role not in _TEAM_ROLES:
+        raise HTTPException(status_code=403, detail="Creative generation is a team action")
+    scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    creative_row, job = scoped
+    if any(render.format_key not in PRESETS for render in renders):
+        raise HTTPException(status_code=422, detail="Unknown creative format")
+
+    source_manifest = CreativeManifest.model_validate(creative_row.manifest)
+    source_image_layer = source_manifest.layer(LayerKind.L1_BASE)
+    if (
+        source_manifest.copy_block is None
+        or source_image_layer is None
+        or source_image_layer.artifact_ref is None
+    ):
+        raise HTTPException(status_code=422, detail="Creative is not renderable")
+    source_image_path = _artifact_within_root(source_image_layer.artifact_ref)
+    if source_image_path is None:
+        raise HTTPException(status_code=422, detail="Creative source image is unavailable")
+
+    brand_row = await repo.get_brand(
+        session,
+        tenant_id=principal.tenant_id,
+        brand_id=job.brand_id,
+    )
+    if brand_row is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    brand = to_brand(brand_row)
+    source_params = dict(source_image_layer.recipe.params)
+    profile_id = str(source_params.get("style_profile_id") or "generic")
+    source_kind = str(source_params.get("image_source") or "brand_placeholder")
+    brand_font_ref = await _resolve_brand_font(
+        session,
+        tenant_id=principal.tenant_id,
+        brand=brand,
+    )
+
+    artifact_dirs: list[Path] = []
+    created_rows: list[CreativeDocRow] = []
+    try:
+        for render in renders:
+            derived_id = str(uuid4())
+            artifact_dir = creative_artifact_path(derived_id, "preview.png").parent
+            artifact_dir.mkdir(parents=True, exist_ok=False)
+            artifact_dirs.append(artifact_dir)
+
+            params = {
+                key: value
+                for key, value in source_params.items()
+                if key
+                not in {
+                    "carousel_set_id",
+                    "carousel_slide_index",
+                    "carousel_slide_count",
+                    "carousel_system",
+                    "derived_from",
+                    "format_variant",
+                }
+            }
+            params.update(render.params)
+            svg_path, preview_path, profile_render_path, qa_report = (
+                await _render_creative_artifacts(
+                    brand=brand,
+                    profile_id=profile_id,
+                    copy_block=render.copy_block,
+                    format_key=render.format_key,
+                    image_path=source_image_path,
+                    artifact_dir=artifact_dir,
+                    render_params=params,
+                    source_kind=source_kind,
+                    heading_font_ref=brand_font_ref,
+                    body_font_ref=brand_font_ref,
+                )
+            )
+
+            manifest = source_manifest.model_copy(deep=True)
+            manifest.format_key = render.format_key
+            manifest.copy_block = render.copy_block.model_copy(deep=True)
+            manifest.variants = []
+            manifest.variant_selected_id = None
+            image_layer = manifest.layer(LayerKind.L1_BASE)
+            assert image_layer is not None
+            image_layer.recipe.params = params
+            _set_rendered_artifacts(
+                manifest,
+                svg_path=svg_path,
+                preview_path=preview_path,
+                profile_render_path=profile_render_path,
+                qa_report=qa_report,
+            )
+            created_rows.append(
+                await repo.create_creative_doc(
+                    session,
+                    tenant_id=principal.tenant_id,
+                    id=derived_id,
+                    job_id=job.id,
+                    manifest=manifest.model_dump(mode="json"),
+                    parent_id=creative_id,
+                    created_by=_actor_dict(principal),
+                    revision_note=render.revision_note,
+                )
+            )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        for artifact_dir in artifact_dirs:
+            shutil.rmtree(artifact_dir, ignore_errors=True)
+        raise
+
+    return [
+        generated_creative_response(to_creative_doc(row)) for row in created_rows
+    ]
+
+
+async def generate_format_variants(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    creative_id: str,
+    format_keys: list[str],
+) -> list[GeneratedCreative]:
+    """Re-compose one scoped concept into append-only sibling creatives by format."""
+    scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    source_manifest = CreativeManifest.model_validate(scoped[0].manifest)
+    if source_manifest.copy_block is None:
+        raise HTTPException(status_code=422, detail="Creative has no copy block")
+    renders = [
+        _DerivedRender(
+            format_key=format_key,
+            copy_block=source_manifest.copy_block,
+            params={
+                "derived_from": creative_id,
+                "format_variant": True,
+            },
+            revision_note=f"format variant {format_key} from {creative_id}",
+        )
+        for format_key in format_keys
+    ]
+    return await _render_derived_creatives(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+        renders=renders,
+    )
+
+
+async def generate_carousel_slides(
+    session: AsyncSession,
+    *,
+    principal: Principal,
+    creative_id: str,
+    copy_blocks: list[CopyBlock],
+) -> list[GeneratedCreative]:
+    """Render one or more 4:5 slides as an audited sibling set with one visual system."""
+    if not copy_blocks:
+        raise HTTPException(status_code=422, detail="Carousel needs at least one slide")
+    scoped = await get_scoped_creative(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+    )
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    source_manifest = CreativeManifest.model_validate(scoped[0].manifest)
+    source_image_layer = source_manifest.layer(LayerKind.L1_BASE)
+    if source_image_layer is None or source_manifest.copy_block is None:
+        raise HTTPException(status_code=422, detail="Creative is not renderable")
+    source_params = source_image_layer.recipe.params
+    carousel_set_id = str(uuid4())
+    preset = PRESETS["carousel"]
+    profile_id = str(source_params.get("style_profile_id") or "generic")
+    fixed_render_params: dict[str, object] = {}
+    if profile_id == "simply-nikah":
+        fixed_render_params["nikah_archetype"] = str(
+            source_params.get("nikah_archetype")
+            or _suggest_nikah(source_manifest.copy_block)[0]
+        )
+    system = {
+        "format_key": preset.key,
+        "width": preset.width,
+        "height": preset.height,
+        "safe_zone": preset.safe_zone.model_dump(mode="json"),
+        "template_key": source_manifest.template_key or "centered_hero",
+        "style_profile_id": profile_id,
+        "text_alignment": str(source_params.get("text_alignment") or "left"),
+        **fixed_render_params,
+    }
+    slide_count = len(copy_blocks)
+    renders = [
+        _DerivedRender(
+            format_key="carousel",
+            copy_block=copy_block,
+            params={
+                **fixed_render_params,
+                "derived_from": creative_id,
+                "carousel_set_id": carousel_set_id,
+                "carousel_slide_index": index,
+                "carousel_slide_count": slide_count,
+                "carousel_system": system,
+            },
+            revision_note=(
+                f"carousel {carousel_set_id} slide {index}/{slide_count} "
+                f"from {creative_id}"
+            ),
+        )
+        for index, copy_block in enumerate(copy_blocks, start=1)
+    ]
+    return await _render_derived_creatives(
+        session,
+        principal=principal,
+        creative_id=creative_id,
+        renders=renders,
+    )
+
+
 def _artifact_within_root(ref: str | None) -> Path | None:
     """A stored artifact ref is UNTRUSTED (the manifest is editable data, and these bytes get
     copied into servable creative dirs). Return the resolved path only when it's a regular file
