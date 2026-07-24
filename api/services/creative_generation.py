@@ -20,9 +20,10 @@ from api.core.auth import Principal, is_client_in_scope
 from api.core.capabilities import Capability, has_capability
 from api.core.config import get_settings
 from api.db import repo
-from api.db.mappers import to_brand, to_creative_doc
+from api.db.mappers import to_brand, to_creative_doc, to_preference_signal
 from api.db.models import CreativeDocRow, JobRow
 from api.services.edit_signals import feedback_from_edit, record_signal
+from api.services.preferences import Variant, rank_variants
 from creative import art_direction
 from creative.adapters import (
     ImageGenerationFailed,
@@ -54,6 +55,7 @@ from mimik_contracts import (
     LayerKind,
     LayerRecipe,
     PRESETS,
+    PreferenceSignal,
     PreferenceSource,
 )
 
@@ -386,6 +388,77 @@ def _plan_variants(profile_id: str, count: int) -> list[_VariantLever]:
             ),
         ]
     return levers[:count]
+
+
+async def _client_preference_signals(
+    session: AsyncSession, *, tenant_id: str, client_id: str
+) -> list[PreferenceSignal]:
+    """Load THIS client's accumulated preference signals for the taste-ranker (M-06).
+
+    Client-scoped at the DATA layer (locked #2/#3): list_preference_signals filters by tenant_id
+    AND client_id, so client B's signals can never leak into client A's generation."""
+    rows = await repo.list_preference_signals(
+        session, tenant_id=tenant_id, client_id=client_id
+    )
+    return [to_preference_signal(row) for row in rows]
+
+
+def _levers_as_ranking_variants(levers: list[_VariantLever]) -> list[Variant]:
+    """Present each lever to the taste-ranker with the SAME attribute keys a PICK signal carries
+    (variant_lever_key / variant_lever_value), so a client's revealed picks score directly against
+    future levers. Id is the lever's position so the ranked result maps straight back."""
+    return [
+        Variant(
+            id=str(index),
+            attributes={
+                "variant_lever_key": lever.key,
+                "variant_lever_value": lever.value,
+            },
+        )
+        for index, lever in enumerate(levers)
+    ]
+
+
+def _order_levers_by_preference(
+    levers: list[_VariantLever], signals: list[PreferenceSignal]
+) -> list[_VariantLever]:
+    """M-06: order the A/B levers so the client's predicted-preferred lever becomes variant 0 (the
+    one shown first / promoted as the active creative).
+
+    Delegates to the taste-ranker (rank_variants) against THIS client's accumulated signals — it
+    never reimplements ranking. Cold-start guard: below the ranker's signal threshold the ranker
+    is a passthrough, and even when active a lever that no signal touches scores 0 and Python's
+    stable sort keeps its input position — so a thin or lever-irrelevant history preserves the
+    deterministic _plan_variants order (no bias from nothing)."""
+    if len(levers) < 2:
+        return levers
+    ranking = rank_variants(signals, _levers_as_ranking_variants(levers))
+    if not ranking.ranker_active:
+        return levers
+    return [levers[int(rv.id)] for rv in ranking.ranked]
+
+
+def _bias_default_lever(
+    profile_id: str, base_params: dict, signals: list[PreferenceSignal]
+) -> None:
+    """M-06: nudge the SINGLE-generate default lever toward the client's learned preference.
+
+    Additive + cold-start-guarded: consult the SAME lever family and ranker the A/B path uses;
+    only when the ranker is active AND the levers show a genuine preference differential (the top
+    lever strictly outscores the bottom) do we inject the winning lever's param override. Otherwise
+    base_params is untouched and the copy-driven default stands (no bias from nothing). Never
+    overrides a param already set explicitly upstream."""
+    candidates = _plan_variants(profile_id, _MAX_VARIANTS)
+    if len(candidates) < 2:
+        return
+    ranking = rank_variants(signals, _levers_as_ranking_variants(candidates))
+    if not ranking.ranker_active or not ranking.ranked:
+        return
+    if ranking.ranked[0].score <= ranking.ranked[-1].score:
+        return
+    winner = candidates[int(ranking.ranked[0].id)]
+    for key, value in winner.params.items():
+        base_params.setdefault(key, value)
 
 
 def _suggest_nikah(copy_block: CopyBlock) -> tuple[str, str | None, str]:
@@ -1207,10 +1280,23 @@ async def generate_client_creative(
             "text_region": text_region,
         }
 
+        # M-06: consult THIS client's preference profile to steer the free design lever(s). Loaded
+        # once, client-scoped at the data layer, so client B never influences client A.
+        signals = await _client_preference_signals(
+            session, tenant_id=principal.tenant_id, client_id=client_id
+        )
+
         # M-05: one source image, N variant renders differing only by a free design lever. For
         # variants==1 the plan is a single "natural" render, so this is byte-identical to before.
         variant_count = max(1, min(variants, _MAX_VARIANTS))
         levers = _plan_variants(profile_id, variant_count)
+        if variant_count >= 2:
+            # M-06: order the A/B set so the predicted-preferred lever is variant 0 (shown first);
+            # cold-start falls back to the deterministic _plan_variants order.
+            levers = _order_levers_by_preference(levers, signals)
+        else:
+            # M-06: bias the single-generate default lever toward the learned preference (guarded).
+            _bias_default_lever(profile_id, base_l1_params, signals)
         primary, variant_records = await _render_variants(
             brand=brand,
             profile_id=profile_id,
