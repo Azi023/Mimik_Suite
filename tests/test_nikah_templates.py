@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import struct
 import zlib
+from xml.etree import ElementTree
 
 import pytest
 
@@ -15,6 +17,7 @@ from creative.render.nikah_templates import (
     render_nikah,
 )
 
+_SVG_NS = "http://www.w3.org/2000/svg"
 _LAYER_IDS = (
     "layer-background",
     "layer-motif",
@@ -44,6 +47,11 @@ _PROTECTION_COPY = {
     "headline": "Protected from the very first hello",
     "sub": "Your privacy is guarded at every step.",
     "cta": "Learn how",
+}
+_AYAH_COPY = {
+    "ayah": "وَمِنْ آيَاتِهِ أَنْ خَلَقَ لَكُم مِّنْ أَنفُسِكُمْ أَزْوَاجًا",
+    "translation": "And among His signs is that He created for you spouses from among yourselves.",
+    "cta": "Begin with intention",
 }
 
 
@@ -89,6 +97,23 @@ async def test_protection_symbol_hero_renders_nonblank_png(format_key: str, widt
     assert _idat_distinct_bytes(png) > 50
 
 
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+@pytest.mark.parametrize("format_key,width,height", _FORMATS)
+async def test_ayah_translation_renders_nonblank_png(
+    format_key: str,
+    width: int,
+    height: int,
+) -> None:
+    png = await render_nikah(
+        "ayah_translation",
+        copy=_AYAH_COPY,
+        format_key=format_key,
+        direction="rtl",
+    )
+    assert png_size(png) == (width, height)
+    assert _idat_distinct_bytes(png) > 50
+
+
 # ---------------------------------------------------------------------------------------------
 # Layered SVG contract (no browser needed)
 # ---------------------------------------------------------------------------------------------
@@ -107,6 +132,90 @@ def test_svg_emits_the_nine_named_layers_for_both_archetypes() -> None:
         assert svg.count('inkscape:groupmode="layer"') == 9
         assert svg.count('data-editable="true"') == 9
         assert svg.count("data-bbox=") == 9
+
+
+def test_nikah_ltr_default_matches_frozen_pre_rtl_serialization() -> None:
+    default_svg = build_nikah_svg(
+        "highlighted_word_hero",
+        copy=_HIGHLIGHT_COPY,
+        format_key="carousel",
+    )
+
+    assert default_svg == build_nikah_svg(
+        "highlighted_word_hero",
+        copy=_HIGHLIGHT_COPY,
+        format_key="carousel",
+        direction="ltr",
+    )
+    assert hashlib.sha256(default_svg.encode()).hexdigest() == (
+        "32f8c826e6a7e13bf6b90ba801fbfdcc8548094221163e259082ff16959d805f"
+    )
+
+
+def test_ayah_translation_uses_rtl_amiri_panel_and_ltr_translation() -> None:
+    svg = build_nikah_svg(
+        "ayah_translation",
+        copy=_AYAH_COPY,
+        format_key="carousel",
+        direction="rtl",
+    )
+
+    assert 'data-role="ayah-panel"' in svg
+    assert _AYAH_COPY["ayah"] in svg
+    assert _AYAH_COPY["translation"] in svg
+    assert "MimikScriptArabic" in svg
+    assert "@font-face" in svg
+    headline_layer = svg.split('id="layer-headline"', 1)[1].split("</g>", 1)[0]
+    support_layer = svg.split('id="layer-support"', 1)[1].split("</g>", 1)[0]
+    assert 'direction="rtl"' in headline_layer
+    assert 'text-anchor="end"' in headline_layer
+    assert 'direction="ltr"' in support_layer
+    assert 'text-anchor="middle"' in support_layer
+    root = ElementTree.fromstring(svg)
+    translation_lines = root.findall(
+        f"{{{_SVG_NS}}}g[@id='layer-support']/{{{_SVG_NS}}}text"
+    )
+    assert translation_lines
+    assert {line.attrib["x"] for line in translation_lines} == {"540"}
+    assert modesty_report(svg, source_kind="generated_vector") == []
+
+
+def test_rtl_nikah_right_aligns_arabic_headline_support_and_cta() -> None:
+    svg = build_nikah_svg(
+        "protection_symbol_hero",
+        copy={
+            "headline": "بداية تحفظ الخصوصية",
+            "sub": "تعارف هادف تقوده القيم",
+            "cta": "ابدأ الآن",
+        },
+        format_key="ig_post",
+        direction="rtl",
+    )
+    root = ElementTree.fromstring(svg)
+
+    for layer_id in ("layer-headline", "layer-support", "layer-cta"):
+        texts = root.findall(f"{{{_SVG_NS}}}g[@id='{layer_id}']//{{{_SVG_NS}}}text")
+        assert texts
+        for text in texts:
+            assert text.attrib["direction"] == "rtl"
+            assert text.attrib["text-anchor"] == "end"
+            assert "MimikScriptArabic" in text.attrib["font-family"]
+
+
+def test_ayah_translation_requires_arabic_ayah_and_ltr_translation() -> None:
+    with pytest.raises(ValueError, match="Arabic-script 'ayah'"):
+        build_nikah_svg(
+            "ayah_translation",
+            copy={"ayah": "A sign of mercy", "translation": "A sign of mercy"},
+            format_key="ig_post",
+        )
+
+    with pytest.raises(ValueError, match="Latin-script 'translation'"):
+        build_nikah_svg(
+            "ayah_translation",
+            copy={"ayah": _AYAH_COPY["ayah"], "translation": "مودة ورحمة"},
+            format_key="ig_post",
+        )
 
 
 def test_svg_dimensions_match_each_format() -> None:
@@ -145,6 +254,7 @@ def test_modesty_passes_for_generated_vector() -> None:
     for archetype, copy, hero in (
         ("highlighted_word_hero", _HIGHLIGHT_COPY, "hands_heart"),
         ("protection_symbol_hero", _PROTECTION_COPY, "heart_shield"),
+        ("ayah_translation", _AYAH_COPY, "crescent"),
     ):
         svg = build_nikah_svg(archetype, copy=copy, format_key="carousel", hero_symbol=hero)
         assert modesty_report(svg, source_kind="generated_vector") == []

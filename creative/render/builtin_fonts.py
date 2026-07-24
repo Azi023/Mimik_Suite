@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-FontCategory = Literal["sans-serif", "serif", "display"]
+FontCategory = Literal["sans-serif", "serif", "display", "arabic"]
 
 _BUILTIN_ROOT = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "builtin"
 
@@ -42,8 +42,8 @@ def _font(
     )
 
 
-# Google Fonts currently publishes static Regular/Bold files for Poppins and Lato.
-# The other six families expose one upright variable TTF; that file supplies both paths.
+# Google Fonts publishes static Regular/Bold files for Poppins, Lato, and Amiri.
+# The other six Latin families expose one upright variable TTF; that file supplies both paths.
 _BUILTIN_FONTS: tuple[BuiltinFont, ...] = (
     _font(
         key="poppins",
@@ -103,6 +103,14 @@ _BUILTIN_FONTS: tuple[BuiltinFont, ...] = (
         preview_text="Elegant details make the difference.",
         regular_filename="Raleway[wght].ttf",
     ),
+    _font(
+        key="amiri",
+        family="Amiri",
+        category="arabic",
+        preview_text="وَمِنْ آيَاتِهِ أَنْ خَلَقَ لَكُم",
+        regular_filename="Amiri-Regular.ttf",
+        bold_filename="Amiri-Bold.ttf",
+    ),
 )
 
 _BUILTIN_BY_KEY = {font.key: font for font in _BUILTIN_FONTS}
@@ -116,3 +124,21 @@ def list_builtin_fonts() -> list[BuiltinFont]:
 def get_builtin_font(key: str) -> BuiltinFont | None:
     """Resolve a built-in family by its stable slug."""
     return _BUILTIN_BY_KEY.get(key)
+
+
+def contains_arabic(text: str | None) -> bool:
+    """Return whether text contains a character from the Arabic Unicode blocks."""
+    return bool(text) and any(
+        "\u0600" <= character <= "\u06ff"
+        or "\u0750" <= character <= "\u077f"
+        or "\u08a0" <= character <= "\u08ff"
+        for character in text
+    )
+
+
+def builtin_arabic_font_path() -> Path:
+    """Return the repository-bundled Amiri Regular path, failing loud if absent."""
+    amiri = get_builtin_font("amiri")
+    if amiri is None or not amiri.regular_path.is_file():
+        raise RuntimeError("Built-in Amiri font is unavailable")
+    return amiri.regular_path

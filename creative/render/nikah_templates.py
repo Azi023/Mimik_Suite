@@ -1,6 +1,6 @@
 """Simply Nikah render family — faceless flat-vector heroes composed from engine primitives.
 
-Mirrors ``glo2go_templates`` in shape (a ``NikahTemplateContext``, two archetype classes, an HTML
+Mirrors ``glo2go_templates`` in shape (a ``NikahTemplateContext``, archetype classes, an HTML
 builder for structural tests, an async ``render_nikah`` returning PNG bytes) but composes ONLY
 engine SVG vectors — Simply Nikah never takes a photograph. The standalone SVG emitter matches
 ``creative/export/svg.py``'s named-layer contract so the canvas editor and PSD export consume SN
@@ -30,6 +30,7 @@ from mimik_contracts import get_format
 from creative.export.svg import rasterize_svg_to_png  # reuse the established rasterizer
 from creative.knowledge.feedback import load_rules
 from creative.render import nikah_primitives as prim
+from creative.render.builtin_fonts import builtin_arabic_font_path, contains_arabic
 from creative.render.fonts import embed_font_face, font_family_stack
 from creative.render.templates import (
     LayoutTemplate,
@@ -45,6 +46,7 @@ _SYSTEM_FONT = prim._SYSTEM_FONT
 # brand font renders identically across every code-composited path (never client text; see fonts.py).
 _HEADING_FONT_FAMILY = "MimikBrandHeading"
 _BODY_FONT_FAMILY = "MimikBrandBody"
+_SCRIPT_FONT_FAMILY = "MimikScriptArabic"
 
 # Palette fallbacks (shared with the primitive module — all profile hexes are approx=True).
 _PINK_FALLBACK = prim._PINK_FALLBACK
@@ -89,7 +91,7 @@ _BANNED_PHOTO_KEYS = ("image_ref", "image", "photo", "photo_path", "image_path")
 
 
 class NikahTemplateContext(TemplateContext):
-    """Simply Nikah copy + composition controls shared by both v1 archetypes.
+    """Simply Nikah copy + composition controls shared by its launch archetypes.
 
     ``image_ref`` stays None — SN composes pure engine vectors (GENERATED_VECTOR). A non-None
     ``image_ref`` MUST raise, guarding the never-real-photos rule.
@@ -303,6 +305,19 @@ _ARCHETYPE_PARAMS = {
         "ground_gradient_default": False,
         "highlight_required": False,
     },
+    "ayah_translation": {
+        "headline_font_frac": 0.060,
+        "headline_weight": 500,
+        "headline_max_lines": 3,
+        "support_font_frac": 0.02963,
+        "support_margin_frac": 0.035,
+        "support_opacity": 0.88,
+        "hero_frac": 0.80,
+        "hero_center_frac": 0.38,
+        "glow_opacity": 0.38,
+        "ground_gradient_default": True,
+        "highlight_required": False,
+    },
 }
 
 
@@ -334,14 +349,27 @@ def _compose(
     rule_ids = " ".join(rule.id for rule in load_rules(_NIKAH_PROFILE_ID))
     if ground_gradient is None:
         ground_gradient = bool(params["ground_gradient_default"])
+    is_ayah = archetype == "ayah_translation"
 
     # --- copy ---------------------------------------------------------------------------------
-    headline = _copy_value(copy, "headline", required=True)
+    headline = _copy_value(copy, "ayah", "headline", required=True) if is_ayah else _copy_value(
+        copy,
+        "headline",
+        required=True,
+    )
     assert headline is not None
     highlight = _copy_value(copy, "highlight", "highlight_word")
     if params["highlight_required"] and highlight is None:
         raise ValueError(f"{archetype!r} requires a 'highlight' copy key")
-    support = _copy_value(copy, "sub", "subhead")
+    support = (
+        _copy_value(copy, "translation", "sub", "subhead", required=True)
+        if is_ayah
+        else _copy_value(copy, "sub", "subhead")
+    )
+    if is_ayah and not contains_arabic(headline):
+        raise ValueError("'ayah_translation' requires Arabic-script 'ayah' copy")
+    if is_ayah and not _contains_latin(support):
+        raise ValueError("'ayah_translation' requires Latin-script 'translation' copy")
     cta_label = _copy_value(copy, "cta")
 
     # --- wordmark -----------------------------------------------------------------------------
@@ -355,10 +383,21 @@ def _compose(
     head_font = round(params["headline_font_frac"] * w)
     head_weight = int(params["headline_weight"])
     head_lh = round(head_font * 1.08)
-    head_width = round(w * 0.778)
-    head_x0 = round((w - head_width) / 2)
-    head_cx = round(w / 2)
-    head_top = round(st + 0.115 * h)
+    if is_ayah:
+        panel_x = round(w * 0.10)
+        panel_y = round(st + 0.14 * h)
+        panel_w = round(w * 0.80)
+        panel_h = round(min(0.30 * h, 0.52 * w))
+        panel_padding = round(w * 0.065)
+        head_width = panel_w - 2 * panel_padding
+        head_x0 = panel_x + panel_padding
+        head_cx = panel_x + panel_w - panel_padding
+        head_top = panel_y + round(panel_h * 0.15)
+    else:
+        head_width = round(w * 0.778)
+        head_x0 = round((w - head_width) / 2)
+        head_cx = round(w / 2)
+        head_top = round(st + 0.115 * h)
     max_chars = max(1, int(head_width / (head_font * prim._HEAVY_GLYPH_FACTOR)))
 
     # Split the headline around the (case-insensitive) highlight occurrence. v1 stacks the boxed
@@ -385,7 +424,16 @@ def _compose(
         for line in _wrap(text, max_chars, params["headline_max_lines"]):
             baseline = y + head_font
             headline_lines.append(
-                _TextLine(line, head_cx, baseline, head_font, head_weight, palette["plum"], 1.0, "middle")
+                _TextLine(
+                    line,
+                    head_cx,
+                    baseline,
+                    head_font,
+                    head_weight,
+                    palette["plum"],
+                    1.0,
+                    "end" if is_ayah else "middle",
+                )
             )
             y += head_lh
 
@@ -416,17 +464,22 @@ def _compose(
     support_font = round(params["support_font_frac"] * w)
     support_lh = round(support_font * 1.45)
     support_margin = round(params["support_margin_frac"] * w)
-    support_top = headline_block_bottom + support_margin
+    support_top = (
+        panel_y + panel_h + round(0.045 * h)
+        if is_ayah
+        else headline_block_bottom + support_margin
+    )
     support_lines: list[_TextLine] = []
     if support:
         sup_chars = max(1, int(head_width / (support_font * 0.52)))
         sy = support_top
+        support_x = round(w / 2) if is_ayah else head_cx
         for line in _wrap(support, sup_chars, 2):
             baseline = sy + support_font
             support_lines.append(
                 _TextLine(
                     line,
-                    head_cx,
+                    support_x,
                     baseline,
                     support_font,
                     430,
@@ -454,17 +507,45 @@ def _compose(
         cta_bbox = (round(w / 2), cta_top, 0, 0)
 
     # --- hero + glow --------------------------------------------------------------------------
-    hero_cx = round(w / 2)
-    hero_cy = round(st + params["hero_center_frac"] * (h - st - sb))
-    hero_frac_box = params["hero_frac"] * w
-    free_gap = cta_top - support_block_bottom
-    hero_box = round(min(hero_frac_box, 0.85 * free_gap)) if free_gap > 0 else round(hero_frac_box)
-    hero_box = max(hero_box, round(hero_frac_box * 0.5))  # never collapse the hero
-    half = hero_box / 2
-    glow_rx = round(1.35 * half)
-    glow_ry = round(1.20 * half)
-    hero_bbox = (round(hero_cx - half), round(hero_cy - half), hero_box, hero_box)
-    glow_bbox = (hero_cx - glow_rx, hero_cy - glow_ry, 2 * glow_rx, 2 * glow_ry)
+    if is_ayah:
+        hero_cx = round(w / 2)
+        hero_cy = panel_y + round(panel_h / 2)
+        hero_box = panel_w
+        glow_rx = round(panel_w * 0.52)
+        glow_ry = round(panel_h * 0.62)
+        hero_bbox = (panel_x, panel_y, panel_w, panel_h)
+        glow_bbox = (
+            hero_cx - glow_rx,
+            hero_cy - glow_ry,
+            2 * glow_rx,
+            2 * glow_ry,
+        )
+    else:
+        hero_cx = round(w / 2)
+        hero_cy = round(st + params["hero_center_frac"] * (h - st - sb))
+        hero_frac_box = params["hero_frac"] * w
+        free_gap = cta_top - support_block_bottom
+        hero_box = (
+            round(min(hero_frac_box, 0.85 * free_gap))
+            if free_gap > 0
+            else round(hero_frac_box)
+        )
+        hero_box = max(hero_box, round(hero_frac_box * 0.5))
+        half = hero_box / 2
+        glow_rx = round(1.35 * half)
+        glow_ry = round(1.20 * half)
+        hero_bbox = (
+            round(hero_cx - half),
+            round(hero_cy - half),
+            hero_box,
+            hero_box,
+        )
+        glow_bbox = (
+            hero_cx - glow_rx,
+            hero_cy - glow_ry,
+            2 * glow_rx,
+            2 * glow_ry,
+        )
 
     return _NikahComposition(
         archetype=archetype,
@@ -548,6 +629,20 @@ def _embed_fragment(layer: ElementTree.Element, fragment: str) -> None:
 def _render_hero_fragment(comp: _NikahComposition) -> str:
     """Dispatch the hero symbol to the primitive vocabulary; returns a single-rooted <g>."""
     p = comp.palette
+    if comp.archetype == "ayah_translation":
+        x, y, width, height = comp.hero_bbox
+        inset = max(10, round(width * 0.018))
+        return (
+            '<g data-role="ayah-panel">'
+            f'<rect x="{x}" y="{y}" width="{width}" height="{height}" rx="34" '
+            f'fill="{p["blush"]}" fill-opacity="0.56" stroke="{p["lilac"]}" '
+            'stroke-width="3"/>'
+            f'<rect x="{x + inset}" y="{y + inset}" '
+            f'width="{width - 2 * inset}" height="{height - 2 * inset}" rx="26" '
+            'fill="none" '
+            f'stroke="{p["plum"]}" stroke-opacity="0.12" stroke-width="2"/>'
+            "</g>"
+        )
     cx, cy, box = comp.hero_cx, comp.hero_cy, comp.hero_box
     half = box / 2
     symbol = comp.hero_symbol
@@ -595,6 +690,12 @@ def _ground_gradient_fragment(comp: _NikahComposition) -> str:
     )
 
 
+def _contains_latin(text: str | None) -> bool:
+    return bool(text) and any(
+        "\u0041" <= character <= "\u024f" for character in text
+    )
+
+
 def build_nikah_svg(
     archetype: str,
     *,
@@ -606,6 +707,8 @@ def build_nikah_svg(
     layer_overrides: Mapping[str, object] | None = None,
     heading_font_ref: str | None = None,
     body_font_ref: str | None = None,
+    direction: str = "ltr",
+    script_font_ref: str | None = None,
 ) -> str:
     """Standalone layered SVG matching svg.py's named-layer contract.
 
@@ -618,7 +721,14 @@ def build_nikah_svg(
     note): each font is embedded as an ``@font-face`` in the SVG ``<style>`` and applied to the
     headline + highlight word (heading font) and the support line + CTA (body font). When None,
     the render is unchanged — system font, byte-identical to before.
+
+    ``direction="rtl"`` right-aligns Arabic-bearing text and embeds ``script_font_ref``. The
+    Ayah + Translation archetype always renders its ayah RTL with bundled Amiri by default while
+    keeping the translation and CTA LTR.
     """
+    if direction not in {"ltr", "rtl"}:
+        raise ValueError("Simply Nikah text direction must be 'ltr' or 'rtl'")
+
     comp = _compose(
         archetype,
         copy=copy,
@@ -633,10 +743,22 @@ def build_nikah_svg(
     # system font stack, so the un-branded render is byte-identical to today.
     heading_font = embed_font_face(heading_font_ref, family=_HEADING_FONT_FAMILY) if heading_font_ref else None
     body_font = embed_font_face(body_font_ref, family=_BODY_FONT_FAMILY) if body_font_ref else None
+    needs_script_font = direction == "rtl" or archetype == "ayah_translation"
+    script_font = (
+        embed_font_face(
+            script_font_ref or str(builtin_arabic_font_path()),
+            family=_SCRIPT_FONT_FAMILY,
+        )
+        if needs_script_font
+        else None
+    )
     heading_family = (
         font_family_stack(heading_font.family, _SYSTEM_FONT) if heading_font else _SYSTEM_FONT
     )
     body_family = font_family_stack(body_font.family, _SYSTEM_FONT) if body_font else _SYSTEM_FONT
+    script_family = (
+        font_family_stack(script_font.family, _SYSTEM_FONT) if script_font else _SYSTEM_FONT
+    )
 
     p = comp.palette
     root = ElementTree.Element(
@@ -653,7 +775,11 @@ def build_nikah_svg(
 
     # Optional brand-font faces go in a document <style> so Playwright loads them before paint.
     # Only emitted when a font is supplied — the no-font path adds nothing (byte-identical).
-    face_blocks = [font.face_css for font in (heading_font, body_font) if font is not None]
+    face_blocks = [
+        font.face_css
+        for font in (heading_font, body_font, script_font)
+        if font is not None
+    ]
     if face_blocks:
         style = ElementTree.SubElement(root, _svg_tag("style"), {"type": "text/css"})
         style.text = "".join(face_blocks)
@@ -710,35 +836,82 @@ def build_nikah_svg(
 
     # layer-headline: the non-highlighted headline words (heading font)
     headline = _layer(root, "layer-headline", comp.headline_bbox)
+    if archetype == "ayah_translation":
+        headline.set("data-role", "ayah-text")
+        headline.set("data-text", " ".join(line.text for line in comp.headline_lines))
     for line in comp.headline_lines:
-        _add_text_line_with_font(headline, line, heading_family)
+        headline_direction = (
+            "rtl" if archetype == "ayah_translation" else direction
+        )
+        headline_family = (
+            script_family if contains_arabic(line.text) else heading_family
+        )
+        _add_text_line_with_font(
+            headline,
+            line,
+            headline_family,
+            direction=headline_direction,
+            right_edge=comp.headline_bbox[0] + comp.headline_bbox[2],
+        )
     layers["layer-headline"], bboxes["layer-headline"] = headline, comp.headline_bbox
 
     # layer-highlight-word: the plum box + reversed text (heading font; empty for a plain headline)
     highlight = _layer(root, "layer-highlight-word", comp.highlight_bbox)
     if comp.highlight_word:
+        highlight_family = (
+            script_family if contains_arabic(comp.highlight_word) else heading_family
+        )
         box_svg, _bw, _bh = prim.highlighted_word_box(
             comp.highlight_word,
             x=comp.highlight_x, y=comp.highlight_y, font_size=comp.highlight_font,
-            box_fill=p["plum"], text_fill=p["cloud"], font_family=heading_family,
+            box_fill=p["plum"], text_fill=p["cloud"], font_family=highlight_family,
         )
         _embed_fragment(highlight, box_svg)
+        if direction == "rtl" and archetype != "ayah_translation":
+            for text in highlight.iter(_svg_tag("text")):
+                text.set("direction", "rtl")
+                text.set("text-anchor", "end")
+                text.set(
+                    "x",
+                    f"{comp.highlight_x + _bw - 0.45 * comp.highlight_font:g}",
+                )
     layers["layer-highlight-word"], bboxes["layer-highlight-word"] = highlight, comp.highlight_bbox
 
     # layer-support: the support line (body font)
     support = _layer(root, "layer-support", comp.support_bbox)
+    if archetype == "ayah_translation":
+        support.set("data-role", "translation")
+        support.set("data-text", " ".join(line.text for line in comp.support_lines))
     for line in comp.support_lines:
-        _add_text_line_with_font(support, line, body_family)
+        support_direction = "ltr" if archetype == "ayah_translation" else direction
+        support_family = script_family if contains_arabic(line.text) else body_family
+        _add_text_line_with_font(
+            support,
+            line,
+            support_family,
+            direction=support_direction,
+            right_edge=comp.support_bbox[0] + comp.support_bbox[2],
+            emit_ltr=archetype == "ayah_translation",
+        )
     layers["layer-support"], bboxes["layer-support"] = support, comp.support_bbox
 
     # layer-cta: rounded pill CTA (Deep Plum fill, Cloud White text — body font)
     cta = _layer(root, "layer-cta", comp.cta_bbox)
     if comp.cta_label:
+        cta_family = (
+            script_family if contains_arabic(comp.cta_label) else body_family
+        )
         pill_svg, _pw = prim.cta_pill(
             comp.cta_cx, comp.cta_top, height=comp.cta_h, label=comp.cta_label,
-            fill=p["plum"], text_fill=p["cloud"], font_family=body_family,
+            fill=p["plum"], text_fill=p["cloud"], font_family=cta_family,
         )
         _embed_fragment(cta, pill_svg)
+        if direction == "rtl" and archetype != "ayah_translation":
+            cta_right = comp.cta_cx + _pw / 2 - comp.cta_h * 0.72
+            for text in cta.iter(_svg_tag("text")):
+                text.set("direction", "rtl")
+                text.set("text-anchor", "end")
+                text.set("x", f"{cta_right:g}")
     layers["layer-cta"], bboxes["layer-cta"] = cta, comp.cta_bbox
 
     _apply_layer_overrides(layers, bboxes, layer_overrides)
@@ -746,17 +919,29 @@ def build_nikah_svg(
     return ElementTree.tostring(root, encoding="unicode", xml_declaration=True)
 
 
-def _add_text_line_with_font(layer: ElementTree.Element, line: _TextLine, font_family: str) -> None:
+def _add_text_line_with_font(
+    layer: ElementTree.Element,
+    line: _TextLine,
+    font_family: str,
+    *,
+    direction: str = "ltr",
+    right_edge: int | None = None,
+    emit_ltr: bool = False,
+) -> None:
+    anchor = "end" if direction == "rtl" else line.anchor
+    x = right_edge if direction == "rtl" and right_edge is not None else line.x
     attrs = {
-        "x": str(line.x),
+        "x": str(x),
         "y": str(line.baseline),
         "fill": line.fill,
         "font-family": font_family,
         "font-size": str(line.font),
         "font-weight": str(line.weight),
-        "text-anchor": line.anchor,
+        "text-anchor": anchor,
         f"{{{_XML_NS}}}space": "preserve",
     }
+    if direction == "rtl" or emit_ltr:
+        attrs["direction"] = direction
     if line.opacity < 1.0:
         attrs["fill-opacity"] = f"{line.opacity:.2f}"
     text = ElementTree.SubElement(layer, _svg_tag("text"), attrs)
@@ -925,6 +1110,34 @@ class ProtectionSymbolHero(LayoutTemplate):
         return _geometry(self.key, _as_nikah_context(ctx))
 
 
+class AyahTranslation(LayoutTemplate):
+    """Arabic ayah panel with an LTR translation and restrained invitation."""
+
+    key = "ayah_translation"
+    name = "Ayah + Translation"
+    description = "Amiri-set Arabic ayah panel, plain-English translation, and gentle CTA."
+
+    def render(self, ctx: TemplateContext) -> str:
+        nk = _as_nikah_context(ctx)
+        svg = build_nikah_svg(
+            self.key,
+            copy=_ctx_copy(nk),
+            format_key=nk.format_key,
+            hero_symbol=nk.hero_symbol,
+            logo_ref=nk.logo_ref,
+            lattice_backdrop=nk.lattice_backdrop,
+            direction="rtl",
+        )
+        w, h = nk.size()
+        return (
+            f'<div style="position:relative;width:{w}px;height:{h}px;'
+            f'overflow:hidden">{svg}</div>'
+        )
+
+    def geometry(self, ctx: TemplateContext) -> TemplateGeometry:
+        return _geometry(self.key, _as_nikah_context(ctx))
+
+
 def _geometry(archetype: str, nk: NikahTemplateContext) -> TemplateGeometry:
     comp = _compose(
         archetype, copy=_ctx_copy(nk), format_key=nk.format_key,
@@ -952,7 +1165,12 @@ def _geometry(archetype: str, nk: NikahTemplateContext) -> TemplateGeometry:
 
 
 NIKAH_TEMPLATES: dict[str, LayoutTemplate] = {
-    t.key: t for t in (HighlightedWordHero(), ProtectionSymbolHero())
+    t.key: t
+    for t in (
+        HighlightedWordHero(),
+        ProtectionSymbolHero(),
+        AyahTranslation(),
+    )
 }
 # ORCHESTRATOR: register into TEMPLATES / wire QA seam here.
 # Intentionally NOT calling `TEMPLATES.update(NIKAH_TEMPLATES)` in this build — the QA-registry
@@ -975,6 +1193,7 @@ def build_nikah_html(
     Copy keys — highlighted_word_hero: ``headline`` + ``highlight`` (required; highlight must be a
     case-insensitive substring of headline), optional ``sub``/``subhead``, ``cta``.
     protection_symbol_hero: ``headline`` required; ``highlight``/``sub``/``cta`` optional.
+    ayah_translation: Arabic ``ayah`` + Latin-script ``translation`` required; ``cta`` optional.
     """
     _require_nikah_profile(profile)
     svg = build_nikah_svg(
@@ -998,6 +1217,8 @@ async def render_nikah(
     lattice_backdrop: bool = True,
     heading_font_ref: str | None = None,
     body_font_ref: str | None = None,
+    direction: str = "ltr",
+    script_font_ref: str | None = None,
 ) -> bytes:
     """Render a Simply Nikah archetype to PNG through the established Playwright rasterizer.
 
@@ -1007,11 +1228,13 @@ async def render_nikah(
 
     ``heading_font_ref`` / ``body_font_ref`` are OPTIONAL brand-font files threaded into
     build_nikah_svg (see there); None keeps the system-font render (byte-identical).
+    ``direction`` and ``script_font_ref`` use the same RTL/Arabic behavior as build_nikah_svg.
     """
     svg = build_nikah_svg(
         archetype, copy=copy, format_key=format_key,
         hero_symbol=hero_symbol, logo_ref=logo_ref, lattice_backdrop=lattice_backdrop,
         heading_font_ref=heading_font_ref, body_font_ref=body_font_ref,
+        direction=direction, script_font_ref=script_font_ref,
     )
     return await rasterize_svg_to_png(svg, format_key)
 

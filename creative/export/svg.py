@@ -12,6 +12,7 @@ from xml.etree import ElementTree
 from mimik_contracts import PRESETS, CreativeFormat
 
 from creative.knowledge.feedback import load_rules
+from creative.render.builtin_fonts import builtin_arabic_font_path, contains_arabic
 from creative.render.compositor import render_html_to_png
 from creative.render.fonts import embed_font_face, font_family_stack
 from creative.render.glo2go_layout import (
@@ -40,6 +41,7 @@ _SYSTEM_FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-s
 # Internal @font-face family names for optional brand fonts (never client text — see fonts.py).
 _HEADING_FONT_FAMILY = "MimikBrandHeading"
 _BODY_FONT_FAMILY = "MimikBrandBody"
+_SCRIPT_FONT_FAMILY = "MimikScriptArabic"
 _DEFAULT_BADGE_TEXT = "G2G Aesthetics"
 _GLO2GO_PROFILE_ID = "glo2go-aesthetics"
 _EDITABLE_LAYER_IDS = frozenset(
@@ -409,22 +411,22 @@ def _add_wrapped_text(
     fill: str,
     text_alignment: TextAlignment,
     font_family: str = _SYSTEM_FONT,
+    direction: str = "ltr",
 ) -> ElementTree.Element:
     svg_anchor = {"left": "start", "center": "middle", "right": "end"}[text_alignment]
-    text = ElementTree.SubElement(
-        layer,
-        _svg_tag("text"),
-        {
-            "x": str(x),
-            "y": str(first_baseline),
-            "fill": fill,
-            "font-family": font_family,
-            "font-size": str(font_size),
-            "font-weight": str(font_weight),
-            "text-anchor": svg_anchor,
-            f"{{{_XML_NS}}}space": "preserve",
-        },
-    )
+    attrs = {
+        "x": str(x),
+        "y": str(first_baseline),
+        "fill": fill,
+        "font-family": font_family,
+        "font-size": str(font_size),
+        "font-weight": str(font_weight),
+        "text-anchor": svg_anchor,
+        f"{{{_XML_NS}}}space": "preserve",
+    }
+    if direction == "rtl":
+        attrs["direction"] = "rtl"
+    text = ElementTree.SubElement(layer, _svg_tag("text"), attrs)
     for index, line in enumerate(lines):
         tspan = ElementTree.SubElement(
             text,
@@ -438,20 +440,26 @@ def _add_wrapped_text(
     return text
 
 
-def _content_x(comp: _Composition) -> int:
+def _content_x(comp: _Composition, alignment: TextAlignment | None = None) -> int:
+    resolved = alignment or comp.text_alignment
     return {
         "left": comp.panel_x + comp.panel_padding,
         "center": comp.panel_x + round(comp.panel_width / 2),
         "right": comp.panel_x + comp.panel_width - comp.panel_padding,
-    }[comp.text_alignment]
+    }[resolved]
 
 
-def _aligned_box_x(comp: _Composition, width: int) -> int:
+def _aligned_box_x(
+    comp: _Composition,
+    width: int,
+    alignment: TextAlignment | None = None,
+) -> int:
+    resolved = alignment or comp.text_alignment
     return {
         "left": comp.panel_x + comp.panel_padding,
         "center": comp.panel_x + round((comp.panel_width - width) / 2),
         "right": comp.panel_x + comp.panel_width - comp.panel_padding - width,
-    }[comp.text_alignment]
+    }[resolved]
 
 
 def render_creative_svg(
@@ -473,6 +481,8 @@ def render_creative_svg(
     layer_overrides: Mapping[str, object] | None = None,
     heading_font_ref: str | None = None,
     body_font_ref: str | None = None,
+    direction: str = "ltr",
+    script_font_ref: str | None = None,
 ) -> str:
     """Return the Glo2Go hero as a complete SVG with named, editable layers.
 
@@ -481,7 +491,12 @@ def render_creative_svg(
     embedded as an ``@font-face`` in the SVG ``<style>`` (Playwright rasterizes it) and applied
     to the headline (heading font) and subhead/CTA (body font). When None, the render is
     unchanged — system fonts, byte-identical to before.
+
+    ``direction="rtl"`` right-aligns live copy and embeds ``script_font_ref`` for Arabic text.
+    When that ref is None, the repository-bundled Amiri Regular face is used.
     """
+    if direction not in {"ltr", "rtl"}:
+        raise ValueError("Creative text direction must be 'ltr' or 'rtl'")
     if not headline.strip():
         raise ValueError("Creative headline must not be blank")
 
@@ -489,10 +504,21 @@ def render_creative_svg(
     # @font-face families let heading and body use different files simultaneously.
     heading_font = embed_font_face(heading_font_ref, family=_HEADING_FONT_FAMILY) if heading_font_ref else None
     body_font = embed_font_face(body_font_ref, family=_BODY_FONT_FAMILY) if body_font_ref else None
+    script_font = (
+        embed_font_face(
+            script_font_ref or str(builtin_arabic_font_path()),
+            family=_SCRIPT_FONT_FAMILY,
+        )
+        if direction == "rtl"
+        else None
+    )
     heading_family = (
         font_family_stack(heading_font.family, _SYSTEM_FONT) if heading_font else _SYSTEM_FONT
     )
     body_family = font_family_stack(body_font.family, _SYSTEM_FONT) if body_font else _SYSTEM_FONT
+    script_family = (
+        font_family_stack(script_font.family, _SYSTEM_FONT) if script_font else _SYSTEM_FONT
+    )
 
     fmt = _format_for(format_key)
     comp = _composition(
@@ -529,7 +555,11 @@ def render_creative_svg(
 
     # Optional brand-font faces go in a document <style> so Playwright loads them before paint.
     # Only emitted when a font is supplied — the no-font path adds nothing (byte-identical).
-    face_blocks = [font.face_css for font in (heading_font, body_font) if font is not None]
+    face_blocks = [
+        font.face_css
+        for font in (heading_font, body_font, script_font)
+        if font is not None
+    ]
     if face_blocks:
         style = ElementTree.SubElement(root, _svg_tag("style"), {"type": "text/css"})
         style.text = "".join(face_blocks)
@@ -563,7 +593,8 @@ def render_creative_svg(
     )
     panel = _layer(root, "layer-panel", panel_bbox)
     panel.set("data-panel-anchor", comp.panel_anchor)
-    panel.set("data-text-alignment", comp.text_alignment)
+    live_text_alignment: TextAlignment = "right" if direction == "rtl" else comp.text_alignment
+    panel.set("data-text-alignment", live_text_alignment)
     ElementTree.SubElement(
         panel,
         _svg_tag("rect"),
@@ -580,7 +611,7 @@ def render_creative_svg(
         },
     )
 
-    content_x = _content_x(comp)
+    content_x = _content_x(comp, live_text_alignment)
     content_box_x = comp.panel_x + comp.panel_padding
     content_box_width = comp.panel_width - 2 * comp.panel_padding
     headline_baseline = comp.panel_y + comp.panel_padding + comp.headline_line_height
@@ -601,8 +632,9 @@ def render_creative_svg(
         font_size=comp.headline_size,
         font_weight=760,
         fill=palette_ink,
-        text_alignment=comp.text_alignment,
-        font_family=heading_family,
+        text_alignment=live_text_alignment,
+        font_family=script_family if contains_arabic(headline) else heading_family,
+        direction=direction,
     )
     subhead_baseline = (
         comp.panel_y
@@ -628,8 +660,9 @@ def render_creative_svg(
             font_size=comp.body_size,
             font_weight=430,
             fill=palette_ink,
-            text_alignment=comp.text_alignment,
-            font_family=body_family,
+            text_alignment=live_text_alignment,
+            font_family=script_family if contains_arabic(sub) else body_family,
+            direction=direction,
         )
     subhead_height = 0
     if comp.subhead_lines:
@@ -651,7 +684,7 @@ def render_creative_svg(
             comp.panel_width - 2 * comp.panel_padding,
             round(len(cta) * cta_font_size * 0.56 + 2 * cta_padding_x),
         )
-        cta_x = _aligned_box_x(comp, cta_width)
+        cta_x = _aligned_box_x(comp, cta_width, live_text_alignment)
         cta_bbox = (cta_x, cta_y, cta_width, cta_height)
         _set_layer_bbox(cta_layer, cta_bbox)
         ElementTree.SubElement(
@@ -666,19 +699,27 @@ def render_creative_svg(
                 "fill": palette_ink,
             },
         )
+        cta_text_x = (
+            cta_x + cta_width - cta_padding_x
+            if direction == "rtl"
+            else cta_x + round(cta_width / 2)
+        )
+        cta_text_attrs = {
+            "x": str(cta_text_x),
+            "y": str(cta_y + round(cta_height / 2)),
+            "fill": palette_ground,
+            "font-family": script_family if contains_arabic(cta) else body_family,
+            "font-size": str(cta_font_size),
+            "font-weight": "750",
+            "dominant-baseline": "middle",
+            "text-anchor": "end" if direction == "rtl" else "middle",
+        }
+        if direction == "rtl":
+            cta_text_attrs["direction"] = "rtl"
         cta_text = ElementTree.SubElement(
             cta_layer,
             _svg_tag("text"),
-            {
-                "x": str(cta_x + round(cta_width / 2)),
-                "y": str(cta_y + round(cta_height / 2)),
-                "fill": palette_ground,
-                "font-family": body_family,
-                "font-size": str(cta_font_size),
-                "font-weight": "750",
-                "dominant-baseline": "middle",
-                "text-anchor": "middle",
-            },
+            cta_text_attrs,
         )
         cta_text.text = cta
 

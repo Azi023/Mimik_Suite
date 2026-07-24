@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import struct
 import zlib
 from pathlib import Path
@@ -120,6 +121,58 @@ def test_svg_renders_panel_anchor_and_centered_live_text() -> None:
     assert headline is not None
     assert headline.attrib["text-anchor"] == "middle"
     assert "".join(headline.itertext()) == "Centered inside a left panel"
+
+
+def test_svg_explicit_ltr_is_byte_identical_to_the_default() -> None:
+    from creative.export.svg import render_creative_svg
+
+    kwargs = {
+        "format_key": "ig_post",
+        "image_ref": _solid_png_data_uri("#F4F4F4"),
+        "headline": "Faith-led introductions",
+        "sub": "A gentle beginning for two families.",
+        "cta": "Learn more",
+        "palette_ink": "#5A2A6B",
+        "palette_ground": "#FFFFFF",
+        "badge_text": "Simply Nikah",
+        "logo_ref": None,
+    }
+
+    default_svg = render_creative_svg(**kwargs)
+    assert default_svg == render_creative_svg(**kwargs, direction="ltr")
+    assert hashlib.sha256(default_svg.encode()).hexdigest() == (
+        "d1d9d8495655a863958f604d8c805b583d418df3d9484e0ed2c6235eb4647f69"
+    )
+
+
+def test_svg_rtl_right_aligns_live_copy_and_embeds_arabic_font() -> None:
+    from creative.export.svg import render_creative_svg
+
+    svg = render_creative_svg(
+        format_key="ig_post",
+        image_ref=_solid_png_data_uri("#F4F4F4"),
+        headline="وَمِنْ آيَاتِهِ أَنْ خَلَقَ لَكُم",
+        sub="مَوَدَّةً وَرَحْمَةً",
+        cta=None,
+        palette_ink="#5A2A6B",
+        palette_ground="#FFFFFF",
+        badge_text="Simply Nikah",
+        logo_ref=None,
+        direction="rtl",
+    )
+    root = ElementTree.fromstring(svg)
+    style = root.find(f"{{{SVG_NS}}}style")
+    headline = root.find(f"{{{SVG_NS}}}g[@id='layer-headline']/{{{SVG_NS}}}text")
+    subhead = root.find(f"{{{SVG_NS}}}g[@id='layer-subhead']/{{{SVG_NS}}}text")
+
+    assert style is not None
+    assert "@font-face" in (style.text or "")
+    assert "MimikScriptArabic" in (style.text or "")
+    for text in (headline, subhead):
+        assert text is not None
+        assert text.attrib["direction"] == "rtl"
+        assert text.attrib["text-anchor"] == "end"
+        assert "MimikScriptArabic" in text.attrib["font-family"]
 
 
 def test_svg_badge_theme_switches_for_dark_and_light_photo_stubs() -> None:

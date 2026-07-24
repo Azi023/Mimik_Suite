@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -76,10 +77,45 @@ async def test_font_library_is_team_gated(client: AsyncClient) -> None:
         "nunito",
         "open-sans",
         "raleway",
+        "amiri",
     ]
     assert all(
         set(font) == {"key", "family", "category", "preview_text"} for font in library
     )
+
+
+def test_amiri_builtin_is_a_valid_arabic_truetype_font() -> None:
+    from creative.render.builtin_fonts import get_builtin_font
+
+    amiri = get_builtin_font("amiri")
+
+    assert amiri is not None
+    assert amiri.family == "Amiri"
+    assert amiri.category == "arabic"
+    assert amiri.preview_text == "وَمِنْ آيَاتِهِ أَنْ خَلَقَ لَكُم"
+    assert amiri.regular_path == _BUILTIN_ROOT / "amiri" / "Amiri-Regular.ttf"
+    assert amiri.bold_path == _BUILTIN_ROOT / "amiri" / "Amiri-Bold.ttf"
+    expected_sha256 = {
+        "Amiri-Regular.ttf": "ab391c4147d054c48976e98322ad0eefe1427aa0e0502a12a4c75d80a70cfcd7",
+        "Amiri-Bold.ttf": "cfccb794268e7d573d857e6d6a67f89cf8a053e8ffd85dfa0c8ec1bb36fc4827",
+    }
+    required_tables = {b"cmap", b"GDEF", b"GSUB", b"GPOS", b"name"}
+    for path in (amiri.regular_path, amiri.bold_path):
+        data = path.read_bytes()
+        assert data[:4] == b"\x00\x01\x00\x00"
+        assert len(data) > 100_000
+        table_count = int.from_bytes(data[4:6], "big")
+        table_tags = {
+            data[offset : offset + 4]
+            for offset in range(12, 12 + table_count * 16, 16)
+        }
+        assert required_tables <= table_tags
+        assert "Amiri".encode("utf-16-be") in data
+        assert hashlib.sha256(data).hexdigest() == expected_sha256[path.name]
+
+    license_text = (_BUILTIN_ROOT / "amiri" / "OFL.txt").read_text()
+    assert "SIL OPEN FONT LICENSE Version 1.1" in license_text
+    assert "The Amiri Project Authors" in license_text
 
 
 async def test_materialize_builtin_font_creates_approved_tenant_scoped_asset(
