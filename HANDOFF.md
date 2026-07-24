@@ -4,7 +4,38 @@
 
 ---
 
-## ► LATEST (2026-07-24 pm9) — SESSION WRAP: editor done, MASTER PLAN written, satellite vision restored; fresh session = orchestrate the missed half
+## ► LATEST (2026-07-24 pm10) — BIG BUILD SESSION: per-client craft + learning loop + Drive proven; 21 commits, all green
+
+**State:** branch `main`, HEAD `4ae0879`, **613 tests pass** (1 skipped = live-vision critic exit test, needs `GEMINI_API_KEY` in-env). 20 commits in Mimik_Suite + 1 in sibling `mimik-contracts` (`4bf80be`). Tree clean except pre-existing `CLAUDE.md`/`uv.lock` drift. Local docker DB (`:5434`) has real data; **2 real Deliveries now in the mimikcreations Drive** (Glo2Go approvals) + a `_Mimik Suite Smoke Test` folder — delete those test artifacts when convenient.
+
+### What shipped (multi-executor: Claude subagents + Codex + Fable)
+- **Simply Nikah vector engine (M-01)** built + WIRED into the live path (`c7f653f`/`7829a17`) — SN renders its design language (v1 = L1/L2 base-template craft; iconography is weak — see design-critic).
+- **Live brand-QA gate (M-08)** — `run_live_qa` gates the actual rendered output on the live path (`82dedb0`).
+- **PSD real-layers fix (`387557a`)**, **Drive full-stack approval PROVEN (M-07, `eef87c6`)** — approval→archive→Delivery works; fixed a real defect (archive re-rendered via the registry → KeyError'd on ALL profile creatives; now archives the persisted preview) + security-hardened the artifact read (containment).
+- **A/B variants (M-05, `53665d1` + contracts `4bf80be`)** → **learning loop closed (M-06, `10d4a87`)** — generation now consults `preferences.rank_variants` to order variants; "Ranker is steering picks" is now honest. → **font activation (M-10, `4ae0879`)** — brand fonts resolve + render through all 3 paths incl. SN.
+- **Built-in font library + tenant-safe raw-serve (Codex, `65661e3`)** + **brand @font-face mechanism (`793e648`)** + **ops asset library UI + thumbnails + font picker (`bca1588`/`cc458c1`)**.
+- **Command Center: queue panel + QA-in-review + edit-signal wire (`c011135`)** + **NL parser backend (A-05, `a9b477f`)**. **Month planner (M-17, `fe9a545`)**.
+- **Design-critic slice 1 (`c710db0`)** — A1 brand-token-diff (objective) + A5 iconography (vision), ADVISORY-only. PROVEN with live vision: catches the operator's exact v1 failures (hands-heart blob, glitch shield). Spec: `docs/DESIGN_CRITIC_SPEC.md`.
+- **Skills vendored (`324653b`)**: impeccable + designer-skills at `.claude/skills/`. Docs: `docs/DESIGN_IQ_UPGRADE.md`, `docs/FRONTEND_WIRING_BACKLOG.md`, `docs/NIKAH_ENGINE_SPEC.md`.
+
+### OPEN LOOPS / operator decisions (next session)
+1. **Deploy re-sync + brand-seed on the REAL DB — BLOCKED on env.** `.env` has TWO `DATABASE_URL` lines (local `:5434` AND Supabase — Supabase wins) and the Supabase connect fails SSL cert verify (self-signed in chain). Local DB is healthy (4 brands, 40 creatives); the "0 brands" drift is Supabase-side. Decide which DB is authoritative + fix the SSL/env before touching prod.
+2. **Design-critic advisory → GATING** — slice 1 is advisory by design. Slices 2–3 (`DESIGN_CRITIC_SPEC.md`): golden-set calibration → hard gate + retry/escalation ladder (re-art-direct → archetype swap → AI-illustration finish). This is THE lever to raise output to the reference-creative bar (the operator's real quality goal).
+3. **SN craft floor** — v1 vectors are "okay for L1/L2 base" (operator); the finish bar = AI-illustration (faceless match cards, foliage, gradients — the reference images). Swap the weak engine-authored primitives (hands-heart, shield-crescent) for license-verified free-pack vectors; the AI-illustration finish escalation is spec'd but behind the paid gate (constraint #7).
+4. **Font role-split** — v1 uses one brand font for heading+body (`TODO(font-roles)` in `_resolve_brand_font`). Split via an asset role tag when a brand needs distinct display/body faces.
+
+### ANTI-CONTEXT (things tried / gotchas)
+- **rembg (Island Cart cutout) BLOCKED on Python 3.13** — a legacy transitive pins `<3.10`. Workaround: `rembg[cpu]>=2.0.60` or isolated `uvx`. IC is also product-photo-blocked, so parked.
+- Local scripts must OVERRIDE `DATABASE_URL='postgresql+asyncpg://mimik:mimik@localhost:5434/mimik_suite'` (the `.env` Supabase line otherwise wins).
+- `validate_asset_ref` (contracts) is a CSS-injection guard, NOT path containment — stored artifact paths from manifests are untrusted (hardened in `approval_flow` + `record_variant_pick`).
+- Run `graphify update .` next session (AST-only) — the graph is stale after 21 commits.
+
+### NEXT ACTION
+Operator's call: (a) fix the Supabase env → deploy re-sync + brand-seed, or (b) push design quality — critic gating (slices 2–3) + SN primitive craft (the reference-bar work), or (c) dogfood: upload a real brand font in `/assets` + generate to see fonts land. Island Cart cutout unblocks only with product photos + the rembg workaround.
+
+---
+
+## (2026-07-24 pm9) — SESSION WRAP: editor done, MASTER PLAN written, satellite vision restored; fresh session = orchestrate the missed half
 
 **PRIMARY DOC FOR THE FRESH SESSION: `docs/MASTER_PLAN.md`** (read it first — it has the full vision, the
 missed-items backlog, the operator's answers in §7, and the P0 lanes). This pm9 is just the orchestration wrapper.
