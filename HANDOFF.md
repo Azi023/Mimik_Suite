@@ -4,7 +4,38 @@
 
 ---
 
-## ► LATEST (2026-07-24 pm11) — LIVE DEPLOY FIXED + buildable backlog cleared; 30 commits, on prod
+## ► LATEST (2026-07-24 pm12) — NEXT SESSION = BUILD BRAND KIT v2 (approved) end-to-end + deploy
+
+**State:** branch `main`, HEAD ~`4a3119f`, **661 tests green**. Everything from pm11 is pushed + **deployed live** on suite.mimikcreations.com and CONFIGURED/WORKING: Graph email (M365, tested — real email delivered), Drive archive, Gemini critic+copy, super-admin. Prod `.env` at `/root/mimik-suite/.env` now has all of: SUPABASE/JWT/DATABASE + SUPERADMIN_EMAILS + APP_BASE_URL + GRAPH_* (EMAIL_PROVIDER=graph, sender atheeque@mimikcreations.com) + GOOGLE_OAUTH_* + ARCHIVE_BACKEND + DRIVE_ROOT_FOLDER_ID + GEMINI_API_KEY. **Still off:** WhatsApp (Meta portfolio under automation-restriction review — operator handles the appeal). Stripe deferred.
+
+### THE NEXT SESSION'S JOB: build **Brand Kit v2** — the whole feature, all slices, one session, then deploy
+Operator approved the direction (Fable design). **DO NOT spread it phase-by-phase across sessions — build it all, slice after slice, parallelizing disjoint scopes.** It is PER-CLIENT (driven by each client's Brand data + tokens + style profile; themed from the client's own colours).
+- **Read first:** `docs/BRAND_KIT_V2_SPEC.md` (the spec) + `docs/brand-kit-prototype.html` (the approved look — open/render it) + `docs/STYLE_PROFILES.md` (the 3 clients' real data).
+- **What it is:** a per-client editorial "brand book" at `web/app/clients/[id]/brand-kit`, HTML-first + data-driven, with 6 tabs (Brand Discovery · Creative Direction · Logo Suite · Colours & Fonts · Applications · Launch Templates), named colours + rationale + status badges, logo-variant slots, a font suite over the 9-family built-in library + a downloadable font pack, graceful placeholder empty-states, and **multi-format export** (PDF via Playwright `page.pdf`, per-section PNG via element screenshot, a hosted share link via the client-portal magic-link pattern, Launch-Templates→existing creative render). It's its OWN editorial surface (not mono-admin), themed from the client's tokens; edit controls stay shadcn.
+
+### EXECUTION PLAN (build all — ordered slices, multi-executor)
+- **Slice 1 (fastest visible win):** additive contract fields (mimik-contracts: BrandKit/BrandDiscovery, named ColorRole+rationale+status+PendingColor, LogoVariant slots, FontRole, CreativeDirection, BrandPattern, BrandApplication, LaunchTemplate, KitTheme, published) + read-only **Colours & Fonts tab** + `GET /brands/{id}/font-pack` zip. Data exists for all 3 clients.
+- **Slice 2:** Brand Discovery tab + field editing (shadcn controls).
+- **Slice 3:** Logo Suite + Creative Direction tabs (logo-variant upload/placeholders, moodboard + rationale paragraphs).
+- **Slice 4:** Applications + Launch Templates tabs (Launch Templates map to the existing creative render pipeline).
+- **Slice 5:** Exports — PDF/PNG endpoints (reuse `creative/render/compositor.py` Playwright) + hosted share link (portal magic-link pattern, gated by `BrandKit.published`).
+- **Slice 6:** Seed the 3 dogfood clients' brand-kit data from STYLE_PROFILES so it's populated; dogfood on Glo2Go; deploy.
+- **Executor mapping:** Opus specs/reviews/commits/deploys · **Codex** (`codex exec --full-auto`, prompt with "IMPLEMENT NOW, no questions, decisions already made") for contracts/backend/export/font-pack · **Fable-model + Claude subagents** for the tabbed UI (port the prototype into React, theme from client tokens) + design-craft · parallelize disjoint, serialize hot files.
+- **mimik-contracts is a sibling repo — PUSH it after contract changes** (CI builds against its GitHub remote; forgetting = runtime ImportError, that bit us this session).
+
+### DEPLOY MECHANICS (Mimik is docker-compose, NOT Coolify)
+Push main → CI `build-images` builds ghcr images (~3min; `next build` fails on lint, so keep web lint clean) → on the VPS: `ssh hetzner-vps` → `cd /root/mimik-suite && docker compose -p mimiksuite pull && docker compose -p mimiksuite up -d` (project name is `mimiksuite`, no hyphen). Verify: container healthy + code present at `/app/Mimik_Suite/...`. Set any new secret env in the VPS `.env` (operator's secrets — never pipe over SSH/commit).
+
+### ANTI-CONTEXT (learned this session)
+- `codex exec --full-auto` sometimes STOPS to ask a design question instead of building — prepend "IMPLEMENT NOW, no questions, decisions already made" + pre-answer every choice.
+- Concurrent Codex/agents intermingle the working tree — commit per-lane by explicit path (`git add <files>`), never `git add -A`.
+- The one broken deploy was a single pre-existing lint error failing `next build`; and unpushed mimik-contracts commits. Keep web lint clean + push contracts.
+- Scroll-reveal animations don't fire in headless screenshots — inject `*{opacity:1!important;animation:none!important}` to capture brand-kit tabs.
+- `graphify update .` is stale.
+
+---
+
+## (2026-07-24 pm11) — LIVE DEPLOY FIXED + buildable backlog cleared; 30 commits, on prod
 
 **State:** branch `main`, HEAD `281370f`, **661 tests pass** (1 skipped = live-vision critic, needs `GEMINI_API_KEY`). 30 Mimik_Suite commits this session + mimik-contracts pushed (`4bf80be`). **All pushed to GitHub; deployed to prod** (suite.mimikcreations.com, healthy). Tree clean except pre-existing CLAUDE.md/uv.lock + graphify-out/scratchpad (untracked, local).
 
