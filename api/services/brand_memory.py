@@ -129,6 +129,43 @@ def store_asset_file(
     return str(path), real_mime
 
 
+async def create_stored_asset(
+    session: AsyncSession,
+    *,
+    brand: BrandRow,
+    kind: str,
+    data: bytes,
+    filename: str,
+    approved: bool = False,
+    license: str | None = None,
+    notes: str | None = None,
+) -> BrandAssetRow:
+    """Persist trusted bytes and create the matching brand-asset row.
+
+    Uploads and server-bundled assets share this path so storage layout, magic-byte MIME
+    detection, size limits, and server-generated filenames cannot drift between flows.
+    """
+    path, mime = store_asset_file(
+        tenant_id=brand.tenant_id,
+        brand_id=brand.id,
+        kind=kind,
+        data=data,
+    )
+    return await repo.create_brand_asset(
+        session,
+        tenant_id=brand.tenant_id,
+        client_id=brand.client_id,
+        brand_id=brand.id,
+        kind=kind,
+        filename=safe_display_filename(filename),
+        mime=mime,
+        local_path=path,
+        approved=approved,
+        license=license,
+        notes=notes,
+    )
+
+
 def read_asset_bytes(asset: BrandAssetRow) -> bytes:
     """Read a stored asset's bytes; fail loud if the file is gone (the row said it exists)."""
     if not asset.local_path:

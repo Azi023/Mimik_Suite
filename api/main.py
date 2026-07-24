@@ -22,6 +22,7 @@ from api.routers import (
     creatives,
     deliveries,
     exports,
+    fonts,
     intake,
     invitations,
     jobs,
@@ -85,6 +86,7 @@ app.include_router(intake.router)
 app.include_router(clients.router)
 app.include_router(brands.router)
 app.include_router(assets.router)
+app.include_router(fonts.router)
 app.include_router(pillars.router)
 app.include_router(briefs.router)
 app.include_router(jobs.router)

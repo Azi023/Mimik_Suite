@@ -10,22 +10,25 @@ of upload.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.core.auth import Principal, require_role
+from api.core.config import get_settings
 from api.db import repo
 from api.db.mappers import to_brand_asset
 from api.db.session import get_session
+from api.routers.jobs import _TEAM
 from api.services import brand_memory
 from creative.references.fit_critic import ReferenceCriticError
 from creative.vision.study import CreativeStudyError
 from mimik_contracts import AssetKind, BrandAsset
 
 router = APIRouter(tags=["assets"])
-
-_TEAM = require_role("owner", "ops", "designer", "team")
 
 
 async def _own_brand(session: AsyncSession, principal: Principal, brand_id: str):
@@ -49,28 +52,19 @@ async def upload_asset(
     data = await file.read(brand_memory.MAX_ASSET_BYTES + 1)
     try:
         # The trusted mime is SNIFFED from the bytes — the client Content-Type is never trusted.
-        path, mime = brand_memory.store_asset_file(
-            tenant_id=principal.tenant_id,
-            brand_id=brand_id,
+        row = await brand_memory.create_stored_asset(
+            session,
+            brand=brand,
             kind=kind.value,
             data=data,
+            filename=file.filename or "upload",
+            license=license,
+            notes=notes,
         )
     except brand_memory.AssetTooLarge as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except brand_memory.UnsupportedAssetMime as exc:
         raise HTTPException(status_code=415, detail=str(exc)) from exc
-    row = await repo.create_brand_asset(
-        session,
-        tenant_id=principal.tenant_id,
-        client_id=brand.client_id,
-        brand_id=brand_id,
-        kind=kind.value,
-        filename=brand_memory.safe_display_filename(file.filename),
-        mime=mime,
-        local_path=path,
-        license=license,
-        notes=notes,
-    )
     await session.commit()
     return to_brand_asset(row)
 
@@ -131,6 +125,43 @@ async def list_assets(
         kind=kind.value if kind else None,
     )
     return [to_brand_asset(r) for r in rows]
+
+
+@router.get("/assets/{asset_id}/raw", response_class=FileResponse)
+async def get_asset_raw(
+    asset_id: str,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> FileResponse:
+    asset = await repo.get_brand_asset(
+        session,
+        tenant_id=principal.tenant_id,
+        asset_id=asset_id,
+    )
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    brand = await repo.get_brand(
+        session,
+        tenant_id=principal.tenant_id,
+        brand_id=asset.brand_id,
+    )
+    if brand is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not asset.local_path:
+        raise HTTPException(status_code=404, detail="Asset file not found")
+
+    tenant_asset_root = (
+        Path(get_settings().assets_local_root) / principal.tenant_id / brand.id
+    ).resolve()
+    try:
+        local_path = Path(asset.local_path).resolve(strict=True)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="Asset file not found") from exc
+    if not local_path.is_file() or not local_path.is_relative_to(tenant_asset_root):
+        raise HTTPException(status_code=404, detail="Asset file not found")
+
+    return FileResponse(path=local_path, media_type=asset.mime)
 
 
 @router.post("/assets/{asset_id}/approve", response_model=BrandAsset)
