@@ -44,6 +44,7 @@ from creative.revision.interpreter import interpret_ask
 from mimik_contracts import (
     Actor,
     ActorRole,
+    AssetKind,
     Brand,
     CanvasRevision,
     CopyBlock,
@@ -492,12 +493,47 @@ def _nikah_variant_selection(
     return "protection_symbol_hero", None, "shield_crescent"
 
 
+async def _resolve_brand_font(
+    session: AsyncSession, *, tenant_id: str, brand: Brand
+) -> str | None:
+    """Resolve THIS brand's active brand font to a local font-file path for the compositor (M-10).
+
+    Returns the ``local_path`` of the brand's MOST-RECENT approved ``AssetKind.FONT`` asset, or
+    None when the brand has no approved font — in which case the render path is unchanged
+    (system fonts, byte-identical to before). The approved gate matches the logo flow: only a
+    human-approved asset (built-in-library materialization or an approved upload) is ever used.
+
+    Tenant-scoped at the DATA layer (locked #2): list_brand_assets filters by tenant_id AND
+    brand_id, so another tenant's font asset can never be resolved here — the route is not trusted
+    on its own.
+
+    v1 CONVENTION: a single brand font drives BOTH heading and body text. The caller passes the
+    one resolved ref as heading_font_ref AND body_font_ref.
+    TODO(font-roles): support a heading/body role split — e.g. tag the FONT asset with a role
+    (an asset notes/study marker) and resolve two distinct refs — once a brand needs separate
+    display and body faces. Until then one font intentionally governs both.
+    """
+    rows = await repo.list_brand_assets(
+        session,
+        tenant_id=tenant_id,
+        brand_id=brand.id,
+        kind=AssetKind.FONT.value,
+    )
+    # list_brand_assets orders by created_at ascending, so the last approved row is most recent.
+    approved = [row for row in rows if row.approved and row.local_path]
+    if not approved:
+        return None
+    return approved[-1].local_path
+
+
 async def _render_nikah_artifacts(
     *,
     copy_block: CopyBlock,
     format_key: str,
     brand: Brand,
     archetype_override: str | None = None,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> tuple[str, bytes]:
     """Render a Simply Nikah creative through the vector engine (M-01). Returns (svg, png)
     so live QA can read the semantic-layer geometry. SN never takes a photo.
@@ -521,6 +557,8 @@ async def _render_nikah_artifacts(
         format_key=format_key,
         hero_symbol=hero_symbol,
         logo_ref=brand.tokens.logo.ref,
+        heading_font_ref=heading_font_ref,
+        body_font_ref=body_font_ref,
     )
     preview = await svg_export.rasterize_svg_to_png(svg, format_key)
     return svg, preview
@@ -536,6 +574,8 @@ async def _render_creative_artifacts(
     artifact_dir: Path,
     render_params: dict,
     source_kind: str,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> tuple[Path, Path, Path | None, QAReport]:
     profile = _profile(profile_id)
     text_region = render_params.get("text_region")
@@ -556,6 +596,8 @@ async def _render_creative_artifacts(
                 format_key=format_key,
                 brand=brand,
                 archetype_override=render_params.get("nikah_archetype"),
+                heading_font_ref=heading_font_ref,
+                body_font_ref=body_font_ref,
             )
             effective_source_kind = "generated_vector"
         except Exception as exc:  # noqa: BLE001 — never let a render fault break generation
@@ -580,6 +622,8 @@ async def _render_creative_artifacts(
             text_alignment=render_params.get("text_alignment", "left"),
             subject_zoom=render_params.get("subject_zoom", 1.0),
             badge_background_luminance=render_params.get("badge_background_luminance"),
+            heading_font_ref=heading_font_ref,
+            body_font_ref=body_font_ref,
         )
         profile_render_path = artifact_dir / "glo2go-render.png"
         profile_render_path.write_bytes(profile_png)
@@ -602,6 +646,8 @@ async def _render_creative_artifacts(
             text_alignment=render_params.get("text_alignment", "left"),
             subject_zoom=render_params.get("subject_zoom", 1.0),
             badge_background_luminance=render_params.get("badge_background_luminance"),
+            heading_font_ref=heading_font_ref,
+            body_font_ref=body_font_ref,
         )
         preview = await svg_export.rasterize_svg_to_png(svg, format_key)
     svg_path = artifact_dir / "creative.svg"
@@ -646,6 +692,8 @@ async def _render_variants(
     base_params: dict,
     source_kind: str,
     levers: list[_VariantLever],
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> tuple[tuple[Path, Path, Path | None, QAReport, dict], list[CreativeVariant]]:
     """Render each planned lever from ONE shared source image (M-05).
 
@@ -670,6 +718,8 @@ async def _render_variants(
             artifact_dir=variant_dir,
             render_params=variant_params,
             source_kind=source_kind,
+            heading_font_ref=heading_font_ref,
+            body_font_ref=body_font_ref,
         )
         records.append(
             CreativeVariant(
@@ -986,6 +1036,10 @@ async def revise_creative(
             except Exception as exc:
                 logger.warning("revise: failed to source new image (%s); keeping existing image", exc)
 
+        # M-10: resolve the brand's approved font (tenant-scoped) and thread it into the render.
+        brand_font_ref = await _resolve_brand_font(
+            session, tenant_id=principal.tenant_id, brand=brand
+        )
         svg_path, preview_path, profile_render_path, qa_report = await _render_creative_artifacts(
             brand=brand,
             profile_id=str(l1_params.get("style_profile_id", "generic")),
@@ -995,6 +1049,8 @@ async def revise_creative(
             artifact_dir=artifact_dir,
             render_params=l1_params,
             source_kind=str(l1_params.get("image_source") or "brand_placeholder"),
+            heading_font_ref=brand_font_ref,
+            body_font_ref=brand_font_ref,
         )
 
         manifest.copy_block = copy_block
@@ -1112,6 +1168,10 @@ async def revert_creative(
     artifact_dir.mkdir(parents=True, exist_ok=False)
 
     try:
+        # M-10: resolve the brand's approved font (tenant-scoped) and thread it into the render.
+        brand_font_ref = await _resolve_brand_font(
+            session, tenant_id=principal.tenant_id, brand=brand
+        )
         svg_path, preview_path, profile_render_path, qa_report = await _render_creative_artifacts(
             brand=brand,
             profile_id=str(render_params.get("style_profile_id", "generic")),
@@ -1121,6 +1181,8 @@ async def revert_creative(
             artifact_dir=artifact_dir,
             render_params=render_params,
             source_kind=str(render_params.get("image_source") or "brand_placeholder"),
+            heading_font_ref=brand_font_ref,
+            body_font_ref=brand_font_ref,
         )
         _set_rendered_artifacts(
             manifest,
@@ -1297,6 +1359,12 @@ async def generate_client_creative(
         else:
             # M-06: bias the single-generate default lever toward the learned preference (guarded).
             _bias_default_lever(profile_id, base_l1_params, signals)
+
+        # M-10: resolve the brand's approved font ONCE (tenant-scoped) and thread it into every
+        # variant render. None => unchanged system-font behavior.
+        brand_font_ref = await _resolve_brand_font(
+            session, tenant_id=principal.tenant_id, brand=brand
+        )
         primary, variant_records = await _render_variants(
             brand=brand,
             profile_id=profile_id,
@@ -1307,6 +1375,8 @@ async def generate_client_creative(
             base_params=base_l1_params,
             source_kind=source_kind,
             levers=levers,
+            heading_font_ref=brand_font_ref,
+            body_font_ref=brand_font_ref,
         )
         # The primary (variant 0) render populates the active layers; its params include variant
         # 0's lever override (none for single-generate).

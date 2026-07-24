@@ -194,3 +194,73 @@ def test_glo2go_injects_font_face_and_family_overrides(tmp_path: Path) -> None:
     # Cascade overrides applied to the heading and body selectors.
     assert ".g2g-panel h1{font-family:'MimikBrandHeading'" in html
     assert "'MimikBrandBody'" in html
+
+
+# --------------------------------------------------------- Simply Nikah template wiring
+#
+# SN renders HTML/SVG through the same Playwright compositor, so it adopts embed_font_face /
+# font_family_stack identically (fonts.py ADOPTERS note): heading font -> headline + highlight
+# word, body font -> support line + CTA. None => byte-identical system-font render.
+
+
+def _nikah_svg(**kwargs: object) -> str:
+    from creative.render.nikah_templates import build_nikah_svg
+
+    return build_nikah_svg(
+        "highlighted_word_hero",
+        copy={
+            "headline": "Marry with the RIGHT intention",
+            "highlight": "RIGHT",
+            "sub": "A gentle, faith-led beginning for two families.",
+            "cta": "Start your nikah",
+        },
+        format_key="ig_post",
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def _first_text_under(root: ElementTree.Element, layer_id: str) -> ElementTree.Element | None:
+    layer = root.find(f"{{{SVG_NS}}}g[@id='{layer_id}']")
+    if layer is None:
+        return None
+    return next(iter(layer.iter(f"{{{SVG_NS}}}text")), None)
+
+
+def test_nikah_without_font_is_byte_identical() -> None:
+    assert _nikah_svg() == _nikah_svg(heading_font_ref=None, body_font_ref=None)
+
+
+def test_nikah_injects_font_face_and_applies_family(tmp_path: Path) -> None:
+    heading = _font_file(tmp_path, ".ttf")
+    body = _font_file(tmp_path, ".otf")
+    svg = _nikah_svg(heading_font_ref=str(heading), body_font_ref=str(body))
+
+    root = ElementTree.fromstring(svg)
+    style = root.find(f"{{{SVG_NS}}}style")
+    assert style is not None and style.text is not None
+    assert "@font-face" in style.text
+    assert "MimikBrandHeading" in style.text
+    assert "MimikBrandBody" in style.text
+    assert "format('truetype')" in style.text
+    assert "format('opentype')" in style.text
+
+    # Heading font drives the headline + highlight word; body font drives the support + CTA.
+    headline = _first_text_under(root, "layer-headline")
+    highlight = _first_text_under(root, "layer-highlight-word")
+    support = _first_text_under(root, "layer-support")
+    cta = _first_text_under(root, "layer-cta")
+    assert headline is not None and "MimikBrandHeading" in headline.attrib["font-family"]
+    assert highlight is not None and "MimikBrandHeading" in highlight.attrib["font-family"]
+    assert support is not None and "MimikBrandBody" in support.attrib["font-family"]
+    assert cta is not None and "MimikBrandBody" in cta.attrib["font-family"]
+
+
+def test_nikah_with_font_still_passes_modesty() -> None:
+    """A brand font is additive vector CSS — it must not trip the structural modesty audit."""
+    from creative.render.nikah_templates import modesty_report
+
+    svg = _nikah_svg(
+        heading_font_ref="data:font/woff2;base64," + base64.b64encode(b"wOF2stub").decode("ascii"),
+        body_font_ref="data:font/woff2;base64," + base64.b64encode(b"wOF2stub").decode("ascii"),
+    )
+    assert modesty_report(svg, source_kind="generated_vector") == []

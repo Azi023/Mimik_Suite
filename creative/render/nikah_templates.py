@@ -30,6 +30,7 @@ from mimik_contracts import get_format
 from creative.export.svg import rasterize_svg_to_png  # reuse the established rasterizer
 from creative.knowledge.feedback import load_rules
 from creative.render import nikah_primitives as prim
+from creative.render.fonts import embed_font_face, font_family_stack
 from creative.render.templates import (
     LayoutTemplate,
     TemplateContext,
@@ -40,6 +41,10 @@ from creative.style_profile import Effect, StyleProfile, get_style_profile
 
 _NIKAH_PROFILE_ID = "simply-nikah"
 _SYSTEM_FONT = prim._SYSTEM_FONT
+# Internal @font-face family names for optional brand fonts — same tokens svg.py/glo2go use, so a
+# brand font renders identically across every code-composited path (never client text; see fonts.py).
+_HEADING_FONT_FAMILY = "MimikBrandHeading"
+_BODY_FONT_FAMILY = "MimikBrandBody"
 
 # Palette fallbacks (shared with the primitive module — all profile hexes are approx=True).
 _PINK_FALLBACK = prim._PINK_FALLBACK
@@ -599,11 +604,20 @@ def build_nikah_svg(
     logo_ref: str | None = None,
     lattice_backdrop: bool = True,
     layer_overrides: Mapping[str, object] | None = None,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> str:
     """Standalone layered SVG matching svg.py's named-layer contract.
 
     ``layer_overrides`` accepts the same dx/dy/scale/rotation/visible/fill mapping svg.py honors,
     keyed by SN layer ids, so the canvas editor round-trips without a second code path.
+
+    ``heading_font_ref`` / ``body_font_ref`` are OPTIONAL brand-font files (a stored
+    ``AssetKind.FONT`` ``local_path`` or a ``data:font/...`` URI). SN renders through the same
+    Playwright compositor as svg.py/glo2go, so it adopts fonts identically (fonts.py ADOPTERS
+    note): each font is embedded as an ``@font-face`` in the SVG ``<style>`` and applied to the
+    headline + highlight word (heading font) and the support line + CTA (body font). When None,
+    the render is unchanged — system font, byte-identical to before.
     """
     comp = _compose(
         archetype,
@@ -613,6 +627,17 @@ def build_nikah_svg(
         logo_ref=logo_ref,
         lattice_backdrop=lattice_backdrop,
     )
+
+    # Resolve optional brand fonts up front (fail loud before building the tree). Distinct
+    # @font-face families let heading and body use different files simultaneously; None => the
+    # system font stack, so the un-branded render is byte-identical to today.
+    heading_font = embed_font_face(heading_font_ref, family=_HEADING_FONT_FAMILY) if heading_font_ref else None
+    body_font = embed_font_face(body_font_ref, family=_BODY_FONT_FAMILY) if body_font_ref else None
+    heading_family = (
+        font_family_stack(heading_font.family, _SYSTEM_FONT) if heading_font else _SYSTEM_FONT
+    )
+    body_family = font_family_stack(body_font.family, _SYSTEM_FONT) if body_font else _SYSTEM_FONT
+
     p = comp.palette
     root = ElementTree.Element(
         _svg_tag("svg"),
@@ -625,6 +650,13 @@ def build_nikah_svg(
             "data-design-rule-ids": comp.rule_ids,
         },
     )
+
+    # Optional brand-font faces go in a document <style> so Playwright loads them before paint.
+    # Only emitted when a font is supplied — the no-font path adds nothing (byte-identical).
+    face_blocks = [font.face_css for font in (heading_font, body_font) if font is not None]
+    if face_blocks:
+        style = ElementTree.SubElement(root, _svg_tag("style"), {"type": "text/css"})
+        style.text = "".join(face_blocks)
 
     layers: dict[str, ElementTree.Element] = {}
     bboxes: dict[str, tuple[int, int, int, int]] = {}
@@ -676,35 +708,35 @@ def build_nikah_svg(
     )
     layers["layer-wordmark"], bboxes["layer-wordmark"] = wordmark, comp.wm_bbox
 
-    # layer-headline: the non-highlighted headline words
+    # layer-headline: the non-highlighted headline words (heading font)
     headline = _layer(root, "layer-headline", comp.headline_bbox)
     for line in comp.headline_lines:
-        _add_text_line_with_font(headline, line, comp.font_family)
+        _add_text_line_with_font(headline, line, heading_family)
     layers["layer-headline"], bboxes["layer-headline"] = headline, comp.headline_bbox
 
-    # layer-highlight-word: the plum box + reversed text (empty for a plain headline)
+    # layer-highlight-word: the plum box + reversed text (heading font; empty for a plain headline)
     highlight = _layer(root, "layer-highlight-word", comp.highlight_bbox)
     if comp.highlight_word:
         box_svg, _bw, _bh = prim.highlighted_word_box(
             comp.highlight_word,
             x=comp.highlight_x, y=comp.highlight_y, font_size=comp.highlight_font,
-            box_fill=p["plum"], text_fill=p["cloud"], font_family=comp.font_family,
+            box_fill=p["plum"], text_fill=p["cloud"], font_family=heading_family,
         )
         _embed_fragment(highlight, box_svg)
     layers["layer-highlight-word"], bboxes["layer-highlight-word"] = highlight, comp.highlight_bbox
 
-    # layer-support: the support line
+    # layer-support: the support line (body font)
     support = _layer(root, "layer-support", comp.support_bbox)
     for line in comp.support_lines:
-        _add_text_line_with_font(support, line, comp.font_family)
+        _add_text_line_with_font(support, line, body_family)
     layers["layer-support"], bboxes["layer-support"] = support, comp.support_bbox
 
-    # layer-cta: rounded pill CTA (Deep Plum fill, Cloud White text)
+    # layer-cta: rounded pill CTA (Deep Plum fill, Cloud White text — body font)
     cta = _layer(root, "layer-cta", comp.cta_bbox)
     if comp.cta_label:
         pill_svg, _pw = prim.cta_pill(
             comp.cta_cx, comp.cta_top, height=comp.cta_h, label=comp.cta_label,
-            fill=p["plum"], text_fill=p["cloud"], font_family=comp.font_family,
+            fill=p["plum"], text_fill=p["cloud"], font_family=body_family,
         )
         _embed_fragment(cta, pill_svg)
     layers["layer-cta"], bboxes["layer-cta"] = cta, comp.cta_bbox
@@ -964,16 +996,22 @@ async def render_nikah(
     hero_symbol: HeroSymbol = "hands_heart",
     logo_ref: str | None = None,
     lattice_backdrop: bool = True,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
 ) -> bytes:
     """Render a Simply Nikah archetype to PNG through the established Playwright rasterizer.
 
     Mirrors render_glo2go's call shape (minus image_ref — SN never takes a photo): loads
     get_style_profile("simply-nikah") internally (via _compose), builds the layered SVG, fails loud
     on unknown archetype/format/copy, and returns PNG bytes at exact format dimensions.
+
+    ``heading_font_ref`` / ``body_font_ref`` are OPTIONAL brand-font files threaded into
+    build_nikah_svg (see there); None keeps the system-font render (byte-identical).
     """
     svg = build_nikah_svg(
         archetype, copy=copy, format_key=format_key,
         hero_symbol=hero_symbol, logo_ref=logo_ref, lattice_backdrop=lattice_backdrop,
+        heading_font_ref=heading_font_ref, body_font_ref=body_font_ref,
     )
     return await rasterize_svg_to_png(svg, format_key)
 

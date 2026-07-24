@@ -365,3 +365,102 @@ async def test_live_qa_simply_nikah_allows_generated_vector() -> None:
         format_key="ig_post", source_kind="generated_vector", expect_logo=False,
     )
     assert not any(f.startswith("source:") for f in report.failures), report.failures
+
+
+# --- M-10: a resolved brand font threads into every render path's SVG -------------------------
+#
+# _render_creative_artifacts is the single seam every caller (generate/revise/revert) flows
+# through, so proving the font lands here proves the three render branches (generic svg / glo2go /
+# nikah) are wired. Playwright is stubbed out — the SVG the compositor would rasterize is what we
+# assert on (Playwright rasterizes @font-face, so the family in the SVG is what actually renders).
+
+
+@pytest.mark.parametrize("profile_id", ["generic", "glo2go-aesthetics", "simply-nikah"])
+async def test_render_threads_brand_font_into_svg(
+    profile_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api.services import creative_generation as cg
+    from creative.qa.checks import QAReport
+
+    async def fake_raster(_svg: str, _fmt: str) -> bytes:
+        return b"png"
+
+    async def fake_glo2go(*_args: object, **_kwargs: object) -> bytes:
+        return b"png"
+
+    async def fake_qa(*_args: object, **_kwargs: object) -> QAReport:
+        return QAReport(passed=True, failures=[])
+
+    monkeypatch.setattr("creative.export.svg.rasterize_svg_to_png", fake_raster)
+    monkeypatch.setattr("creative.render.glo2go_templates.render_glo2go", fake_glo2go)
+    monkeypatch.setattr(cg, "run_live_qa", fake_qa)
+
+    font = tmp_path / "brand.ttf"
+    font.write_bytes(b"\x00\x01\x00\x00" + b"stub-ttf-payload")
+    image = tmp_path / "source.png"
+    image.write_bytes(_solid_png("#CCCCCC", 8, 8))
+    artifact_dir = tmp_path / "art"
+    artifact_dir.mkdir()
+
+    brand = Brand(tenant_id="t1", client_id="c1", slug="brand", name="Brand", tokens=BrandTokens())
+    copy_block = CopyBlock(
+        headline="Marry with clear intention",
+        subhead="A gentle, faith-led start",
+        cta="Begin",
+    )
+
+    svg_path, _preview, _profile_render, qa_report = await cg._render_creative_artifacts(
+        brand=brand,
+        profile_id=profile_id,
+        copy_block=copy_block,
+        format_key="ig_post",
+        image_path=image,
+        artifact_dir=artifact_dir,
+        render_params={},
+        source_kind="brand_placeholder",
+        heading_font_ref=str(font),
+        body_font_ref=str(font),
+    )
+
+    svg = svg_path.read_text()
+    assert "@font-face" in svg, f"{profile_id} SVG did not embed the brand font face"
+    assert "MimikBrandHeading" in svg
+    assert "format('truetype')" in svg
+    assert qa_report.passed
+
+
+async def test_render_without_brand_font_has_no_font_face(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Backward compatibility: with no font ref threaded, the SVG is the system-font render — no
+    @font-face block appears (byte-for-byte unchanged from the pre-M-10 path)."""
+    from api.services import creative_generation as cg
+    from creative.qa.checks import QAReport
+
+    async def fake_raster(_svg: str, _fmt: str) -> bytes:
+        return b"png"
+
+    async def fake_qa(*_args: object, **_kwargs: object) -> QAReport:
+        return QAReport(passed=True, failures=[])
+
+    monkeypatch.setattr("creative.export.svg.rasterize_svg_to_png", fake_raster)
+    monkeypatch.setattr(cg, "run_live_qa", fake_qa)
+
+    image = tmp_path / "source.png"
+    image.write_bytes(_solid_png("#CCCCCC", 8, 8))
+    artifact_dir = tmp_path / "art"
+    artifact_dir.mkdir()
+    brand = Brand(tenant_id="t1", client_id="c1", slug="brand", name="Brand", tokens=BrandTokens())
+    copy_block = CopyBlock(headline="Marry with clear intention", subhead="A start", cta="Begin")
+
+    svg_path, *_ = await cg._render_creative_artifacts(
+        brand=brand,
+        profile_id="generic",
+        copy_block=copy_block,
+        format_key="ig_post",
+        image_path=image,
+        artifact_dir=artifact_dir,
+        render_params={},
+        source_kind="brand_placeholder",
+    )
+    svg = svg_path.read_text()
+    assert "@font-face" not in svg
+    assert "MimikBrand" not in svg
