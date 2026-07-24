@@ -14,8 +14,10 @@ the same procedure serves both the client-approval route and the ops board's →
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,8 +39,15 @@ from mimik_contracts import (
     TaskType,
 )
 
+logger = logging.getLogger(__name__)
+
 # A renderer turns a stored creative doc into PNG bytes. Default re-renders from the manifest.
 Renderer = Callable[[AsyncSession, str, CreativeDocRow], Awaitable[bytes]]
+
+# Mirrors creative_generation.CREATIVE_ARTIFACT_ROOT (kept local to avoid importing that large,
+# frequently-changed module). A stored artifact_ref is only honored if it resolves INSIDE this
+# root — the manifest is editable data, so a raw filesystem path from it is untrusted input.
+_CREATIVE_ARTIFACT_ROOT = Path("var/creatives")
 
 
 class ApprovalFlowError(Exception):
@@ -74,6 +83,25 @@ async def default_render(session: AsyncSession, tenant_id: str, doc: CreativeDoc
     from creative.render.compositor import render_context_to_png
 
     manifest = CreativeManifest.model_validate(doc.manifest)
+
+    # Prefer the persisted rendered artifact: it's reproducible from stored data AND covers the
+    # profile-specific renders (glo2go/nikah) whose template_keys are NOT in the registry re-render
+    # path below — archiving would otherwise KeyError on every real profile creative. Re-render is
+    # the fallback only when the stored preview is missing.
+    #
+    # SECURITY: artifact_ref comes from the (editable) manifest, and we read + upload these bytes to
+    # Drive — a crafted ref could exfiltrate an arbitrary file. Only honor it if it resolves to a
+    # regular file CONTAINED in the creatives root; anything else falls through to a safe re-render.
+    l5 = manifest.layer(LayerKind.L5_FINISH)
+    if l5 is not None and l5.artifact_ref:
+        candidate = Path(l5.artifact_ref).resolve()
+        root = _CREATIVE_ARTIFACT_ROOT.resolve()
+        if root in candidate.parents and candidate.is_file():
+            return candidate.read_bytes()
+        logger.warning(
+            "ignoring out-of-root creative artifact_ref for doc=%s (re-rendering instead)", doc.id
+        )
+
     job = await repo.get_job(session, tenant_id=tenant_id, job_id=doc.job_id)
     if job is None:
         raise ApprovalFlowError("job not found for creative")
