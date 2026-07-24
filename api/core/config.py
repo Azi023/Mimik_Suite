@@ -131,15 +131,20 @@ class Settings(BaseSettings):
     whatsapp_api_base: str = "https://graph.facebook.com/v21.0"  # overridable for tests
 
     # Email outbound. "none" (default) records the delivery attempt without network access;
-    # "console" logs the full message for development; "smtp" uses STARTTLS when enabled.
-    # SMTP_PASSWORD is a secret — provide it via env only, never commit or log it.
-    email_provider: str = "none"  # none | smtp | console
+    # "console" logs the full message for development; "smtp" uses STARTTLS when enabled;
+    # "graph" uses an app-only Microsoft Graph token to send as GRAPH_SENDER.
+    # SMTP_PASSWORD and GRAPH_CLIENT_SECRET are secrets — env only, never commit or log them.
+    email_provider: str = "none"  # none | smtp | console | graph
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""  # SECRET — env only
     smtp_from: str = ""
     smtp_use_tls: bool = True
+    graph_tenant_id: str = ""
+    graph_client_id: str = ""
+    graph_client_secret: str = ""  # SECRET — env only
+    graph_sender: str = ""
 
 
 _settings: Settings | None = None
