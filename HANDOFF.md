@@ -4,7 +4,37 @@
 
 ---
 
-## ► LATEST (2026-07-24 pm10) — BIG BUILD SESSION: per-client craft + learning loop + Drive proven; 21 commits, all green
+## ► LATEST (2026-07-24 pm11) — LIVE DEPLOY FIXED + buildable backlog cleared; 30 commits, on prod
+
+**State:** branch `main`, HEAD `281370f`, **661 tests pass** (1 skipped = live-vision critic, needs `GEMINI_API_KEY`). 30 Mimik_Suite commits this session + mimik-contracts pushed (`4bf80be`). **All pushed to GitHub; deployed to prod** (suite.mimikcreations.com, healthy). Tree clean except pre-existing CLAUDE.md/uv.lock + graphify-out/scratchpad (untracked, local).
+
+### DEPLOY IS REAL NOW (was broken since 07-21)
+- **Mimik = plain docker-compose** at `/root/mimik-suite/` (project name `mimiksuite`, NO hyphen — deploy with `docker compose -p mimiksuite pull && up -d`). **NOT Coolify.** Coolify on the VPS manages ONLY the CSE dashboard. A local `.env` on the server is the intended setup.
+- Root cause of the stale deploy: `build-images` CI failed on every push since 07-21 on a pre-existing `TopBar.tsx` unused-import (`next build` fails on lint) — fixed (`b8729ed`). Also the sibling **mimik-contracts had 3 unpushed commits** (CreativeVariant) that would ImportError at runtime — pushed.
+- Deployed image verified live: email adapter, critic gating, nikah engine, CreativeVariant all present; API health 200. **After each push, CI rebuilds the ghcr images (~3min); then run `docker compose -p mimiksuite pull && up -d` on the VPS to go live.**
+- **Prod `.env` is nearly empty — only DATABASE_URL + (now) SUPERADMIN_EMAILS + APP_BASE_URL.** To activate features on live, add to `/root/mimik-suite/.env` then re-up: `GEMINI_API_KEY` (critic vision + copy), Drive `GOOGLE_OAUTH_*` + `ARCHIVE_BACKEND=google_drive_oauth`, `EMAIL_PROVIDER=graph` + `GRAPH_*`, WhatsApp vars. (Do NOT pipe secrets over SSH — operator sets them.)
+
+### SHIPPED THIS SESSION (all committed + pushed; multi-executor: Codex + Claude subagents + Fable)
+Critic gating (advisory, `CRITIC_GATING_ENABLED=False`) · **M365 Graph email** (`EMAIL_PROVIDER=graph`, uses free M365 + a free Azure app) · swappable email adapter + **invitation email + accept page** (`/invite/accept?token=`) · **per-tenant white-label branding** (web/lib/branding.ts; `jasmine`→"Jasmin Suite"; Mimik no-op) · **Arabic/RTL + SN Ayah archetype** (Amiri font) · **SN craft-floor fix** (blob hands→cupped dua-hands, glitch shield→clean crescent; new `creative/render/nikah_vectors.py` + assets/vectors/nikah/ 6 placeholder SVGs) · **multi-format fan-out + N-slide carousels** · Drive full-stack approval proven + archive bug fixed + hardened. (Earlier in session: SN engine live, live-QA gate, A/B variants, learning loop closed, built-in fonts, asset library + thumbnails, Command Center panel+parser, month planner, design-critic slices 1-3.)
+
+### OPEN / operator decisions + next
+1. **Activate live features** = set the prod `.env` secrets above + `compose -p mimiksuite pull && up -d`. Make the **free Azure app** (Graph email — like leads-gen) → set `GRAPH_TENANT_ID/CLIENT_ID/CLIENT_SECRET/SENDER`.
+2. **WhatsApp**: create a FRESH Meta Business Portfolio → WhatsApp Business Account → Business-type app → phone-number-id + permanent system-user token → `WHATSAPP_PROVIDER=meta_cloud` + those. (Old portfolio was enforcement-restricted.)
+3. **White-label follow-ups** (still say "Mimik"): CLIENT REVIEW PORTAL (highest — `PortalShell.tsx`, `review/[token]`, needs tenant_slug in the portal session bundle), invitation-email subject/body, pre-auth login. Do these for a clean Jasmine handoff.
+4. **Critic**: flip `CRITIC_GATING_ENABLED=True` after watching advisory scores.
+5. **SN vectors**: the 6 assets in `assets/vectors/nikah/` are hand-authored placeholders — swap in curated CC0 vectors at the documented path for real polish (operator: source free silhouettes online).
+6. **Stripe** (no account from LK) + **Island Cart cutout** (ops manager must add IC brand brief + assets; rembg needs `rembg[cpu]>=2.0.60` on Py3.13) — both parked.
+
+### ANTI-CONTEXT / gotchas
+- `codex exec --full-auto` sometimes STOPS to ask a design question instead of building — prepend "IMPLEMENT NOW, no questions, decisions already made" + pre-answer to force it through.
+- Concurrent Codex/agents intermingle the working tree — stage per-lane by explicit path, never `git add -A`.
+- Local DB scripts must override `DATABASE_URL='postgresql+asyncpg://mimik:mimik@localhost:5434/mimik_suite'` (the `.env` Supabase line wins otherwise; Supabase connect fails SSL cert verify from local — likely a local cert-store thing, VPS connects fine).
+- The API image copies to `/app/Mimik_Suite/` (WORKDIR), not `/app/` — check container paths there.
+- Run `graphify update .` next session (stale after 30 commits).
+
+---
+
+## (2026-07-24 pm10) — per-client craft + learning loop + Drive proven; 21 commits, all green
 
 **State:** branch `main`, HEAD `4ae0879`, **613 tests pass** (1 skipped = live-vision critic exit test, needs `GEMINI_API_KEY` in-env). 20 commits in Mimik_Suite + 1 in sibling `mimik-contracts` (`4bf80be`). Tree clean except pre-existing `CLAUDE.md`/`uv.lock` drift. Local docker DB (`:5434`) has real data; **2 real Deliveries now in the mimikcreations Drive** (Glo2Go approvals) + a `_Mimik Suite Smoke Test` folder — delete those test artifacts when convenient.
 
