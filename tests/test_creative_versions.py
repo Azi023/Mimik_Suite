@@ -445,14 +445,18 @@ async def test_svg_export_falls_back_to_existing_preview_and_remains_tenant_scop
 ) -> None:
     monkeypatch.chdir(tmp_path)
     Path("source.png").write_bytes(b"source")
-    _stub_renderer(monkeypatch)
     _tenant_id, token = await _create_tenant(client, name="Agency A", slug="svg-fallback-a")
     _client_id, _job_id, creative_id = await _create_creative(
         client,
         token=token,
         suffix="svg-fallback",
     )
-    (Path("var/creatives") / creative_id / "creative.svg").unlink()
+    artifact_dir = Path("var/creatives") / creative_id
+    artifact_dir.mkdir(parents=True)
+    preview_path = artifact_dir / "preview.png"
+    preview_path.write_bytes(b"\x89PNG\r\n\x1a\npreview")
+    assert preview_path.is_file()
+    assert not (artifact_dir / "creative.svg").exists()
 
     response = await client.get(
         f"/exports/svg?creative_id={creative_id}",
@@ -474,6 +478,36 @@ async def test_svg_export_falls_back_to_existing_preview_and_remains_tenant_scop
         headers=_auth(foreign_token),
     )
     assert hidden.status_code == 404
+
+
+async def test_svg_export_returns_404_when_no_svg_or_preview_exists(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("source.png").write_bytes(b"source")
+    _tenant_id, token = await _create_tenant(
+        client,
+        name="Agency A",
+        slug="svg-missing-artifacts",
+    )
+    _client_id, _job_id, creative_id = await _create_creative(
+        client,
+        token=token,
+        suffix="svg-missing-artifacts",
+    )
+    artifact_dir = Path("var/creatives") / creative_id
+    artifact_dir.mkdir(parents=True)
+    assert not (artifact_dir / "creative.svg").exists()
+    assert not (artifact_dir / "preview.png").exists()
+
+    response = await client.get(
+        f"/exports/svg?creative_id={creative_id}",
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 404, response.text
 
 
 async def test_list_all_creatives_returns_latest_per_job_newest_first_and_tenant_scoped(
