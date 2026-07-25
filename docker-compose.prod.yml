@@ -27,6 +27,14 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    # PERSISTENT STATE ON LOCAL DISK. var/creatives holds generated creative artifacts
+    # (creative.svg / preview.png) and var/assets holds uploaded brand assets (logos,
+    # fonts, product photos, reference creatives) — see creative_generation.py
+    # CREATIVE_ARTIFACT_ROOT and config.assets_local_root, both container-relative paths.
+    # Without this mount every `docker compose pull && up -d` destroys all of them, while
+    # the DB rows survive — which surfaces as "Creative not found" in the canvas editor.
+    volumes:
+      - ${VAR_ROOT:-./var}:/app/Mimik_Suite/var
     # RAM-tight box: cap so a Playwright render spike can't OOM the operator's other
     # apps. ~900m leaves room for one serialized Chromium render (Postgres is external).
     mem_limit: 900m
@@ -82,3 +90,6 @@ services:
     # No published port — only the api service reaches redis over the compose network.
 
 # No named volumes: Postgres is external (Supabase) and redis is ephemeral cache.
+# File artifacts are the exception — they are NOT in Postgres. api bind-mounts VAR_ROOT
+# (default ./var, /root/mimik-suite/var on the VPS) so creatives and uploaded brand
+# assets survive image pulls. Back that directory up; nothing else on the box is stateful.
