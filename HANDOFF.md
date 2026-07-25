@@ -4,7 +4,42 @@
 
 ---
 
-## ► LATEST (2026-07-25 pm16) — text-fill + CRUD soft-delete deployed; agy live; git auto-sync; Jasmin/Shevin
+## ► LATEST (2026-07-25 pm17) — OPERATING MODEL: VPS codex builds on branches → Claude reviews → merge → deploy
+
+The build loop is now branch-based + verifiable. Read `docs/AUTONOMOUS_OPERATION.md` +
+`docs/PRODUCTION_ROADMAP.md` first. Everything through pm16 is deployed + green.
+
+### The operating model (decided with operator)
+- **codex/agy on the VPS (`/root/mimik-src/`) are the EXECUTORS.** They run `--full-auto` (skip
+  prompts), have full context (3 repos + all docs), cap at ~120K tokens then handoff+fresh-session.
+- **A Claude session is the ORCHESTRATOR/REVIEWER.** Why: this is a live MULTI-TENANT app — the #1
+  risk is IDOR/tenant leakage — so every change needs a security/tenant-isolation review gate before
+  prod. Pure-autonomous-to-main has no gate.
+- **The loop:** codex works on a `lane/<name>` BRANCH (never main) → pushes → a Claude session reviews
+  (security-review + pattern-reviewer: tenant-scoping, IDOR test green, non-destructive, no secrets) →
+  merge to main → CI builds → deploy on VPS. The pushed branch IS the hand-back checkpoint.
+- **"Alert that falls into a Claude session":** a VPS script cannot invoke a chat. The real mechanism
+  is either (a) manually start a fresh Claude session to review the branch, or (b) `/schedule` a
+  recurring Claude Code cloud agent that reviews open `lane/*` branches. Recommended: set up (b).
+
+### IN-FLIGHT (needs review before merge)
+- **VPS codex is building `lane/fix-canvas-editor`** — the "Creative not found" canvas-editor bug
+  (creative EXISTS + renders on board/review; only the /creatives/[id]/edit route fails). When pushed:
+  `git fetch && git checkout lane/fix-canvas-editor`, run security-review + pattern-reviewer, confirm
+  `npm run build` + `uv run pytest -q` green, then merge to main + deploy. DO NOT merge unreviewed.
+
+### Also done this turn
+- Filled `kit.discovery.mission` for all 3 brands (was the last visible ghost card).
+- Confirmed: creative `af32eac4` EXISTS + not soft-deleted (the "not found" is the editor route bug,
+  not data loss); CI all green (deploys are healthy, nothing "gone").
+
+### NEXT lanes (assign to VPS codex on branches, review each): from PRODUCTION_ROADMAP.md
+in-product brand-kit editing · creative generation quality (copy+imagery) · asset gathering
+(browser+copyright) · in-browser terminal (hardened, separate service) · CRUD PATCH completeness.
+
+---
+
+## ► (2026-07-25 pm16) — text-fill + CRUD soft-delete deployed; agy live; git auto-sync; Jasmin/Shevin
 
 Continuation of pm15. Deployed HEAD `9956ac6`, all green + verified.
 
