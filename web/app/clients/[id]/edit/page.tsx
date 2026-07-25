@@ -54,6 +54,17 @@ export default async function ClientEditPage({
 
   return (
     <AppShell sidebar={sidebar} title="Edit client" crumb={editData.client.name}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: "1rem",
+        }}
+      >
+        <Link href={`/clients/${id}/brand-kit`} className="btn-primary">
+          Open Brand Kit →
+        </Link>
+      </div>
       <ClientBrandEditor client={editData.client} brand={editData.brand} />
     </AppShell>
   );
