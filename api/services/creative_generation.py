@@ -74,7 +74,7 @@ CREATIVE_ARTIFACT_ROOT = Path("var/creatives")
 _MAX_STOCK_BYTES = 20 * 1024 * 1024
 _MAX_STOCK_REDIRECTS = 3
 _PEXELS_IMAGE_HOST = "images.pexels.com"
-_TEAM_ROLES = frozenset({"owner", "admin", "ops", "designer", "team"})
+_TEAM_ROLES = frozenset({"super_admin", "owner", "admin", "ops", "designer", "team"})
 _PROFILE_IDS = frozenset({"glo2go-aesthetics", "simply-nikah", "island-cart"})
 _GLO2GO_ARCHETYPE = "single_photo_education_hero"
 

@@ -114,7 +114,10 @@ def require_role(*roles: str):
     allowed = set(roles)
 
     async def _guard(principal: Principal = Depends(get_principal)) -> Principal:
-        if principal.role not in allowed:
+        # super_admin is the cross-tenant platform role and holds every capability; it satisfies
+        # every role gate. Without this bypass super_admin is paradoxically locked out of team
+        # actions (generate, publish, briefs, …) it is meant to fully own.
+        if principal.role != "super_admin" and principal.role not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Requires role in {sorted(allowed)}",
