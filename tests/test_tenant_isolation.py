@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from conftest import superadmin_headers
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from api.db.models import JobRow
+from api.db.session import get_session
+from api.main import app
 
 
 async def _new_tenant(client: AsyncClient, name: str, slug: str) -> tuple[dict, str]:
@@ -170,6 +175,7 @@ async def test_idor_core_entity_patch_and_delete_blocked_across_tenants(
         f"/clients/{client_id}": {"name": "Taken client"},
         f"/brands/{brand_id}": {"brand_voice": "Taken voice"},
         f"/briefs/{brief_id}": {"snapshot": "Taken brief"},
+        f"/jobs/{job_id}": {"title": "Taken job"},
         f"/creatives/{creative_id}": {"copy_status": "approved"},
         f"/tasks/{task_id}": {"status": "done", "assignee": "tenant-b"},
         f"/assets/{asset_id}": {"notes": "Taken asset"},
@@ -191,6 +197,19 @@ async def test_idor_core_entity_patch_and_delete_blocked_across_tenants(
     assert (
         await client.get(f"/briefs/{brief_id}", headers=headers_a)
     ).json()["sections"]["snapshot"] is None
+    session_gen = app.dependency_overrides[get_session]()
+    session = await session_gen.__anext__()
+    try:
+        stored_job = (
+            await session.execute(select(JobRow).where(JobRow.id == job_id))
+        ).scalar_one()
+        assert stored_job.tenant_id == (
+            await client.get(f"/jobs/{job_id}", headers=headers_a)
+        ).json()["tenant_id"]
+        assert stored_job.title == "A job"
+        assert stored_job.deleted_at is None
+    finally:
+        await session_gen.aclose()
     creative = await client.get(
         f"/jobs/{job_id}/creatives", headers=headers_a
     )

@@ -120,6 +120,32 @@ async def test_unprovisioned_identity_is_forbidden(
     assert resp.status_code == 403
 
 
+async def test_user_from_suspended_tenant_is_forbidden(
+    client: AsyncClient, supabase_env
+) -> None:
+    tenant_id, owner = await _bootstrap_tenant(client)
+    provisioned = await _provision(
+        client,
+        owner,
+        auth_subject="suspended-user",
+        role="ops",
+        email="suspended@example.com",
+    )
+    assert provisioned.status_code == 201, provisioned.text
+
+    suspended = await client.patch(
+        f"/tenants/{tenant_id}",
+        json={"suspended": True},
+        headers=superadmin_headers(),
+    )
+    assert suspended.status_code == 200, suspended.text
+
+    token = supabase_env("suspended-user")
+    denied = await client.get("/clients", headers=_auth(token))
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "Tenant is suspended"
+
+
 async def test_expired_supabase_token_rejected(client: AsyncClient, supabase_env) -> None:
     token = supabase_env("supa-user-1", exp_delta=-10)
     resp = await client.get("/clients", headers=_auth(token))

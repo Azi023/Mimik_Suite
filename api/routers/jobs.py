@@ -6,15 +6,20 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal, require_role
+from api.core.auth import (
+    Principal,
+    get_principal,
+    principal_audit_actor,
+    require_role,
+)
 from api.db import repo
 from api.db.mappers import to_job
 from api.db.session import get_session
-from mimik_contracts import ActorRole, Job
+from mimik_contracts import ActorRole, Job, UpdateJob
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -106,3 +111,75 @@ async def list_jobs(
         client_id = principal.client_id
     rows = await repo.list_jobs(session, tenant_id=principal.tenant_id, client_id=client_id)
     return [to_job(r) for r in rows]
+
+
+@router.patch("/{job_id}", response_model=Job)
+async def update_job(
+    job_id: str,
+    body: UpdateJob,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> Job:
+    fields = body.model_dump(exclude_unset=True)
+    required_fields = ("title", "format_key", "approval_lead_days", "status")
+    if any(name in fields and fields[name] is None for name in required_fields):
+        raise HTTPException(
+            status_code=422,
+            detail="title, format_key, approval_lead_days and status cannot be null",
+        )
+
+    if "status" in fields and body.status is not None:
+        fields["status"] = body.status.value
+
+    if "pillar_id" in fields and body.pillar_id is not None:
+        current = await repo.get_job(
+            session,
+            tenant_id=principal.tenant_id,
+            job_id=job_id,
+        )
+        if current is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        pillar = await repo.get_pillar(
+            session,
+            tenant_id=principal.tenant_id,
+            pillar_id=body.pillar_id,
+        )
+        if pillar is None or pillar.client_id != current.client_id:
+            raise HTTPException(status_code=404, detail="Pillar not found")
+
+    if fields:
+        row = await repo.update_job(
+            session,
+            tenant_id=principal.tenant_id,
+            job_id=job_id,
+            actor=principal_audit_actor(principal),
+            **fields,
+        )
+    else:
+        row = await repo.get_job(
+            session,
+            tenant_id=principal.tenant_id,
+            job_id=job_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await session.commit()
+    return to_job(row)
+
+
+@router.delete("/{job_id}", status_code=204)
+async def delete_job(
+    job_id: str,
+    principal: Principal = Depends(require_role("owner", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await repo.soft_delete_job(
+        session,
+        tenant_id=principal.tenant_id,
+        job_id=job_id,
+        actor=principal_audit_actor(principal),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await session.commit()
+    return Response(status_code=204)

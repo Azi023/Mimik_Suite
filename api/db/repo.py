@@ -51,6 +51,34 @@ async def get_tenant_by_slug(session: AsyncSession, slug: str) -> TenantRow | No
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def list_tenants(session: AsyncSession) -> list[TenantRow]:
+    """Platform scope only. The router must explicitly require super_admin."""
+    stmt = select(TenantRow).order_by(TenantRow.created_at, TenantRow.id)
+    return list((await session.execute(stmt)).scalars())
+
+
+async def set_tenant_suspended(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    suspended: bool,
+    actor: dict[str, str],
+) -> TenantRow | None:
+    """Platform-scoped tenant state mutation; authorization is enforced by the router."""
+    changed_at = datetime.now(timezone.utc)
+    stmt = (
+        update(TenantRow)
+        .where(TenantRow.id == tenant_id)
+        .values(
+            suspended_at=changed_at if suspended else None,
+            suspension_changed_at=changed_at,
+            suspension_changed_by=actor,
+        )
+        .returning(TenantRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 # --- Client ---
 async def create_client(session: AsyncSession, *, tenant_id: str, **fields) -> ClientRow:
     row = ClientRow(tenant_id=tenant_id, **fields)
@@ -286,14 +314,21 @@ async def create_job(session: AsyncSession, *, tenant_id: str, **fields) -> JobR
 
 
 async def get_job(session: AsyncSession, *, tenant_id: str, job_id: str) -> JobRow | None:
-    stmt = select(JobRow).where(JobRow.id == job_id, JobRow.tenant_id == tenant_id)
+    stmt = select(JobRow).where(
+        JobRow.id == job_id,
+        JobRow.tenant_id == tenant_id,
+        JobRow.deleted_at.is_(None),
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def list_jobs(
     session: AsyncSession, *, tenant_id: str, client_id: str | None = None
 ) -> list[JobRow]:
-    stmt = select(JobRow).where(JobRow.tenant_id == tenant_id)
+    stmt = select(JobRow).where(
+        JobRow.tenant_id == tenant_id,
+        JobRow.deleted_at.is_(None),
+    )
     if client_id is not None:
         stmt = stmt.where(JobRow.client_id == client_id)
     stmt = stmt.order_by(JobRow.created_at)
@@ -308,6 +343,7 @@ async def list_jobs_in_publish_window(
         select(JobRow)
         .where(
             JobRow.tenant_id == tenant_id,
+            JobRow.deleted_at.is_(None),
             JobRow.publish_date.is_not(None),
             JobRow.publish_date >= start,
             JobRow.publish_date <= end,
@@ -323,8 +359,57 @@ async def list_scheduled_jobs_all_tenants(session: AsyncSession) -> list[JobRow]
     This is the one deliberately non-tenant-scoped query — it runs in a background worker,
     never on a request path, so there is no caller tenant to filter by. Callers must NOT
     expose its results across a tenant boundary."""
-    stmt = select(JobRow).where(JobRow.publish_date.is_not(None))
+    stmt = select(JobRow).where(
+        JobRow.deleted_at.is_(None),
+        JobRow.publish_date.is_not(None),
+    )
     return list((await session.execute(stmt)).scalars())
+
+
+async def update_job(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    job_id: str,
+    actor: dict[str, str],
+    **fields: object,
+) -> JobRow | None:
+    """Update editable fields without ever resolving the job outside the caller's tenant."""
+    stmt = (
+        update(JobRow)
+        .where(
+            JobRow.id == job_id,
+            JobRow.tenant_id == tenant_id,
+            JobRow.deleted_at.is_(None),
+        )
+        .values(
+            **fields,
+            updated_at=datetime.now(timezone.utc),
+            updated_by=actor,
+        )
+        .returning(JobRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def soft_delete_job(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    job_id: str,
+    actor: dict[str, str],
+) -> JobRow | None:
+    stmt = (
+        update(JobRow)
+        .where(
+            JobRow.id == job_id,
+            JobRow.tenant_id == tenant_id,
+            JobRow.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(timezone.utc), deleted_by=actor)
+        .returning(JobRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 # --- UserAccount (authZ source of truth) ---
@@ -473,6 +558,7 @@ async def create_creative_doc(
             .where(
                 JobRow.id == job_id,
                 JobRow.tenant_id == tenant_id,
+                JobRow.deleted_at.is_(None),
             )
             .with_for_update()
         )
@@ -603,6 +689,7 @@ async def list_latest_creatives(
         ).where(
             JobRow.tenant_id == tenant_id,
             JobRow.client_id == client_id,
+            JobRow.deleted_at.is_(None),
         )
     ranked = ranked_stmt.subquery()
     stmt = (
@@ -669,6 +756,7 @@ async def get_latest_creative_doc_for_client(
             CreativeDocRow.deleted_at.is_(None),
             JobRow.tenant_id == tenant_id,
             JobRow.client_id == client_id,
+            JobRow.deleted_at.is_(None),
         )
         .order_by(CreativeDocRow.created_at.desc())
         .limit(1)
@@ -722,7 +810,11 @@ async def list_tenant_deliveries(
     stmt = (
         select(DeliveryRow, JobRow)
         .join(JobRow, JobRow.id == DeliveryRow.job_id)
-        .where(DeliveryRow.tenant_id == tenant_id)
+        .where(
+            DeliveryRow.tenant_id == tenant_id,
+            JobRow.tenant_id == tenant_id,
+            JobRow.deleted_at.is_(None),
+        )
         .order_by(DeliveryRow.created_at.desc())
     )
     if client_id is not None:

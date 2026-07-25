@@ -69,6 +69,20 @@ def _looks_like_supabase(token: str) -> bool:
     return claims.get("iss") == settings.supabase_issuer
 
 
+async def _reject_suspended_tenant(
+    session: AsyncSession, *, tenant_id: str, role: str
+) -> None:
+    """Block ordinary principals at authentication time; platform operators can reactivate."""
+    if role == "super_admin":
+        return
+    tenant = await repo.get_tenant(session, tenant_id)
+    if tenant is not None and tenant.suspended_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant is suspended",
+        )
+
+
 async def get_principal(
     creds: HTTPAuthorizationCredentials = Depends(_bearer),
     session: AsyncSession = Depends(get_session),
@@ -97,6 +111,11 @@ async def get_principal(
         role = account.role
         if account.email and account.email.lower() in get_settings().superadmin_email_set:
             role = "super_admin"
+        await _reject_suspended_tenant(
+            session,
+            tenant_id=account.tenant_id,
+            role=role,
+        )
         return Principal(
             tenant_id=account.tenant_id,
             role=role,
@@ -114,7 +133,9 @@ async def get_principal(
     tenant_id = payload.get("sub")
     if not tenant_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed token")
-    return Principal(tenant_id=tenant_id, role=payload.get("role", "team"))
+    role = payload.get("role", "team")
+    await _reject_suspended_tenant(session, tenant_id=tenant_id, role=role)
+    return Principal(tenant_id=tenant_id, role=role)
 
 
 def require_role(*roles: str):

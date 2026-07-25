@@ -33,3 +33,57 @@ async def test_create_tenant_allowed_for_superadmin(client: AsyncClient) -> None
     assert body["tenant"]["slug"] == "mimik"
     # The founding principal of the new tenant is its OWNER (not a super_admin).
     assert decode_access_token(body["access_token"])["role"] == "owner"
+
+
+async def test_tenant_list_and_suspend_reject_non_superadmin(
+    client: AsyncClient,
+) -> None:
+    created = await client.post(
+        "/tenants",
+        json={"name": "Mimik", "slug": "mimik"},
+        headers=superadmin_headers(),
+    )
+    tenant_id = created.json()["tenant"]["id"]
+    owner_headers = {
+        "Authorization": f"Bearer {created.json()['access_token']}"
+    }
+
+    assert (await client.get("/tenants", headers=owner_headers)).status_code == 403
+    assert (
+        await client.patch(
+            f"/tenants/{tenant_id}",
+            json={"suspended": True},
+            headers=owner_headers,
+        )
+    ).status_code == 403
+
+
+async def test_superadmin_can_list_suspend_and_reactivate_tenant(
+    client: AsyncClient,
+) -> None:
+    created = await client.post(
+        "/tenants",
+        json={"name": "Mimik", "slug": "mimik"},
+        headers=superadmin_headers(),
+    )
+    tenant_id = created.json()["tenant"]["id"]
+
+    listed = await client.get("/tenants", headers=superadmin_headers())
+    assert listed.status_code == 200, listed.text
+    assert tenant_id in {tenant["id"] for tenant in listed.json()}
+
+    suspended = await client.patch(
+        f"/tenants/{tenant_id}",
+        json={"suspended": True},
+        headers=superadmin_headers(),
+    )
+    assert suspended.status_code == 200, suspended.text
+    assert suspended.json()["suspended_at"] is not None
+
+    reactivated = await client.patch(
+        f"/tenants/{tenant_id}",
+        json={"suspended": False},
+        headers=superadmin_headers(),
+    )
+    assert reactivated.status_code == 200, reactivated.text
+    assert reactivated.json()["suspended_at"] is None

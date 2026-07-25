@@ -19,10 +19,15 @@ _ONE_PIXEL_PNG = (
 )
 
 
+class _TenantlessSession:
+    async def get(self, _model: object, _identity: object) -> None:
+        return None
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    async def _unused_session() -> AsyncIterator[object]:
-        yield object()
+    async def _unused_session() -> AsyncIterator[_TenantlessSession]:
+        yield _TenantlessSession()
 
     app.dependency_overrides[get_session] = _unused_session
     with TestClient(app) as test_client:

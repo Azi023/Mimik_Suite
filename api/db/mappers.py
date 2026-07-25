@@ -59,7 +59,13 @@ def _utc(value: datetime | None) -> datetime | None:
 
 
 def to_tenant(row: TenantRow) -> Tenant:
-    return Tenant(id=row.id, created_at=row.created_at, name=row.name, slug=row.slug)
+    return Tenant(
+        id=row.id,
+        created_at=_utc(row.created_at),
+        name=row.name,
+        slug=row.slug,
+        suspended_at=_utc(row.suspended_at),
+    )
 
 
 def to_client(row: ClientRow) -> Client:

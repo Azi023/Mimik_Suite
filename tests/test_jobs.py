@@ -17,8 +17,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from httpx import AsyncClient
 from jwt.algorithms import ECAlgorithm
+from sqlalchemy import select
 
 from api.core import config, supabase_auth
+from api.db.models import JobRow
+from api.db.session import get_session
+from api.main import app
 
 _ISSUER_BASE = "https://test-project.supabase.co"
 _KID = "test-key-1"
@@ -113,6 +117,100 @@ async def test_list_jobs_by_client(client: AsyncClient) -> None:
     listed = await client.get(f"/jobs?client_id={cid}", headers=_auth(token))
     assert listed.status_code == 200
     assert [j["id"] for j in listed.json()] == [jid]
+
+
+async def test_patch_job_updates_only_named_field(client: AsyncClient) -> None:
+    token = await _new_tenant(client, "Mimik", "mimik")
+    _cid, bid = await _new_brand(client, token)
+    created = await client.post(
+        "/jobs",
+        json={
+            "brand_id": bid,
+            "title": "Original",
+            "format_key": "ig_post",
+            "approval_lead_days": 5,
+            "assignee": "Designer A",
+        },
+        headers=_auth(token),
+    )
+    assert created.status_code == 201, created.text
+    original = created.json()
+
+    patched = await client.patch(
+        f"/jobs/{original['id']}",
+        json={"title": "Updated title"},
+        headers=_auth(token),
+    )
+
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["title"] == "Updated title"
+    assert body["format_key"] == original["format_key"]
+    assert body["approval_lead_days"] == original["approval_lead_days"]
+    assert body["assignee"] == original["assignee"]
+    assert body["status"] == original["status"]
+
+
+@pytest.mark.parametrize("field", ["tenant_id", "client_id", "brand_id", "id"])
+async def test_patch_job_cannot_change_identity_fields(
+    client: AsyncClient, field: str
+) -> None:
+    token = await _new_tenant(client, "Mimik", f"mimik-{field}")
+    _cid, bid = await _new_brand(client, token)
+    created = await client.post(
+        "/jobs",
+        json={"brand_id": bid, "title": "Original", "format_key": "ig_post"},
+        headers=_auth(token),
+    )
+    original = created.json()
+
+    patched = await client.patch(
+        f"/jobs/{original['id']}",
+        json={field: "attacker-controlled"},
+        headers=_auth(token),
+    )
+
+    assert patched.status_code == 422
+    fetched = await client.get(f"/jobs/{original['id']}", headers=_auth(token))
+    assert fetched.status_code == 200
+    assert fetched.json()[field] == original[field]
+
+
+async def test_soft_deleted_job_is_hidden_but_row_is_preserved(
+    client: AsyncClient,
+) -> None:
+    tenant = await client.post(
+        "/tenants",
+        json={"name": "Mimik", "slug": "mimik"},
+        headers=superadmin_headers(),
+    )
+    tenant_id = tenant.json()["tenant"]["id"]
+    token = tenant.json()["access_token"]
+    _cid, bid = await _new_brand(client, token)
+    created = await client.post(
+        "/jobs",
+        json={"brand_id": bid, "title": "Delete me", "format_key": "ig_post"},
+        headers=_auth(token),
+    )
+    job_id = created.json()["id"]
+
+    deleted = await client.delete(f"/jobs/{job_id}", headers=_auth(token))
+
+    assert deleted.status_code == 204, deleted.text
+    assert (await client.get(f"/jobs/{job_id}", headers=_auth(token))).status_code == 404
+    listed = await client.get("/jobs", headers=_auth(token))
+    assert job_id not in {row["id"] for row in listed.json()}
+
+    session_gen = app.dependency_overrides[get_session]()
+    session = await session_gen.__anext__()
+    try:
+        row = (
+            await session.execute(select(JobRow).where(JobRow.id == job_id))
+        ).scalar_one()
+        assert row.deleted_at is not None
+        assert row.deleted_by == {"id": tenant_id, "role": "owner"}
+    finally:
+        await session_gen.aclose()
 
 
 async def test_idor_job_isolation_across_tenants(client: AsyncClient) -> None:
