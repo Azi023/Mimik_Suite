@@ -10,6 +10,7 @@ from mimik_contracts import (
     AssetStudy,
     Brand,
     BrandAsset,
+    BrandKit,
     BrandTokens,
     Brief,
     BriefSections,
@@ -93,6 +94,7 @@ def to_brand(row: BrandRow) -> Brand:
         donts=row.donts or [],
         handles=row.handles or {},
         tokens=BrandTokens.model_validate(row.tokens) if row.tokens else BrandTokens(),
+        kit=BrandKit.model_validate(row.kit) if row.kit else BrandKit(),
         imagery_style=row.imagery_style,
         references=row.references or [],
     )

@@ -75,6 +75,7 @@ class BrandRow(Base):
     donts: Mapped[list] = mapped_column(JSON, default=list)
     handles: Mapped[dict] = mapped_column(JSON, default=dict)
     tokens: Mapped[dict] = mapped_column(JSON, default=dict)
+    kit: Mapped[dict] = mapped_column(JSON, default=dict)
     imagery_style: Mapped[str | None] = mapped_column(String, nullable=True)
     references: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
