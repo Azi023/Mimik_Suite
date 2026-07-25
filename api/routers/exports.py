@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import re
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
+from mimik_contracts import PRESETS, CreativeManifest, LayerKind
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +53,51 @@ def _brand_slug(badge_text: str | None) -> str:
     return slug or "brand"
 
 
+def _artifact_for_creative(creative_id: str, reference: object) -> Path | None:
+    """Resolve only artifacts owned by this creative, never arbitrary manifest paths."""
+    if not isinstance(reference, str) or not reference:
+        return None
+    root = creative_artifact_path(creative_id, "_").parent.resolve()
+    candidate = Path(reference).resolve()
+    if candidate.parent == root and candidate.is_file():
+        return candidate
+    return None
+
+
+def _stored_artifact(
+    creative_id: str,
+    manifest: CreativeManifest,
+    *,
+    filename: str,
+    manifest_key: str,
+) -> Path | None:
+    canonical = creative_artifact_path(creative_id, filename)
+    if canonical.is_file():
+        return canonical
+    finish = manifest.layer(LayerKind.L5_FINISH)
+    if finish is None:
+        return None
+    return _artifact_for_creative(
+        creative_id,
+        finish.recipe.params.get(manifest_key),
+    )
+
+
+def _preview_backed_svg(preview: Path, manifest: CreativeManifest) -> str:
+    """Make legacy PNG-only creatives loadable as a single editable canvas layer."""
+    preset = PRESETS.get(manifest.format_key, PRESETS["ig_post"])
+    encoded = base64.b64encode(preview.read_bytes()).decode("ascii")
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {preset.width} {preset.height}">'
+        f'<g data-layer="layer-background" '
+        f'data-bbox="0 0 {preset.width} {preset.height}">'
+        f'<image href="data:image/png;base64,{encoded}" width="{preset.width}" '
+        f'height="{preset.height}" preserveAspectRatio="xMidYMid slice"/>'
+        "</g></svg>"
+    )
+
+
 @router.get("/svg")
 async def download_stored_svg(
     creative_id: str,
@@ -63,13 +111,33 @@ async def download_stored_svg(
     )
     if scoped is None:
         raise HTTPException(status_code=404, detail="Creative not found")
-    path = creative_artifact_path(scoped[0].id, "creative.svg")
-    if not path.is_file():
+    creative = scoped[0]
+    manifest = CreativeManifest.model_validate(creative.manifest)
+    path = _stored_artifact(
+        creative.id,
+        manifest,
+        filename="creative.svg",
+        manifest_key="svg_ref",
+    )
+    if path is not None:
+        return FileResponse(
+            path,
+            media_type="image/svg+xml",
+            filename=f"{creative_id}.svg",
+        )
+
+    preview = _stored_artifact(
+        creative.id,
+        manifest,
+        filename="preview.png",
+        manifest_key="preview_ref",
+    )
+    if preview is None:
         raise HTTPException(status_code=404, detail="Creative SVG not found")
-    return FileResponse(
-        path,
+    return Response(
+        content=_preview_backed_svg(preview, manifest),
         media_type="image/svg+xml",
-        filename=f"{creative_id}.svg",
+        headers={"Content-Disposition": f'attachment; filename="{creative_id}.svg"'},
     )
 
 

@@ -438,6 +438,44 @@ async def test_versions_are_ordered_tenant_scoped_and_client_scoped(
     assert hidden_history.status_code == 404
 
 
+async def test_svg_export_falls_back_to_existing_preview_and_remains_tenant_scoped(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    Path("source.png").write_bytes(b"source")
+    _stub_renderer(monkeypatch)
+    _tenant_id, token = await _create_tenant(client, name="Agency A", slug="svg-fallback-a")
+    _client_id, _job_id, creative_id = await _create_creative(
+        client,
+        token=token,
+        suffix="svg-fallback",
+    )
+    (Path("var/creatives") / creative_id / "creative.svg").unlink()
+
+    response = await client.get(
+        f"/exports/svg?creative_id={creative_id}",
+        headers=_auth(token),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert 'data-layer="layer-background"' in response.text
+    assert "data:image/png;base64," in response.text
+
+    _foreign_tenant_id, foreign_token = await _create_tenant(
+        client,
+        name="Agency B",
+        slug="svg-fallback-b",
+    )
+    hidden = await client.get(
+        f"/exports/svg?creative_id={creative_id}",
+        headers=_auth(foreign_token),
+    )
+    assert hidden.status_code == 404
+
+
 async def test_list_all_creatives_returns_latest_per_job_newest_first_and_tenant_scoped(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
