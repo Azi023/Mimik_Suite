@@ -1198,6 +1198,30 @@
   color: var(--bk-card);
 }
 
+.bk-btn--danger {
+  color: #a83228;
+  border-color: color-mix(in srgb, #a83228 35%, var(--bk-line));
+}
+
+.bk-asset-remove {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  border: 1px solid color-mix(in srgb, #a83228 35%, var(--bk-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bk-paper) 92%, transparent);
+  color: #a83228;
+  padding: 5px 9px;
+  font: 600 10px/1 var(--bk-mono);
+  cursor: pointer;
+}
+
+.bk-asset-remove:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
 /* ————— colophon ————— */
 .bk-colophon {
   max-width: 1180px;

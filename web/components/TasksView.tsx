@@ -4,7 +4,11 @@ import { useMemo, useState, useTransition, type JSX } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ApiTask } from "@/lib/api";
-import { advanceTaskAction } from "@/app/tasks/actions";
+import {
+  advanceTaskAction,
+  removeTaskAction,
+  updateTaskAction,
+} from "@/app/tasks/actions";
 
 /** Task statuses (mimik_contracts.enums.TaskStatus) + the "all" filter sentinel. */
 const STATUSES = ["open", "in_progress", "done"] as const;
@@ -31,6 +35,17 @@ const NEXT_STATUS: ReadonlyMap<Status, Status> = new Map([
 ]);
 
 const PAGE_SIZE = 12;
+const TASK_CRUD_CSS = `
+  .tasks__inline-edit {
+    display: grid; grid-template-columns: minmax(120px, .7fr) minmax(140px, 1fr) auto auto;
+    align-items: center; gap: 6px; margin-top: 8px;
+  }
+  .tasks__actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex-wrap: wrap; }
+  .tasks__remove { color: var(--danger, #b42318); }
+  @media (max-width: 760px) {
+    .tasks__inline-edit { grid-template-columns: 1fr; }
+  }
+`;
 
 function formatWhen(iso: string): string {
   const d = new Date(iso);
@@ -60,6 +75,9 @@ export function TasksView({ tasks, clientNames }: TasksViewProps): JSX.Element {
   const [page, setPage] = useState(0);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editStatus, setEditStatus] = useState<Status>("open");
+  const [editAssignee, setEditAssignee] = useState("");
 
   const filtered = useMemo(
     () =>
@@ -98,8 +116,46 @@ export function TasksView({ tasks, clientNames }: TasksViewProps): JSX.Element {
     });
   }
 
+  function beginEdit(task: ApiTask): void {
+    setEditingId(task.id);
+    setEditStatus(task.status as Status);
+    setEditAssignee(task.assignee ?? "");
+    setError("");
+  }
+
+  function saveEdit(taskId: string): void {
+    setBusyId(taskId);
+    setError("");
+    startTransition(async () => {
+      const result = await updateTaskAction(taskId, editStatus, editAssignee);
+      setBusyId(null);
+      if (result.ok) {
+        setEditingId(null);
+        router.refresh();
+      } else {
+        setError(result.error ?? "Could not update the task.");
+      }
+    });
+  }
+
+  function remove(task: ApiTask): void {
+    if (!window.confirm(`Remove “${task.title}”? It will be hidden, not destroyed.`)) return;
+    setBusyId(task.id);
+    setError("");
+    startTransition(async () => {
+      const result = await removeTaskAction(task.id);
+      setBusyId(null);
+      if (result.ok) {
+        router.refresh();
+      } else {
+        setError(result.error ?? "Could not remove the task.");
+      }
+    });
+  }
+
   return (
     <div className="tasks">
+      <style>{TASK_CRUD_CSS}</style>
       <div className="tasks__filters">
         <div className="tasks__filter-group" role="group" aria-label="Filter by status">
           <button
@@ -178,6 +234,47 @@ export function TasksView({ tasks, clientNames }: TasksViewProps): JSX.Element {
                           open review ↗
                         </Link>
                       )}
+                      {editingId === task.id && (
+                        <div className="tasks__inline-edit">
+                          <select
+                            className="tasks__select"
+                            aria-label={`Status for ${task.title}`}
+                            value={editStatus}
+                            onChange={(event): void =>
+                              setEditStatus(event.target.value as Status)
+                            }
+                          >
+                            {STATUSES.map((status) => (
+                              <option key={status} value={status}>
+                                {STATUS_LABEL.get(status)}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="tasks__select"
+                            value={editAssignee}
+                            maxLength={255}
+                            placeholder="Assignee"
+                            aria-label={`Assignee for ${task.title}`}
+                            onChange={(event): void => setEditAssignee(event.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            disabled={pending && busyId === task.id}
+                            onClick={(): void => saveEdit(task.id)}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={(): void => setEditingId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td>
                       <span className="tasks__type">{TYPE_LABEL.get(task.type) ?? task.type}</span>
@@ -190,6 +287,14 @@ export function TasksView({ tasks, clientNames }: TasksViewProps): JSX.Element {
                     </td>
                     <td className="tasks__when">{formatWhen(task.updated_at ?? task.created_at)}</td>
                     <td className="tasks__actions">
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        disabled={pending}
+                        onClick={(): void => beginEdit(task)}
+                      >
+                        Edit
+                      </button>
                       {next !== undefined ? (
                         <button
                           type="button"
@@ -206,6 +311,14 @@ export function TasksView({ tasks, clientNames }: TasksViewProps): JSX.Element {
                           ✓
                         </span>
                       )}
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm tasks__remove"
+                        disabled={pending && busyId === task.id}
+                        onClick={(): void => remove(task)}
+                      >
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 );

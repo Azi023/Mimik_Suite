@@ -13,6 +13,12 @@ type UploadAction = (
   formData: FormData,
 ) => Promise<AssetActionResult>;
 type AssetAction = (assetId: string) => Promise<AssetActionResult>;
+type AssetUpdateAction = (
+  assetId: string,
+  filename: string,
+  license: string,
+  notes: string,
+) => Promise<AssetActionResult>;
 type FontLibraryAction = () => Promise<FontLibraryResult>;
 type MaterializeFontAction = (brandId: string, fontKey: string) => Promise<AssetActionResult>;
 
@@ -38,6 +44,8 @@ interface BrandAssetLibraryProps {
   approveAction: AssetAction;
   knockoutAction: AssetAction;
   ingestAction: AssetAction;
+  updateAction: AssetUpdateAction;
+  removeAction: AssetAction;
   /** Lazy-load the built-in font catalog (team-gated, server-side) for the Fonts picker. */
   fontLibraryAction: FontLibraryAction;
   /** Materialize a chosen built-in font as an approved FONT asset for the brand. */
@@ -101,6 +109,8 @@ export function BrandAssetLibrary({
   approveAction,
   knockoutAction,
   ingestAction,
+  updateAction,
+  removeAction,
   fontLibraryAction,
   materializeFontAction,
 }: BrandAssetLibraryProps): JSX.Element {
@@ -182,6 +192,8 @@ export function BrandAssetLibrary({
             approveAction={approveAction}
             knockoutAction={knockoutAction}
             ingestAction={ingestAction}
+            updateAction={updateAction}
+            removeAction={removeAction}
             fontLibraryAction={fontLibraryAction}
             materializeFontAction={materializeFontAction}
           />
@@ -207,6 +219,8 @@ interface AssetSectionProps {
   approveAction: AssetAction;
   knockoutAction: AssetAction;
   ingestAction: AssetAction;
+  updateAction: AssetUpdateAction;
+  removeAction: AssetAction;
   fontLibraryAction: FontLibraryAction;
   materializeFontAction: MaterializeFontAction;
 }
@@ -219,6 +233,8 @@ function AssetSection({
   approveAction,
   knockoutAction,
   ingestAction,
+  updateAction,
+  removeAction,
   fontLibraryAction,
   materializeFontAction,
 }: AssetSectionProps): JSX.Element {
@@ -299,6 +315,8 @@ function AssetSection({
               approveAction={approveAction}
               knockoutAction={knockoutAction}
               ingestAction={ingestAction}
+              updateAction={updateAction}
+              removeAction={removeAction}
             />
           ))}
         </div>
@@ -312,6 +330,8 @@ interface AssetCardProps {
   approveAction: AssetAction;
   knockoutAction: AssetAction;
   ingestAction: AssetAction;
+  updateAction: AssetUpdateAction;
+  removeAction: AssetAction;
 }
 
 function AssetCard({
@@ -319,11 +339,17 @@ function AssetCard({
   approveAction,
   knockoutAction,
   ingestAction,
+  updateAction,
+  removeAction,
 }: AssetCardProps): JSX.Element {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [filename, setFilename] = useState(asset.filename);
+  const [license, setLicense] = useState(asset.license ?? "");
+  const [notes, setNotes] = useState(asset.notes ?? "");
 
   function run(action: AssetAction): void {
     setError("");
@@ -337,6 +363,27 @@ function AssetCard({
         setError(result.error ?? "That action failed.");
       }
     });
+  }
+
+  function saveMetadata(): void {
+    setError("");
+    setNotice("");
+    startTransition(async () => {
+      const result = await updateAction(asset.id, filename, license, notes);
+      if (result.ok) {
+        setEditing(false);
+        router.refresh();
+      } else {
+        setError(result.error ?? "Couldn't update that asset.");
+      }
+    });
+  }
+
+  function remove(): void {
+    if (!window.confirm(`Remove “${asset.filename}”? The file will be hidden, not destroyed.`)) {
+      return;
+    }
+    run(removeAction);
   }
 
   const isFont = asset.kind === "font";
@@ -382,6 +429,14 @@ function AssetCard({
         )}
 
         <div className="assetcard__actions">
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            disabled={pending}
+            onClick={(): void => setEditing((current) => !current)}
+          >
+            {editing ? "Cancel edit" : "Edit"}
+          </button>
           {!asset.approved && (
             <button
               type="button"
@@ -412,7 +467,54 @@ function AssetCard({
               {study === null ? "Ingest" : "Re-ingest"}
             </button>
           )}
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm assetcard__remove"
+            disabled={pending}
+            onClick={remove}
+          >
+            Remove
+          </button>
         </div>
+
+        {editing && (
+          <div className="assetcard__editor">
+            <label>
+              <span>Filename</span>
+              <input
+                value={filename}
+                maxLength={255}
+                onChange={(event): void => setFilename(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>License</span>
+              <input
+                value={license}
+                maxLength={500}
+                placeholder="Client-owned, licensed…"
+                onChange={(event): void => setLicense(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Notes</span>
+              <textarea
+                value={notes}
+                maxLength={2000}
+                rows={2}
+                onChange={(event): void => setNotes(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              disabled={pending || filename.trim() === ""}
+              onClick={saveMetadata}
+            >
+              {pending ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        )}
 
         {error !== "" && (
           <p className="assetcard__err" role="alert">
@@ -698,6 +800,21 @@ const STYLES = `
     padding: 2px 8px; border-radius: 999px; margin-top: 2px;
   }
   .assetcard__badge--ok { background: var(--accent-soft); color: var(--accent); }
+  .assetcard__remove { color: var(--danger, #b42318); }
+  .assetcard__editor {
+    display: grid; gap: 8px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line);
+  }
+  .assetcard__editor label { display: grid; gap: 3px; }
+  .assetcard__editor label > span {
+    font-size: 10px; font-weight: 650; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .assetcard__editor input,
+  .assetcard__editor textarea {
+    width: 100%; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--surface); color: var(--ink); padding: 7px 8px; font: inherit;
+  }
+  .assetcard__editor textarea { resize: vertical; }
   .assetcard__badge--pending { background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
   .assetcard__study { margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
   .assetcard__palette { display: flex; gap: 3px; }

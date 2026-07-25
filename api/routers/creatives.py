@@ -9,10 +9,15 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal, require_role
+from api.core.auth import (
+    Principal,
+    get_principal,
+    principal_audit_actor,
+    require_role,
+)
 from api.db import repo
 from api.db.mappers import to_brand, to_creative_doc
 from api.db.session import get_session
@@ -31,6 +36,7 @@ from mimik_contracts import (
     ActorRole,
     BrandLayout,
     CopyBlock,
+    CopyStatus,
     CreativeDoc,
     CreativeManifest,
     CreativeVersionInfo,
@@ -112,6 +118,13 @@ class RevertCreativeRequest(BaseModel):
     to_creative_id: str
 
 
+class UpdateCreativeMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    copy_status: CopyStatus | None = None
+    revision_note: str | None = Field(default=None, max_length=500)
+
+
 @router.post("", response_model=CreativeDoc, status_code=201)
 async def create_creative(
     job_id: str,
@@ -182,6 +195,70 @@ async def list_all_creatives(
         client_id=client_filter,
     )
     return [to_creative_doc(r) for r in rows]
+
+
+@artifact_router.patch("/{creative_id}", response_model=CreativeDoc)
+async def update_creative(
+    creative_id: str,
+    body: UpdateCreativeMetadata,
+    principal: Principal = Depends(require_role("owner", "admin", "ops", "designer", "team")),
+    session: AsyncSession = Depends(get_session),
+) -> CreativeDoc:
+    row = await repo.get_creative_doc(
+        session,
+        tenant_id=principal.tenant_id,
+        creative_doc_id=creative_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+
+    supplied = body.model_dump(exclude_unset=True)
+    fields: dict[str, object] = {}
+    if "copy_status" in supplied:
+        if body.copy_status is None:
+            raise HTTPException(status_code=422, detail="copy_status cannot be null")
+        manifest = CreativeManifest.model_validate(row.manifest)
+        if manifest.copy_block is None:
+            raise HTTPException(status_code=422, detail="Creative has no copy block")
+        copy_block = manifest.copy_block.model_copy(
+            update={"status": body.copy_status}
+        )
+        fields["manifest"] = manifest.model_copy(
+            update={"copy_block": copy_block}
+        ).model_dump(mode="json")
+    if "revision_note" in supplied:
+        fields["revision_note"] = body.revision_note
+
+    if fields:
+        updated = await repo.update_creative_doc(
+            session,
+            tenant_id=principal.tenant_id,
+            creative_doc_id=creative_id,
+            **fields,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Creative not found")
+        row = updated
+    await session.commit()
+    return to_creative_doc(row)
+
+
+@artifact_router.delete("/{creative_id}", status_code=204)
+async def delete_creative(
+    creative_id: str,
+    principal: Principal = Depends(require_role("owner", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await repo.soft_delete_creative_doc(
+        session,
+        tenant_id=principal.tenant_id,
+        creative_doc_id=creative_id,
+        actor=principal_audit_actor(principal),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Creative not found")
+    await session.commit()
+    return Response(status_code=204)
 
 
 @artifact_router.post("/{creative_id}/revise", response_model=GeneratedCreative, status_code=201)

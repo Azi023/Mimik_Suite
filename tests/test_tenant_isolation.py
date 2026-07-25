@@ -107,6 +107,101 @@ async def test_idor_client_patch_blocked_across_tenants(client: AsyncClient) -> 
     assert fetched.json()["name"] == "A's client"
 
 
+async def test_idor_core_entity_patch_and_delete_blocked_across_tenants(
+    client: AsyncClient,
+) -> None:
+    """Every mutable core route resolves the real id inside the caller's tenant."""
+    _, token_a = await _new_tenant(client, "Agency A", "a")
+    _, token_b = await _new_tenant(client, "Agency B", "b")
+    headers_a = _auth(token_a)
+    headers_b = _auth(token_b)
+
+    client_id = (
+        await client.post("/clients", json={"name": "A client"}, headers=headers_a)
+    ).json()["id"]
+    brand_id = (
+        await client.post(
+            "/brands",
+            json={"client_id": client_id, "name": "A brand", "slug": "a-brand"},
+            headers=headers_a,
+        )
+    ).json()["id"]
+    brief_id = (
+        await client.post("/briefs", json={"brand_id": brand_id}, headers=headers_a)
+    ).json()["id"]
+    job_id = (
+        await client.post(
+            "/jobs",
+            json={"brand_id": brand_id, "title": "A job", "format_key": "ig_post"},
+            headers=headers_a,
+        )
+    ).json()["id"]
+    creative_id = (
+        await client.post(
+            f"/jobs/{job_id}/creatives",
+            json={
+                "template_key": "centered_hero",
+                "copy_block": {"headline": "Tenant A only"},
+            },
+            headers=headers_a,
+        )
+    ).json()["id"]
+    task_id = (
+        await client.post(
+            "/tasks",
+            json={"client_id": client_id, "type": "comment", "title": "A task"},
+            headers=headers_a,
+        )
+    ).json()["id"]
+    asset_id = (
+        await client.post(
+            f"/brands/{brand_id}/assets/register",
+            json={
+                "kind": "logo",
+                "drive_file_id": "drive-a-logo",
+                "filename": "a-logo.png",
+                "mime": "image/png",
+            },
+            headers=headers_a,
+        )
+    ).json()["id"]
+
+    patches = {
+        f"/clients/{client_id}": {"name": "Taken client"},
+        f"/brands/{brand_id}": {"brand_voice": "Taken voice"},
+        f"/briefs/{brief_id}": {"snapshot": "Taken brief"},
+        f"/creatives/{creative_id}": {"copy_status": "approved"},
+        f"/tasks/{task_id}": {"status": "done", "assignee": "tenant-b"},
+        f"/assets/{asset_id}": {"notes": "Taken asset"},
+    }
+    for path, payload in patches.items():
+        response = await client.patch(path, json=payload, headers=headers_b)
+        assert response.status_code == 404, f"IDOR PATCH succeeded for {path}: {response.text}"
+
+    for path in patches:
+        response = await client.delete(path, headers=headers_b)
+        assert response.status_code == 404, f"IDOR DELETE succeeded for {path}: {response.text}"
+
+    assert (
+        await client.get(f"/clients/{client_id}", headers=headers_a)
+    ).json()["name"] == "A client"
+    assert (
+        await client.get(f"/brands/{brand_id}", headers=headers_a)
+    ).json()["brand_voice"] is None
+    assert (
+        await client.get(f"/briefs/{brief_id}", headers=headers_a)
+    ).json()["sections"]["snapshot"] is None
+    creative = await client.get(
+        f"/jobs/{job_id}/creatives", headers=headers_a
+    )
+    assert creative.json()[0]["manifest"]["copy_block"]["status"] == "draft"
+    assert (
+        await client.get(f"/tasks/{task_id}", headers=headers_a)
+    ).json()["assignee"] is None
+    assets = await client.get(f"/brands/{brand_id}/assets", headers=headers_a)
+    assert assets.json()[0]["notes"] is None
+
+
 async def test_brand_cannot_attach_to_another_tenants_client(client: AsyncClient) -> None:
     _, token_a = await _new_tenant(client, "Agency A", "a")
     _, token_b = await _new_tenant(client, "Agency B", "b")

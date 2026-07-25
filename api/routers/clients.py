@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal, is_client_in_scope, require_role
+from api.core.auth import (
+    Principal,
+    get_principal,
+    is_client_in_scope,
+    principal_audit_actor,
+    require_role,
+)
 from api.db import repo
 from api.db.mappers import to_client, to_creative_doc
 from api.db.session import get_session
@@ -113,6 +119,24 @@ async def update_client(
         raise HTTPException(status_code=404, detail="Client not found")
     await session.commit()
     return to_client(row)
+
+
+@router.delete("/{client_id}", status_code=204)
+async def delete_client(
+    client_id: str,
+    principal: Principal = Depends(require_role("owner", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await repo.soft_delete_client(
+        session,
+        tenant_id=principal.tenant_id,
+        client_id=client_id,
+        actor=principal_audit_actor(principal),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/{client_id}/creatives:generate", response_model=GeneratedCreative)

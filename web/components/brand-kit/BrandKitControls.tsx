@@ -11,6 +11,9 @@
  */
 
 import { useState, type JSX } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { removeBrandAction } from "@/app/crud-actions";
 
 /** One per-section PNG export link (registry order). */
 export interface KitSectionLink {
@@ -53,6 +56,7 @@ export function BrandKitControls({
   pdfHref,
   sectionLinks,
 }: BrandKitControlsProps): JSX.Element {
+  const router = useRouter();
   const [published, setPublished] = useState<boolean>(initialPublished);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
@@ -105,6 +109,20 @@ export function BrandKitControls({
     }
   }
 
+  async function removeBrand(): Promise<void> {
+    if (!window.confirm("Remove this brand? It will be hidden, not destroyed.")) return;
+    setBusy(true);
+    setError(null);
+    const result = await removeBrandAction(brandId);
+    setBusy(false);
+    if (result.ok) {
+      router.push("/clients");
+      router.refresh();
+    } else {
+      setError(result.error ?? "Could not remove this brand.");
+    }
+  }
+
   return (
     <div className="bk-ctlbar">
       <div className="bk-ctl-status">
@@ -117,6 +135,9 @@ export function BrandKitControls({
         </span>
       </div>
       <div className="bk-ctl-actions">
+        <Link className="bk-btn" href={`/brands/${encodeURIComponent(brandId)}/kit`}>
+          Edit brand
+        </Link>
         <button
           type="button"
           className={published ? "bk-btn" : "bk-btn bk-btn--primary"}
@@ -152,6 +173,16 @@ export function BrandKitControls({
             ))}
           </div>
         </details>
+        <button
+          type="button"
+          className="bk-btn bk-btn--danger"
+          disabled={busy}
+          onClick={(): void => {
+            void removeBrand();
+          }}
+        >
+          Remove brand
+        </button>
       </div>
       {shareUrl !== null && (
         <div className="bk-ctl-share">

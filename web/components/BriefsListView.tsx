@@ -1,5 +1,10 @@
+"use client";
+
 import type { JSX } from "react";
 import Link from "next/link";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { removeBriefAction } from "@/app/crud-actions";
 import type { ApiBrief, ApiBriefStatus } from "@/lib/api";
 import { ChevronRightIcon } from "./icons";
 
@@ -37,11 +42,40 @@ function firstLine(text: string | null, max = 120): string | null {
 }
 
 export function BriefsListView({ briefs, clientNames }: BriefsListViewProps): JSX.Element {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
   // Newest first — the brief someone is most likely working on sits at the top.
   const sorted = [...briefs].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
+  function remove(brief: ApiBrief, name: string): void {
+    if (!window.confirm(`Remove ${name} brief v${brief.version}? It will be hidden, not destroyed.`)) {
+      return;
+    }
+    setBusyId(brief.id);
+    setError("");
+    startTransition(async () => {
+      const result = await removeBriefAction(brief.id);
+      setBusyId(null);
+      if (result.ok) {
+        router.refresh();
+      } else {
+        setError(result.error ?? "Could not remove this brief.");
+      }
+    });
+  }
+
   return (
     <div className="brief">
+      <style>{`
+        .brief-card-wrap { position: relative; }
+        .brief-card-remove {
+          position: absolute; right: 42px; bottom: 14px; z-index: 1;
+          color: var(--danger, #b42318); background: var(--surface);
+        }
+        .brief-list-error { margin-bottom: var(--sp-3); color: var(--danger, #b42318); font-size: 12px; }
+      `}</style>
       <header className="brief-head">
         <div>
           <h1 className="brief-head__title">Brand briefs</h1>
@@ -51,6 +85,11 @@ export function BriefsListView({ briefs, clientNames }: BriefsListViewProps): JS
           </p>
         </div>
       </header>
+      {error !== "" && (
+        <p className="brief-list-error" role="alert">
+          {error}
+        </p>
+      )}
 
       {sorted.length === 0 ? (
         <div className="empty-state">
@@ -66,7 +105,7 @@ export function BriefsListView({ briefs, clientNames }: BriefsListViewProps): JS
             const name = clientNames[brief.client_id] ?? "Untitled client";
             const preview = firstLine(brief.sections.snapshot);
             return (
-              <li key={brief.id}>
+              <li key={brief.id} className="brief-card-wrap">
                 <Link href={`/briefs/${brief.id}`} className="brief-card">
                   <div className="brief-card__main">
                     <div className="brief-card__titlerow">
@@ -89,6 +128,14 @@ export function BriefsListView({ briefs, clientNames }: BriefsListViewProps): JS
                   </div>
                   <ChevronRightIcon />
                 </Link>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm brief-card-remove"
+                  disabled={pending && busyId === brief.id}
+                  onClick={(): void => remove(brief, name)}
+                >
+                  {pending && busyId === brief.id ? "Removing…" : "Remove"}
+                </button>
               </li>
             );
           })}

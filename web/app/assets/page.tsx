@@ -19,6 +19,8 @@ import {
   knockoutLogoAction,
   loadFontLibraryAction,
   materializeBuiltinFontAction,
+  removeAssetAction,
+  updateAssetAction,
   uploadAssetAction,
 } from "./actions";
 
@@ -103,6 +105,8 @@ export default async function AssetsPage({ searchParams }: AssetsPageProps): Pro
         approveAction={approveAssetAction}
         knockoutAction={knockoutLogoAction}
         ingestAction={ingestReferenceAction}
+        updateAction={updateAssetAction}
+        removeAction={removeAssetAction}
         fontLibraryAction={loadFontLibraryAction}
         materializeFontAction={materializeBuiltinFontAction}
       />

@@ -7,7 +7,7 @@ client — so a caller cannot read another tenant's rows even with a valid id (I
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from mimik_contracts import TaskStatus, TaskType
 from sqlalchemy import func, select, update
@@ -61,7 +61,9 @@ async def create_client(session: AsyncSession, *, tenant_id: str, **fields) -> C
 
 async def get_client(session: AsyncSession, *, tenant_id: str, client_id: str) -> ClientRow | None:
     stmt = select(ClientRow).where(
-        ClientRow.id == client_id, ClientRow.tenant_id == tenant_id
+        ClientRow.id == client_id,
+        ClientRow.tenant_id == tenant_id,
+        ClientRow.deleted_at.is_(None),
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -76,7 +78,11 @@ async def update_client(
     """Update one client without ever resolving it outside the caller's tenant."""
     stmt = (
         update(ClientRow)
-        .where(ClientRow.id == client_id, ClientRow.tenant_id == tenant_id)
+        .where(
+            ClientRow.id == client_id,
+            ClientRow.tenant_id == tenant_id,
+            ClientRow.deleted_at.is_(None),
+        )
         .values(**fields)
         .returning(ClientRow)
     )
@@ -84,7 +90,11 @@ async def update_client(
 
 
 async def list_clients(session: AsyncSession, *, tenant_id: str) -> list[ClientRow]:
-    stmt = select(ClientRow).where(ClientRow.tenant_id == tenant_id).order_by(ClientRow.created_at)
+    stmt = (
+        select(ClientRow)
+        .where(ClientRow.tenant_id == tenant_id, ClientRow.deleted_at.is_(None))
+        .order_by(ClientRow.created_at)
+    )
     return list((await session.execute(stmt)).scalars())
 
 
@@ -94,9 +104,31 @@ async def get_client_by_email(
     """Find an existing client by contact email within a tenant — the claim-form dedup key
     (a resubmitted claim returns the existing prospect instead of creating a duplicate)."""
     stmt = select(ClientRow).where(
-        ClientRow.tenant_id == tenant_id, ClientRow.contact_email == email
+        ClientRow.tenant_id == tenant_id,
+        ClientRow.contact_email == email,
+        ClientRow.deleted_at.is_(None),
     )
     return (await session.execute(stmt)).scalars().first()
+
+
+async def soft_delete_client(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    client_id: str,
+    actor: dict[str, str],
+) -> ClientRow | None:
+    stmt = (
+        update(ClientRow)
+        .where(
+            ClientRow.id == client_id,
+            ClientRow.tenant_id == tenant_id,
+            ClientRow.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(timezone.utc), deleted_by=actor)
+        .returning(ClientRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 # --- Brand ---
@@ -108,7 +140,11 @@ async def create_brand(session: AsyncSession, *, tenant_id: str, **fields) -> Br
 
 
 async def get_brand(session: AsyncSession, *, tenant_id: str, brand_id: str) -> BrandRow | None:
-    stmt = select(BrandRow).where(BrandRow.id == brand_id, BrandRow.tenant_id == tenant_id)
+    stmt = select(BrandRow).where(
+        BrandRow.id == brand_id,
+        BrandRow.tenant_id == tenant_id,
+        BrandRow.deleted_at.is_(None),
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
@@ -122,7 +158,11 @@ async def update_brand(
     """Update one brand without ever resolving it outside the caller's tenant."""
     stmt = (
         update(BrandRow)
-        .where(BrandRow.id == brand_id, BrandRow.tenant_id == tenant_id)
+        .where(
+            BrandRow.id == brand_id,
+            BrandRow.tenant_id == tenant_id,
+            BrandRow.deleted_at.is_(None),
+        )
         .values(**fields)
         .returning(BrandRow)
     )
@@ -132,11 +172,33 @@ async def update_brand(
 async def list_brands(
     session: AsyncSession, *, tenant_id: str, client_id: str | None = None
 ) -> list[BrandRow]:
-    stmt = select(BrandRow).where(BrandRow.tenant_id == tenant_id)
+    stmt = select(BrandRow).where(
+        BrandRow.tenant_id == tenant_id, BrandRow.deleted_at.is_(None)
+    )
     if client_id is not None:
         stmt = stmt.where(BrandRow.client_id == client_id)
     stmt = stmt.order_by(BrandRow.created_at)
     return list((await session.execute(stmt)).scalars())
+
+
+async def soft_delete_brand(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    brand_id: str,
+    actor: dict[str, str],
+) -> BrandRow | None:
+    stmt = (
+        update(BrandRow)
+        .where(
+            BrandRow.id == brand_id,
+            BrandRow.tenant_id == tenant_id,
+            BrandRow.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(timezone.utc), deleted_by=actor)
+        .returning(BrandRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 # --- Content pillar ---
@@ -175,18 +237,44 @@ async def create_brief(session: AsyncSession, *, tenant_id: str, **fields) -> Br
 
 
 async def get_brief(session: AsyncSession, *, tenant_id: str, brief_id: str) -> BriefRow | None:
-    stmt = select(BriefRow).where(BriefRow.id == brief_id, BriefRow.tenant_id == tenant_id)
+    stmt = select(BriefRow).where(
+        BriefRow.id == brief_id,
+        BriefRow.tenant_id == tenant_id,
+        BriefRow.deleted_at.is_(None),
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def list_briefs(
     session: AsyncSession, *, tenant_id: str, client_id: str | None = None
 ) -> list[BriefRow]:
-    stmt = select(BriefRow).where(BriefRow.tenant_id == tenant_id)
+    stmt = select(BriefRow).where(
+        BriefRow.tenant_id == tenant_id, BriefRow.deleted_at.is_(None)
+    )
     if client_id is not None:
         stmt = stmt.where(BriefRow.client_id == client_id)
     stmt = stmt.order_by(BriefRow.created_at)
     return list((await session.execute(stmt)).scalars())
+
+
+async def soft_delete_brief(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    brief_id: str,
+    actor: dict[str, str],
+) -> BriefRow | None:
+    stmt = (
+        update(BriefRow)
+        .where(
+            BriefRow.id == brief_id,
+            BriefRow.tenant_id == tenant_id,
+            BriefRow.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(timezone.utc), deleted_by=actor)
+        .returning(BriefRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 # --- Job ---
@@ -368,6 +456,7 @@ async def create_creative_doc(
         stmt = select(CreativeDocRow).where(
             CreativeDocRow.id == parent_id,
             CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.deleted_at.is_(None),
         )
         parent = (await session.execute(stmt)).scalar_one_or_none()
         if parent is None:
@@ -411,7 +500,49 @@ async def get_creative_doc(
     session: AsyncSession, *, tenant_id: str, creative_doc_id: str
 ) -> CreativeDocRow | None:
     stmt = select(CreativeDocRow).where(
-        CreativeDocRow.id == creative_doc_id, CreativeDocRow.tenant_id == tenant_id
+        CreativeDocRow.id == creative_doc_id,
+        CreativeDocRow.tenant_id == tenant_id,
+        CreativeDocRow.deleted_at.is_(None),
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def update_creative_doc(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    creative_doc_id: str,
+    **fields: object,
+) -> CreativeDocRow | None:
+    stmt = (
+        update(CreativeDocRow)
+        .where(
+            CreativeDocRow.id == creative_doc_id,
+            CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.deleted_at.is_(None),
+        )
+        .values(**fields)
+        .returning(CreativeDocRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def soft_delete_creative_doc(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    creative_doc_id: str,
+    actor: dict[str, str],
+) -> CreativeDocRow | None:
+    stmt = (
+        update(CreativeDocRow)
+        .where(
+            CreativeDocRow.id == creative_doc_id,
+            CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(timezone.utc), deleted_by=actor)
+        .returning(CreativeDocRow)
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -421,7 +552,11 @@ async def list_creative_docs(
 ) -> list[CreativeDocRow]:
     stmt = (
         select(CreativeDocRow)
-        .where(CreativeDocRow.tenant_id == tenant_id, CreativeDocRow.job_id == job_id)
+        .where(
+            CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.job_id == job_id,
+            CreativeDocRow.deleted_at.is_(None),
+        )
         .order_by(CreativeDocRow.created_at)
     )
     return list((await session.execute(stmt)).scalars())
@@ -432,7 +567,11 @@ async def list_creative_versions(
 ) -> list[CreativeDocRow]:
     stmt = (
         select(CreativeDocRow)
-        .where(CreativeDocRow.tenant_id == tenant_id, CreativeDocRow.job_id == job_id)
+        .where(
+            CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.job_id == job_id,
+            CreativeDocRow.deleted_at.is_(None),
+        )
         .order_by(*_creative_version_order(newest_first=False))
     )
     return list((await session.execute(stmt)).scalars())
@@ -453,7 +592,10 @@ async def list_latest_creatives(
             order_by=_creative_version_order(newest_first=True),
         )
         .label("creative_rank"),
-    ).where(CreativeDocRow.tenant_id == tenant_id)
+    ).where(
+        CreativeDocRow.tenant_id == tenant_id,
+        CreativeDocRow.deleted_at.is_(None),
+    )
     if client_id is not None:
         ranked_stmt = ranked_stmt.join(
             JobRow,
@@ -468,6 +610,7 @@ async def list_latest_creatives(
         .join(ranked, ranked.c.creative_id == CreativeDocRow.id)
         .where(
             CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.deleted_at.is_(None),
             ranked.c.creative_rank == 1,
         )
         .order_by(CreativeDocRow.created_at.desc(), CreativeDocRow.id.desc())
@@ -487,6 +630,7 @@ async def list_creative_docs_in_window(
         select(CreativeDocRow)
         .where(
             CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.deleted_at.is_(None),
             CreativeDocRow.created_at.between(start, end),
         )
         .order_by(CreativeDocRow.created_at, CreativeDocRow.id)
@@ -502,6 +646,7 @@ async def count_client_versions(
     stmt = select(CreativeDocRow.created_by).where(
         CreativeDocRow.tenant_id == tenant_id,
         CreativeDocRow.job_id == job_id,
+        CreativeDocRow.deleted_at.is_(None),
         CreativeDocRow.created_at >= since,
     )
     authors = (await session.execute(stmt)).scalars()
@@ -521,6 +666,7 @@ async def get_latest_creative_doc_for_client(
         .join(JobRow, JobRow.id == CreativeDocRow.job_id)
         .where(
             CreativeDocRow.tenant_id == tenant_id,
+            CreativeDocRow.deleted_at.is_(None),
             JobRow.tenant_id == tenant_id,
             JobRow.client_id == client_id,
         )
@@ -593,7 +739,51 @@ async def create_task(session: AsyncSession, *, tenant_id: str, **fields) -> Tas
 
 
 async def get_task(session: AsyncSession, *, tenant_id: str, task_id: str) -> TaskRow | None:
-    stmt = select(TaskRow).where(TaskRow.id == task_id, TaskRow.tenant_id == tenant_id)
+    stmt = select(TaskRow).where(
+        TaskRow.id == task_id,
+        TaskRow.tenant_id == tenant_id,
+        TaskRow.deleted_at.is_(None),
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def update_task(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    task_id: str,
+    **fields: object,
+) -> TaskRow | None:
+    stmt = (
+        update(TaskRow)
+        .where(
+            TaskRow.id == task_id,
+            TaskRow.tenant_id == tenant_id,
+            TaskRow.deleted_at.is_(None),
+        )
+        .values(**fields)
+        .returning(TaskRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def soft_delete_task(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    task_id: str,
+    actor: dict[str, str],
+) -> TaskRow | None:
+    stmt = (
+        update(TaskRow)
+        .where(
+            TaskRow.id == task_id,
+            TaskRow.tenant_id == tenant_id,
+            TaskRow.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(timezone.utc), deleted_by=actor)
+        .returning(TaskRow)
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
@@ -605,7 +795,9 @@ async def list_tasks(
     job_id: str | None = None,
     status: str | None = None,
 ) -> list[TaskRow]:
-    stmt = select(TaskRow).where(TaskRow.tenant_id == tenant_id)
+    stmt = select(TaskRow).where(
+        TaskRow.tenant_id == tenant_id, TaskRow.deleted_at.is_(None)
+    )
     if client_id is not None:
         stmt = stmt.where(TaskRow.client_id == client_id)
     if job_id is not None:
@@ -627,6 +819,7 @@ async def list_generation_tasks(
         .where(
             TaskRow.tenant_id == tenant_id,
             TaskRow.type == TaskType.GENERATION.value,
+            TaskRow.deleted_at.is_(None),
         )
         .order_by(TaskRow.created_at, TaskRow.id)
     )
@@ -644,6 +837,7 @@ async def list_open_generation_tasks(session: AsyncSession) -> list[TaskRow]:
         .where(
             TaskRow.type == TaskType.GENERATION.value,
             TaskRow.status == TaskStatus.OPEN.value,
+            TaskRow.deleted_at.is_(None),
         )
         .order_by(TaskRow.created_at, TaskRow.id)
     )
@@ -700,7 +894,49 @@ async def get_brand_asset(
     session: AsyncSession, *, tenant_id: str, asset_id: str
 ) -> BrandAssetRow | None:
     stmt = select(BrandAssetRow).where(
-        BrandAssetRow.id == asset_id, BrandAssetRow.tenant_id == tenant_id
+        BrandAssetRow.id == asset_id,
+        BrandAssetRow.tenant_id == tenant_id,
+        BrandAssetRow.deleted_at.is_(None),
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def update_brand_asset(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    asset_id: str,
+    **fields: object,
+) -> BrandAssetRow | None:
+    stmt = (
+        update(BrandAssetRow)
+        .where(
+            BrandAssetRow.id == asset_id,
+            BrandAssetRow.tenant_id == tenant_id,
+            BrandAssetRow.deleted_at.is_(None),
+        )
+        .values(**fields)
+        .returning(BrandAssetRow)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def soft_delete_brand_asset(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    asset_id: str,
+    actor: dict[str, str],
+) -> BrandAssetRow | None:
+    stmt = (
+        update(BrandAssetRow)
+        .where(
+            BrandAssetRow.id == asset_id,
+            BrandAssetRow.tenant_id == tenant_id,
+            BrandAssetRow.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(timezone.utc), deleted_by=actor)
+        .returning(BrandAssetRow)
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -709,7 +945,9 @@ async def list_brand_assets(
     session: AsyncSession, *, tenant_id: str, brand_id: str, kind: str | None = None
 ) -> list[BrandAssetRow]:
     stmt = select(BrandAssetRow).where(
-        BrandAssetRow.tenant_id == tenant_id, BrandAssetRow.brand_id == brand_id
+        BrandAssetRow.tenant_id == tenant_id,
+        BrandAssetRow.brand_id == brand_id,
+        BrandAssetRow.deleted_at.is_(None),
     )
     if kind is not None:
         stmt = stmt.where(BrandAssetRow.kind == kind)

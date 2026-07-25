@@ -48,6 +48,14 @@ class Principal(BaseModel):
     client_scopes: list[str] = []
 
 
+def principal_audit_actor(principal: Principal) -> dict[str, str]:
+    """Stable actor snapshot for audited mutations, including bootstrap principals."""
+    return {
+        "id": principal.user_id or principal.tenant_id,
+        "role": principal.role,
+    }
+
+
 def _looks_like_supabase(token: str) -> bool:
     """Peek the UNVERIFIED issuer to choose a verifier. The token is still fully verified by
     the chosen path before it is trusted — this only routes, it does not authorize."""

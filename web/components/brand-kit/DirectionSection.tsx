@@ -32,6 +32,7 @@ function Moodboard({ assetIds, view }: { assetIds: string[]; view: BookView }): 
             alt={`Moodboard reference ${index + 1}`}
             fit="cover"
             fallbackLabel="reference unavailable"
+            removable={view === "studio"}
           />
           <figcaption className="bk-mood-cap">
             Reference {String(index + 1).padStart(2, "0")}

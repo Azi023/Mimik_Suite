@@ -12,11 +12,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal, require_role
+from api.core.auth import (
+    Principal,
+    get_principal,
+    principal_audit_actor,
+    require_role,
+)
 from api.db import repo
 from api.db.mappers import to_task
 from api.db.session import get_session
@@ -38,6 +43,13 @@ class CreateTask(BaseModel):
 
 class AdvanceStatus(BaseModel):
     status: str
+
+
+class UpdateTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str | None = None
+    assignee: str | None = Field(default=None, max_length=255)
 
 
 @router.post("", response_model=Task, status_code=201)
@@ -141,6 +153,55 @@ async def get_task(
     if principal.role == ActorRole.CLIENT.value and row.client_id != principal.client_id:
         raise HTTPException(status_code=404, detail="Task not found")
     return to_task(row)
+
+
+@router.patch("/{task_id}", response_model=Task)
+async def update_task(
+    task_id: str,
+    body: UpdateTask,
+    principal: Principal = Depends(require_role("owner", "admin", "ops", "designer", "team")),
+    session: AsyncSession = Depends(get_session),
+) -> Task:
+    fields = body.model_dump(exclude_unset=True)
+    if "status" in fields:
+        if body.status is None or body.status not in _TASK_STATUS_VALUES:
+            raise HTTPException(status_code=422, detail=f"Unknown task status: {body.status}")
+    if fields:
+        fields["updated_at"] = datetime.now(timezone.utc)
+        row = await repo.update_task(
+            session,
+            tenant_id=principal.tenant_id,
+            task_id=task_id,
+            **fields,
+        )
+    else:
+        row = await repo.get_task(
+            session,
+            tenant_id=principal.tenant_id,
+            task_id=task_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await session.commit()
+    return to_task(row)
+
+
+@router.delete("/{task_id}", status_code=204)
+async def delete_task(
+    task_id: str,
+    principal: Principal = Depends(require_role("owner", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await repo.soft_delete_task(
+        session,
+        tenant_id=principal.tenant_id,
+        task_id=task_id,
+        actor=principal_audit_actor(principal),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/{task_id}/status", response_model=Task)

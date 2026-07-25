@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -34,10 +34,17 @@ class TenantRow(Base):
 
 class ClientRow(Base):
     __tablename__ = "clients"
-    # Makes the claim-form email dedup atomic (NULL emails stay distinct, so non-prospect
-    # clients are unaffected). Backs api.routers.intake's IntegrityError-catch under concurrency.
+    # Makes active-client email dedup atomic while allowing a soft-deleted address to be reused.
+    # NULL emails stay distinct, so non-prospect clients are unaffected.
     __table_args__ = (
-        UniqueConstraint("tenant_id", "contact_email", name="uq_clients_tenant_email"),
+        Index(
+            "uq_clients_tenant_email",
+            "tenant_id",
+            "contact_email",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
@@ -52,6 +59,8 @@ class ClientRow(Base):
     instagram: Mapped[str | None] = mapped_column(String, nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class BrandRow(Base):
@@ -79,6 +88,8 @@ class BrandRow(Base):
     imagery_style: Mapped[str | None] = mapped_column(String, nullable=True)
     references: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class BriefRow(Base):
@@ -96,6 +107,8 @@ class BriefRow(Base):
     signed_off_by: Mapped[str | None] = mapped_column(String, nullable=True)
     frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class JobRow(Base):
@@ -199,6 +212,8 @@ class CreativeDocRow(Base):
     created_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     revision_note: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class ApprovalRow(Base):
@@ -258,6 +273,8 @@ class TaskRow(Base):
     notified: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class SubscriptionRow(Base):
@@ -332,6 +349,8 @@ class BrandAssetRow(Base):
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
     study: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class NotificationRow(Base):

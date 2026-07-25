@@ -6,10 +6,12 @@ import {
   type ApiFontLibraryEntry,
   type AssetKind,
   approveAsset,
+  deleteAsset,
   fetchFontLibrary,
   ingestReference,
   knockoutLogo,
   materializeBuiltinFont,
+  updateAssetMetadata,
   uploadBrandAsset,
 } from "@/lib/api";
 import { getSessionToken } from "@/lib/session";
@@ -99,6 +101,50 @@ export async function approveAssetAction(assetId: string): Promise<AssetActionRe
   }
 }
 
+export async function updateAssetAction(
+  assetId: string,
+  filename: string,
+  license: string,
+  notes: string,
+): Promise<AssetActionResult> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return { ok: false, error: "Your session has expired — sign in again." };
+  }
+  if (filename.trim() === "") {
+    return { ok: false, error: "Filename is required." };
+  }
+  try {
+    await updateAssetMetadata(
+      assetId,
+      {
+        filename: filename.trim(),
+        license: license.trim() === "" ? null : license.trim(),
+        notes: notes.trim() === "" ? null : notes.trim(),
+      },
+      token,
+    );
+    revalidatePath("/assets");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: messageForStatus(error, "Couldn't update that asset. Try again.") };
+  }
+}
+
+export async function removeAssetAction(assetId: string): Promise<AssetActionResult> {
+  const token = await getSessionToken();
+  if (token === null) {
+    return { ok: false, error: "Your session has expired — sign in again." };
+  }
+  try {
+    await deleteAsset(assetId, token);
+    revalidatePath("/assets");
+    revalidatePath("/clients", "layout");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: messageForStatus(error, "Couldn't remove that asset. Try again.") };
+  }
+}
 export async function knockoutLogoAction(assetId: string): Promise<AssetActionResult> {
   const token = await getSessionToken();
   if (token === null) {

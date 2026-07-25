@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { ShapeIcon } from "@/components/icons";
+import { ClientsListView } from "@/components/ClientsListView";
 import { getSidebarData } from "@/lib/data";
 import { getSessionToken } from "@/lib/session";
 import { redirectClientToPortal } from "@/lib/guard";
@@ -49,27 +49,7 @@ export default async function ClientsPage(): Promise<JSX.Element> {
           </Link>
         </div>
       ) : (
-        <ul className="gallery" aria-label="Clients">
-          {clients.map((client) => (
-            <li key={client.id}>
-              <Link
-                href={`/clients/${encodeURIComponent(client.id)}/edit`}
-                className="gallery-card gallery-card--client"
-                aria-label={`Edit ${client.name}`}
-              >
-                <span className={`project-row__shape shape--${client.tone}`} aria-hidden="true">
-                  <ShapeIcon shape={client.shape} />
-                </span>
-                <span className="gallery-card__meta">
-                  <span className="gallery-card__title">{client.name}</span>
-                  <span className="gallery-card__version">
-                    {client.count === 1 ? "1 open job" : `${client.count} open jobs`}
-                  </span>
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <ClientsListView clients={clients} />
       )}
     </AppShell>
   );

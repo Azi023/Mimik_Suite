@@ -131,6 +131,7 @@ function SocialCircles({
                   alt={`Social icon on ${titleCase(ground.role)}`}
                   fit="contain"
                   fallbackLabel="—"
+                  removable={view === "studio"}
                 />
               </span>
             </div>
@@ -187,6 +188,7 @@ function LogoSpecimen({
           alt={def.label}
           fit="contain"
           fallbackLabel="logo unavailable"
+          removable={view === "studio"}
         />
       </div>
     </div>

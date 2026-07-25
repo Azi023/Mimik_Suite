@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, require_role
+from api.core.auth import Principal, principal_audit_actor, require_role
 from api.core.config import get_settings
 from api.db import repo
 from api.db.mappers import to_brand_asset
@@ -80,6 +80,14 @@ class RegisterDriveAsset(BaseModel):
     notes: str | None = None
 
 
+class UpdateAssetMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str | None = Field(default=None, min_length=1, max_length=255)
+    license: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 @router.post("/brands/{brand_id}/assets/register", response_model=BrandAsset, status_code=201)
 async def register_drive_asset(
     brand_id: str,
@@ -125,6 +133,55 @@ async def list_assets(
         kind=kind.value if kind else None,
     )
     return [to_brand_asset(r) for r in rows]
+
+
+@router.patch("/assets/{asset_id}", response_model=BrandAsset)
+async def update_asset(
+    asset_id: str,
+    body: UpdateAssetMetadata,
+    principal: Principal = Depends(_TEAM),
+    session: AsyncSession = Depends(get_session),
+) -> BrandAsset:
+    fields = body.model_dump(exclude_unset=True)
+    if "filename" in fields:
+        if fields["filename"] is None:
+            raise HTTPException(status_code=422, detail="Asset filename cannot be null")
+        fields["filename"] = brand_memory.safe_display_filename(str(fields["filename"]))
+    if fields:
+        row = await repo.update_brand_asset(
+            session,
+            tenant_id=principal.tenant_id,
+            asset_id=asset_id,
+            **fields,
+        )
+    else:
+        row = await repo.get_brand_asset(
+            session,
+            tenant_id=principal.tenant_id,
+            asset_id=asset_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    await session.commit()
+    return to_brand_asset(row)
+
+
+@router.delete("/assets/{asset_id}", status_code=204)
+async def delete_asset(
+    asset_id: str,
+    principal: Principal = Depends(require_role("owner", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await repo.soft_delete_brand_asset(
+        session,
+        tenant_id=principal.tenant_id,
+        asset_id=asset_id,
+        actor=principal_audit_actor(principal),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.get("/assets/{asset_id}/raw", response_class=FileResponse)

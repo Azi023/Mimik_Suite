@@ -217,6 +217,7 @@ export function toReviewDoc(doc: ApiCreativeDoc): CreativeDoc {
     previewUrl: `/api/creatives/${encodeURIComponent(doc.id)}/preview`,
     svgUrl: `/api/creatives/${encodeURIComponent(doc.id)}/svg`,
     psdUrl: `/api/creatives/${encodeURIComponent(doc.id)}/psd`,
+    copyStatus: doc.manifest.copy_block?.status ?? "draft",
     layers,
     note:
       activeIndex >= 0

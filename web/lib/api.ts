@@ -708,6 +708,24 @@ async function apiPatch<T>(path: string, body: unknown, sessionToken?: string): 
   return (await response.json()) as T;
 }
 
+async function apiDelete(path: string, sessionToken?: string): Promise<void> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = resolveBearer(sessionToken);
+  if (token !== undefined) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "DELETE",
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw await apiError(response, `DELETE ${path} -> ${response.status}`);
+  }
+}
+
 /**
  * Every endpoint below accepts an optional `sessionToken` — the per-user Supabase
  * bearer, threaded server-side from `lib/session.getSessionToken`. When omitted, the
@@ -739,6 +757,11 @@ export function updateClient(
   return apiPatch<ApiClient>(`/clients/${encodeURIComponent(clientId)}`, body, sessionToken);
 }
 
+/** DELETE /clients/{id} — soft-delete one tenant-scoped client. */
+export function deleteClient(clientId: string, sessionToken?: string): Promise<void> {
+  return apiDelete(`/clients/${encodeURIComponent(clientId)}`, sessionToken);
+}
+
 /** GET /brands/{id}. */
 export function getBrand(brandId: string, sessionToken?: string): Promise<ApiBrand> {
   return apiGet<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, sessionToken);
@@ -762,6 +785,11 @@ export function updateBrandBrief(
   sessionToken?: string,
 ): Promise<ApiBrand> {
   return apiPatch<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, body, sessionToken);
+}
+
+/** DELETE /brands/{id} — soft-delete one tenant-scoped brand. */
+export function deleteBrand(brandId: string, sessionToken?: string): Promise<void> {
+  return apiDelete(`/brands/${encodeURIComponent(brandId)}`, sessionToken);
 }
 
 /* ---------------------------------------------------------------------------
@@ -840,6 +868,29 @@ export function listJobCreatives(jobId: string, sessionToken?: string): Promise<
 /** GET /creatives — the tenant's creatives (latest version per job) for the gallery. */
 export function listCreatives(sessionToken?: string): Promise<ApiCreativeDoc[]> {
   return apiGet<ApiCreativeDoc[]>("/creatives", sessionToken);
+}
+
+export interface UpdateCreativeMetadataBody {
+  copy_status?: "draft" | "approved" | "edited";
+  revision_note?: string | null;
+}
+
+/** PATCH /creatives/{id} — update review metadata without minting a content revision. */
+export function updateCreativeMetadata(
+  creativeId: string,
+  body: UpdateCreativeMetadataBody,
+  sessionToken?: string,
+): Promise<ApiCreativeDoc> {
+  return apiPatch<ApiCreativeDoc>(
+    `/creatives/${encodeURIComponent(creativeId)}`,
+    body,
+    sessionToken,
+  );
+}
+
+/** DELETE /creatives/{id} — soft-delete one tenant-scoped creative. */
+export function deleteCreative(creativeId: string, sessionToken?: string): Promise<void> {
+  return apiDelete(`/creatives/${encodeURIComponent(creativeId)}`, sessionToken);
 }
 
 export interface GenerateCreativeBody {
@@ -1189,6 +1240,25 @@ export function listTasks(
   return apiGet<ApiTask[]>(`/tasks${query !== "" ? `?${query}` : ""}`, sessionToken);
 }
 
+export interface UpdateTaskBody {
+  status?: string;
+  assignee?: string | null;
+}
+
+/** PATCH /tasks/{id} — update task status and/or assignee. */
+export function updateTask(
+  taskId: string,
+  body: UpdateTaskBody,
+  sessionToken?: string,
+): Promise<ApiTask> {
+  return apiPatch<ApiTask>(`/tasks/${encodeURIComponent(taskId)}`, body, sessionToken);
+}
+
+/** DELETE /tasks/{id} — soft-delete one tenant-scoped task. */
+export function deleteTask(taskId: string, sessionToken?: string): Promise<void> {
+  return apiDelete(`/tasks/${encodeURIComponent(taskId)}`, sessionToken);
+}
+
 /** GET /deliveries — one archived-to-Drive record (the join view: delivery + its job title). */
 export interface ApiDeliveryRecord {
   id: string;
@@ -1359,6 +1429,11 @@ export function signoffBrief(
 /** POST /briefs/{id}/revise — mint version N+1 as a fresh draft seeded from this brief's sections. */
 export function reviseBrief(briefId: string, sessionToken?: string): Promise<ApiBrief> {
   return apiPost<ApiBrief>(`/briefs/${encodeURIComponent(briefId)}/revise`, {}, sessionToken);
+}
+
+/** DELETE /briefs/{id} — soft-delete one tenant-scoped brief. */
+export function deleteBrief(briefId: string, sessionToken?: string): Promise<void> {
+  return apiDelete(`/briefs/${encodeURIComponent(briefId)}`, sessionToken);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1562,6 +1637,26 @@ export function uploadReferenceAsset(
  */
 export function approveAsset(assetId: string, sessionToken?: string): Promise<ApiBrandAsset> {
   return apiPost<ApiBrandAsset>(`/assets/${encodeURIComponent(assetId)}/approve`, {}, sessionToken);
+}
+
+export interface UpdateAssetMetadataBody {
+  filename?: string;
+  license?: string | null;
+  notes?: string | null;
+}
+
+/** PATCH /assets/{id} — update display metadata; stored bytes are unchanged. */
+export function updateAssetMetadata(
+  assetId: string,
+  body: UpdateAssetMetadataBody,
+  sessionToken?: string,
+): Promise<ApiBrandAsset> {
+  return apiPatch<ApiBrandAsset>(`/assets/${encodeURIComponent(assetId)}`, body, sessionToken);
+}
+
+/** DELETE /assets/{id} — soft-delete one tenant-scoped asset. */
+export function deleteAsset(assetId: string, sessionToken?: string): Promise<void> {
+  return apiDelete(`/assets/${encodeURIComponent(assetId)}`, sessionToken);
 }
 
 /**

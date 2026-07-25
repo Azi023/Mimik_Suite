@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import {
+  removeCreativeAction,
+  updateCreativeMetadataAction,
+} from "@/app/crud-actions";
 import {
   ApiError,
   type ApiRevisionZone,
@@ -88,6 +93,7 @@ const ASK_ZONES: ReadonlyArray<{ zone: ApiRegionAsk["zone"]; label: string }> = 
  * submits show a quiet inline offline note and keep the pins.
  */
 export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
+  const router = useRouter();
   const panelRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
 
@@ -117,10 +123,18 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
   const [revising, setRevising] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [editorError, setEditorError] = useState("");
+  const [metadataEditing, setMetadataEditing] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<"draft" | "approved" | "edited">(
+    doc.copyStatus,
+  );
+  const [revisionNote, setRevisionNote] = useState("");
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const [metadataError, setMetadataError] = useState("");
 
   // Keep activeDoc in sync if prop changes
   useLayoutEffect(() => {
     setActiveDoc(doc);
+    setCopyStatus(doc.copyStatus);
   }, [doc]);
 
   const refreshVersions = useCallback(async (creativeId: string): Promise<void> => {
@@ -291,6 +305,36 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
     void submit("approve");
   }
 
+  async function saveMetadata(): Promise<void> {
+    setMetadataBusy(true);
+    setMetadataError("");
+    const result = await updateCreativeMetadataAction(
+      activeDoc.creativeDocId,
+      copyStatus,
+      revisionNote,
+    );
+    setMetadataBusy(false);
+    if (result.ok) {
+      setMetadataEditing(false);
+      router.refresh();
+    } else {
+      setMetadataError(result.error ?? "Could not update this creative.");
+    }
+  }
+
+  async function removeCreative(): Promise<void> {
+    if (!window.confirm("Remove this creative? It will be hidden, not destroyed.")) return;
+    setMetadataBusy(true);
+    setMetadataError("");
+    const result = await removeCreativeAction(activeDoc.creativeDocId);
+    setMetadataBusy(false);
+    if (result.ok) {
+      router.refresh();
+    } else {
+      setMetadataError(result.error ?? "Could not remove this creative.");
+    }
+  }
+
   return (
     <aside className="review-panel" ref={panelRef} aria-label="In review">
       <header className="review-panel__head">
@@ -338,6 +382,71 @@ export function ReviewPanel({ doc }: ReviewPanelProps): JSX.Element {
           Open full review ↗
         </Link>
       )}
+
+      <div className="review-panel__section">
+        <div className="review-panel__head">
+          <h3 className="review-panel__label">Creative metadata</h3>
+          <div className="review-panel__downloads">
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={metadataBusy}
+              onClick={(): void => setMetadataEditing((current) => !current)}
+            >
+              {metadataEditing ? "Cancel edit" : "Edit"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={metadataBusy}
+              onClick={(): void => {
+                void removeCreative();
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+        {metadataEditing && (
+          <div className="pin-composer">
+            <select
+              className="pin-composer__input"
+              value={copyStatus}
+              aria-label="Copy status"
+              onChange={(event): void =>
+                setCopyStatus(event.target.value as "draft" | "approved" | "edited")
+              }
+            >
+              <option value="draft">Draft</option>
+              <option value="edited">Edited</option>
+              <option value="approved">Approved</option>
+            </select>
+            <input
+              className="pin-composer__input"
+              value={revisionNote}
+              maxLength={500}
+              placeholder="Revision note"
+              aria-label="Revision note"
+              onChange={(event): void => setRevisionNote(event.target.value)}
+            />
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              disabled={metadataBusy}
+              onClick={(): void => {
+                void saveMetadata();
+              }}
+            >
+              {metadataBusy ? "Saving…" : "Save metadata"}
+            </button>
+          </div>
+        )}
+        {metadataError !== "" && (
+          <p className="tasks__error" role="alert">
+            {metadataError}
+          </p>
+        )}
+      </div>
 
       <div className="review-panel__section">
         <h3 className="review-panel__label">Layers</h3>

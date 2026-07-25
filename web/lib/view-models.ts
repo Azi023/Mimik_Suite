@@ -64,6 +64,7 @@ export interface CreativeDoc {
   previewUrl: string;
   svgUrl: string;
   psdUrl: string;
+  copyStatus: "draft" | "approved" | "edited";
   layers: Layer[];
   note: string;
 }

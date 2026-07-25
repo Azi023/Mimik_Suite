@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from api.core.config import get_settings
 from api.db import repo
 from mimik_contracts import Subscription, SubscriptionStatus
+from sqlalchemy import select
 
 _CHECKOUT_SESSIONS_URL = "https://api.stripe.com/v1/checkout/sessions"
 
@@ -155,7 +156,11 @@ async def _upsert_from_checkout(session, obj: dict) -> Subscription | None:
 
     # Stripe is the trusted source and the id came from OUR checkout, so a by-PK lookup (no
     # tenant filter — we don't yet know the tenant) is correct here; the client row supplies it.
-    client_row = await session.get(ClientRow, client_id)
+    client_stmt = select(ClientRow).where(
+        ClientRow.id == client_id,
+        ClientRow.deleted_at.is_(None),
+    )
+    client_row = (await session.execute(client_stmt)).scalar_one_or_none()
     if client_row is None:
         return None
     tenant_id = client_row.tenant_id

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal, require_role
+from api.core.auth import Principal, get_principal, principal_audit_actor, require_role
 from api.db import repo
 from api.db.mappers import to_brief
 from api.db.session import get_session
@@ -141,6 +141,24 @@ async def update_brief(
     row.sections = body.model_dump(mode="json")
     await session.commit()
     return to_brief(row)
+
+
+@router.delete("/{brief_id}", status_code=204)
+async def delete_brief(
+    brief_id: str,
+    principal: Principal = Depends(require_role("owner", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await repo.soft_delete_brief(
+        session,
+        tenant_id=principal.tenant_id,
+        brief_id=brief_id,
+        actor=principal_audit_actor(principal),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Brief not found")
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/{brief_id}/revise", response_model=Brief, status_code=201)

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.core.auth import Principal, get_principal, require_role
+from api.core.auth import Principal, get_principal, principal_audit_actor, require_role
 from api.core.brand_book_token import issue_brand_book_token
 from api.core.config import get_settings
 from api.db import repo
@@ -152,6 +152,24 @@ async def get_brand(
     if principal.role == ActorRole.CLIENT.value and row.client_id != principal.client_id:
         raise HTTPException(status_code=404, detail="Brand not found")
     return to_brand(row)
+
+
+@router.delete("/{brand_id}", status_code=204)
+async def delete_brand(
+    brand_id: str,
+    principal: Principal = Depends(require_role("owner", "admin")),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    row = await repo.soft_delete_brand(
+        session,
+        tenant_id=principal.tenant_id,
+        brand_id=brand_id,
+        actor=principal_audit_actor(principal),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    await session.commit()
+    return Response(status_code=204)
 
 
 async def _set_published(

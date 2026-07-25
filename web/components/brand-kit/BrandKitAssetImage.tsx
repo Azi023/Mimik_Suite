@@ -1,7 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useState, type JSX } from "react";
+import { useState, useTransition, type JSX } from "react";
+import { useRouter } from "next/navigation";
+import { removeAssetAction } from "@/app/assets/actions";
 import { assetRawUrl } from "@/lib/api";
 
 interface BrandKitAssetImageProps {
@@ -13,6 +15,8 @@ interface BrandKitAssetImageProps {
   /** Mono label shown in place of the image if the bytes fail to load — never a broken glyph. */
   fallbackLabel: string;
   className?: string;
+  /** Studio-only remove affordance; client and export views never receive it. */
+  removable?: boolean;
 }
 
 /**
@@ -26,23 +30,67 @@ export function BrandKitAssetImage({
   fit,
   fallbackLabel,
   className,
+  removable = false,
 }: BrandKitAssetImageProps): JSX.Element {
+  const router = useRouter();
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState("");
+  const [pending, startTransition] = useTransition();
+
+  function remove(): void {
+    if (!window.confirm("Remove this asset? It will be hidden, not destroyed.")) return;
+    setError("");
+    startTransition(async () => {
+      const result = await removeAssetAction(assetId);
+      if (result.ok) {
+        router.refresh();
+      } else {
+        setError(result.error ?? "Could not remove this asset.");
+      }
+    });
+  }
 
   if (failed) {
-    return <span className="bk-img-fallback">{fallbackLabel}</span>;
+    return (
+      <>
+        <span className="bk-img-fallback">{fallbackLabel}</span>
+        {removable && (
+          <button
+            type="button"
+            className="bk-asset-remove"
+            disabled={pending}
+            onClick={remove}
+          >
+            Remove
+          </button>
+        )}
+      </>
+    );
   }
 
   return (
-    <Image
-      src={assetRawUrl(assetId)}
-      alt={alt}
-      fill
-      unoptimized
-      sizes="(max-width: 900px) 100vw, 600px"
-      className={className}
-      style={{ objectFit: fit }}
-      onError={(): void => setFailed(true)}
-    />
+    <>
+      <Image
+        src={assetRawUrl(assetId)}
+        alt={alt}
+        fill
+        unoptimized
+        sizes="(max-width: 900px) 100vw, 600px"
+        className={className}
+        style={{ objectFit: fit }}
+        onError={(): void => setFailed(true)}
+      />
+      {removable && (
+        <button
+          type="button"
+          className="bk-asset-remove"
+          disabled={pending}
+          title={error === "" ? undefined : error}
+          onClick={remove}
+        >
+          {pending ? "Removing…" : "Remove"}
+        </button>
+      )}
+    </>
   );
 }
