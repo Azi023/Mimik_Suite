@@ -77,6 +77,37 @@ Design decided with operator: **in-place deep-merge + audit**, NO versions table
   at its **DEFAULT BRANCH**. Any contracts change must land on **contracts `main` FIRST**, then Suite
   `main` — otherwise the image build breaks.
 
+### ✅ (c)4 lane/crud-completeness — MERGED (`c78aee4`), CI green, DEPLOYED + VERIFIED
+- jobs PATCH + soft-delete (`deleted_at`, actor-stamped); tenants list + suspend/reactivate (super_admin).
+- **Approvals deliberately left APPEND-ONLY** — the roadmap said "PATCH completeness (jobs/approvals)"
+  but an `Approval(actor, action, ts)` row IS the audit trail; making it mutable lets someone rewrite who
+  approved what. Reversal = a NEW counter-record. Do not "complete" this without a deliberate decision.
+- Review evidence: all 4 `JobRow` selects filter `deleted_at IS NULL` (incl. the cross-tenant scheduler
+  query); `UpdateJob` OMITS id/tenant_id/client_id/brand_id so a patch cannot reassign ownership
+  (schema-enforced, extras forbidden); suspension enforced on BOTH auth paths (Supabase + legacy JWT)
+  with super_admin exempt so suspending cannot lock out the only role that can reactivate.
+- Migration `d41f83a2c906`: additive-nullable only, symmetric downgrade, SINGLE linear head. Verified in
+  the prod boot log: `Running upgrade 7a6f2d1c9b04 -> d41f83a2c906` with no error.
+- Prod verified via /openapi.json: `/jobs/{job_id}` = [delete,get,patch], `/tenants` = [get,post],
+  `/tenants/{tenant_id}` = [patch]. Volume still mounted after a 3rd deploy cycle.
+- ⚠ Perf note: `_reject_suspended_tenant` adds a tenant lookup to EVERY authenticated request. Correct,
+  but a per-request DB round-trip on the hot path — cache it if latency shows up.
+
+### 🚧 (c)2 creative generation quality — BLOCKED ON DIAGNOSIS, do NOT hand to codex blind
+- `creative/copy/l0.py` is NOT the gap: it already does versioned prompts from mimik-knowledge,
+  per-client golden exemplars, hard headline limits (≤9 words / ≤60 chars) + corrective retry, and
+  constraint-#3 injection defence (client `topic` fenced as data, tag-stripping). Don't "fix" copy.
+- "Bare" therefore most likely lives in IMAGERY or the L5 finish/composition — **but the evidence was
+  destroyed by the P0 storage bug.** There is no bare creative left on prod to inspect (var/ was empty).
+- So the order is: generate ONE fresh creative (browser-driven adapters — `scripts/leonardo_login.py`,
+  `scripts/chatgpt_generate.py`, constraint #7 no paid APIs, needs the operator logged in) → LOOK at the
+  output → then scope the lane. Dispatching codex at "make it less bare" before that is guesswork.
+
+### 🚧 (c)3 asset gathering — needs the operator at the keyboard (copyright judgment per asset)
+Client's own material = fine; licensed fonts = fine with licence noted; others' posters = REFERENCES
+ONLY, never rehosted as the client's assets. Also: confirm ONE real upload survives a deploy cycle
+before investing a session — the volume is verified, but no actual asset has round-tripped yet.
+
 ### ⚙ OPERATING MODEL CHANGE: codex runs LOCALLY, not on the VPS
 The VPS codex run **hung for 49 minutes at 0:00.00 CPU** having written nothing. Cause, verbatim from its
 log: `Reading additional input from stdin...` — a backgrounded `ssh` left stdin attached.
@@ -95,6 +126,10 @@ Diagnosis tell: a live codex accumulates CPU time; a hung one sits at exactly `0
 - pm17's "the fallback still opens creative.svg when missing" — wrong; the test was lying, the code was fine.
 - "npm EAI_AGAIN = firewall/egress blocked" — wrong; transient DNS, no network change needed.
 - `git status --short --cached` is not a valid flag (breaks `&&` chains mid-script).
+- `web/app/api/**/route.ts` uses `if (token === null && !isApiConfigured())` — i.e. with the API
+  configured and NO token it forwards unauthenticated. NOT a bypass (`get_principal` depends on
+  HTTPBearer, which rejects a missing header first) and it is the HOUSE CONVENTION across 5 routes,
+  so do not "fix" one instance. Changing all 5 is a deliberate auth decision, not a cleanup.
 - 🔴 **FALSE-GREEN CI TRAP (bit me this session):** `gh run list --limit 1` right after a push returns
   the PREVIOUS run — GitHub has not registered the new one yet — so `gh run watch` confirms an
   unrelated build and reports success. ALWAYS resolve the run by headSha:
@@ -111,7 +146,7 @@ Diagnosis tell: a live codex accumulates CPU time; a hung one sits at exactly `0
   Historical HANDOFF mentions left intact as audit trail. Commit `8ac4825`.
 
 ### NEXT ACTION (in order)
-1. Tidy the `route.ts:75` branch (clarity nit, not a vuln). (c)1 itself is done + deployed.
+1. (c)2: generate ONE creative with the operator, LOOK at it, THEN scope the lane (see above).
 2. **Regenerate creative `af32eac4` (Simply Nikah)** and confirm the canvas editor loads it — that is the
    only real proof the original symptom is gone. A green suite is not proof.
 3. Confirm a real upload survives a deploy cycle before investing a session in lane (c)3 asset gathering.
