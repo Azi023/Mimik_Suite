@@ -30,18 +30,18 @@ import type { NextRequest } from "next/server";
  * Canonical public origin for server-issued redirects. Behind the nginx reverse proxy,
  * `request.url` resolves to the container's internal bind address (`0.0.0.0:3000`), which
  * produces broken redirects (`https://0.0.0.0:3000/...` → ERR_SSL_PROTOCOL_ERROR and a
- * CSP `form-action 'self'` block). Prefer the explicitly-configured `APP_BASE_URL`, then
- * the proxy's forwarded host/proto headers, and only fall back to `request.url` last.
+ * CSP `form-action 'self'` block). The fix is the explicitly-configured `APP_BASE_URL`
+ * (set on the web container in production).
+ *
+ * We deliberately do NOT trust `Host` / `X-Forwarded-Host` here: those are client-controllable
+ * and using them to build a redirect origin is an open-redirect (host-header injection) vector.
+ * `APP_BASE_URL` is the trusted source; the `request.url` fallback (localhost in dev) is only
+ * reached when it is unset, which never happens in the deployed stack.
  */
 export function publicOrigin(request: NextRequest): string {
   const configured = process.env.APP_BASE_URL;
   if (configured !== undefined && configured !== "") {
     return configured.replace(/\/+$/, "");
-  }
-  const proto = request.headers.get("x-forwarded-proto") ?? "https";
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (host !== null && host !== "") {
-    return `${proto}://${host}`;
   }
   return new URL(request.url).origin;
 }
