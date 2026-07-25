@@ -54,7 +54,7 @@ production was **destroying every creative artifact and every uploaded brand ass
 - ⚠ **This does NOT fix `af32eac4` on prod** — there is no `preview.png` either; the artifacts were
   wiped by the storage bug. It needs regeneration now that the volume exists.
 
-### 🔄 (c)1 lane/brand-kit-editing — IMPLEMENTED, REVIEW IN PROGRESS, **NOT MERGED**
+### ✅ (c)1 lane/brand-kit-editing — REVIEWED, MERGED (`32a5e5c`), CI green, DEPLOYED + VERIFIED IN PROD
 Design decided with operator: **in-place deep-merge + audit**, NO versions table, NO migration.
 - Contracts (`../mimik-contracts`, SEPARATE REPO): adds `UpdateBrandDiscovery` / `UpdateCreativeDirection`
   / `UpdateKitTheme` / `BrandKitPatch` / `UpdateBrandKit`; `_validate_asset_refs` now accepts None and
@@ -70,6 +70,9 @@ Design decided with operator: **in-place deep-merge + audit**, NO versions table
 - **Open review nit (not a blocker, not a vuln):** `route.ts:75` — when `token === null` but the API is
   configured, it forwards with no bearer instead of 401ing. Verified NOT an auth bypass: `get_principal`
   depends on `HTTPBearer`, which rejects a missing header before any handler runs. Tidy the branch.
+- Deploy VERIFIED against the deployed artifact, not the build status: prod `/openapi.json` now shows
+  PATCH /brands/{brand_id} anyOf = [UpdateBrandBrief, BrandTokens, **UpdateBrandKit**] and the
+  BrandKitPatch / UpdateKitTheme schemas. Contracts landed on contracts `main` (`15d0099`) FIRST.
 - ⚠ **MERGE ORDER MATTERS:** CI (`.github/workflows/build-images.yml`) checks out `Azi023/mimik-contracts`
   at its **DEFAULT BRANCH**. Any contracts change must land on **contracts `main` FIRST**, then Suite
   `main` — otherwise the image build breaks.
@@ -92,6 +95,13 @@ Diagnosis tell: a live codex accumulates CPU time; a hung one sits at exactly `0
 - pm17's "the fallback still opens creative.svg when missing" — wrong; the test was lying, the code was fine.
 - "npm EAI_AGAIN = firewall/egress blocked" — wrong; transient DNS, no network change needed.
 - `git status --short --cached` is not a valid flag (breaks `&&` chains mid-script).
+- 🔴 **FALSE-GREEN CI TRAP (bit me this session):** `gh run list --limit 1` right after a push returns
+  the PREVIOUS run — GitHub has not registered the new one yet — so `gh run watch` confirms an
+  unrelated build and reports success. ALWAYS resolve the run by headSha:
+  `gh run list --json databaseId,headSha --jq '.[]|select(.headSha|startswith("<sha>"))|.databaseId'`.
+  Then verify the DEPLOYED ARTIFACT (curl prod /openapi.json), not the green tick.
+- CI is flaky on `Set up Buildx`: `registry-1.docker.io` timeouts fail the run with nothing wrong in
+  the diff. `gh run rerun <id> --failed` cleared it. Check the failure log before assuming code broke.
 - CLAUDE.md's graphify section rode along inside commit `c1231fb` because `git checkout <stash> -- FILE`
   STAGES the file. Check `git diff --cached --name-only` before committing.
 
@@ -101,8 +111,7 @@ Diagnosis tell: a live codex accumulates CPU time; a hung one sits at exactly `0
   Historical HANDOFF mentions left intact as audit trail. Commit `8ac4825`.
 
 ### NEXT ACTION (in order)
-1. Finish (c)1 review: confirm all four gates green, then commit contracts → push contracts `main` FIRST,
-   then Suite `main`, then deploy. Tidy the `route.ts:75` branch.
+1. Tidy the `route.ts:75` branch (clarity nit, not a vuln). (c)1 itself is done + deployed.
 2. **Regenerate creative `af32eac4` (Simply Nikah)** and confirm the canvas editor loads it — that is the
    only real proof the original symptom is gone. A green suite is not proof.
 3. Confirm a real upload survives a deploy cycle before investing a session in lane (c)3 asset gathering.
