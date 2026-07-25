@@ -3,10 +3,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { BrandKitTabs, type BrandKitTabDef } from "@/components/BrandKitTabs";
+import { BrandKitAssetImage } from "@/components/BrandKitAssetImage";
 import {
   getApiBaseUrl,
   type ApiBrand,
   type ApiColorRole,
+  type ApiLogoVariant,
+  type ApiLogoVariantSlot,
   type ApiPendingColor,
 } from "@/lib/api";
 import { deriveKitCanvasVars, fontRoleFamily, titleCase } from "@/lib/brand-kit";
@@ -28,7 +31,8 @@ function devFallbackAllowed(): boolean {
 
 /* ---------------------------------------------------------------------------
    Section registry (spec §7) — one entry per chapter, in book order.
-   This slice fully builds `colours_fonts`; the rest render calm placeholders.
+   Built read-only: discovery, direction, logo_suite, colours_fonts.
+   Applications + launch templates still render calm placeholders.
 --------------------------------------------------------------------------- */
 
 const KIT_TABS: BrandKitTabDef[] = [
@@ -63,6 +67,514 @@ function PlaceholderChapter({ number, label }: { number: string; label: string }
         <p>This chapter is being written</p>
         <em>arriving with your next review</em>
       </div>
+    </>
+  );
+}
+
+/** True when a nullable wire string actually carries text. */
+function filled(value: string | null | undefined): value is string {
+  return value !== null && value !== undefined && value.trim() !== "";
+}
+
+/** Tier-1 empty state (spec §5) — a dashed ghost card with a muted, typeset prompt. */
+function GhostCard({ hint }: { hint: string }): JSX.Element {
+  return (
+    <div className="bk-ghost">
+      <span className="bk-ghost-hint">{hint}</span>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Chapter 01 — Brand Discovery (read-only)
+--------------------------------------------------------------------------- */
+
+/** One entry of the two-column discovery list — real prose, chips, or a tier-1 ghost. */
+interface DiscoveryEntry {
+  label: string;
+  content: JSX.Element | null;
+  ghostHint: string;
+}
+
+function discoveryEntries(brand: ApiBrand): DiscoveryEntry[] {
+  const discovery = brand.kit?.discovery;
+
+  const prose = (value: string | null | undefined): JSX.Element | null =>
+    filled(value) ? <p>{value}</p> : null;
+
+  const valueChips =
+    discovery !== undefined && discovery.values.length > 0 ? (
+      <div className="bk-chips">
+        {discovery.values.map((value, index) => (
+          <span key={`${value}-${index}`} className="bk-chip">
+            {value}
+          </span>
+        ))}
+      </div>
+    ) : null;
+
+  // Tone of voice: the long-form discovery field, falling back to the brand's own
+  // voice line + tone keywords (spec §3.4 — reused, not duplicated).
+  let toneContent: JSX.Element | null = null;
+  const toneOfVoice = discovery?.tone_of_voice;
+  if (filled(toneOfVoice)) {
+    toneContent = <p>{toneOfVoice}</p>;
+  } else if (filled(brand.brand_voice)) {
+    toneContent = (
+      <>
+        <p>{brand.brand_voice}</p>
+        {brand.tone_keywords.length > 0 && (
+          <div className="bk-chips">
+            {brand.tone_keywords.map((keyword, index) => (
+              <span key={`${keyword}-${index}`} className="bk-chip">
+                {keyword}
+              </span>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return [
+    {
+      label: "Purpose",
+      content: prose(discovery?.purpose),
+      ghostHint: `The purpose arrives with discovery — one sentence on why ${brand.name} exists.`,
+    },
+    {
+      label: "Mission",
+      content: prose(discovery?.mission),
+      ghostHint: `The mission arrives with discovery — what ${brand.name} does every day to serve that purpose.`,
+    },
+    {
+      label: "Vision",
+      content: prose(discovery?.vision),
+      ghostHint: "The vision arrives with discovery — where this brand is headed if everything works.",
+    },
+    {
+      label: "Personality",
+      content: prose(discovery?.personality),
+      ghostHint: "The personality arrives with discovery — who this brand is when it speaks.",
+    },
+    {
+      label: "Brand Values",
+      content: valueChips,
+      ghostHint: "Brand values arrive with discovery — three to five words the work must honour.",
+    },
+    {
+      label: "Tone of Voice",
+      content: toneContent,
+      ghostHint: "The tone of voice arrives with the brief draft — how every caption and panel should sound.",
+    },
+    {
+      label: "Key USP",
+      content: prose(discovery?.key_usp),
+      ghostHint: `The key USP arrives with discovery — the one thing only ${brand.name} can claim.`,
+    },
+    {
+      label: "Visual Competitor Analysis",
+      content: prose(discovery?.visual_competitor_analysis),
+      ghostHint: "A short read on 2–3 competitor feeds — what they do visually, and what we deliberately won't.",
+    },
+    {
+      label: "Existing Brand Review",
+      content: prose(discovery?.existing_brand_review),
+      ghostHint: "An honest review of the brand as it stands today — what stays, what the refresh retires.",
+    },
+    {
+      label: "Target Audience",
+      content: prose(brand.target_audience),
+      ghostHint: "The target audience arrives with the brief draft — who this work must reach, precisely.",
+    },
+  ];
+}
+
+function DiscoverySection({
+  brand,
+  clientName,
+}: {
+  brand: ApiBrand;
+  clientName: string;
+}): JSX.Element {
+  const timeline = brand.kit?.discovery.timeline;
+  const entries = discoveryEntries(brand);
+
+  return (
+    <>
+      <SectionHead kicker="Chapter 01 — Discovery" />
+      <h2 className="bk-sec-title">Who {brand.name} is, before a single pixel.</h2>
+      <p className="bk-sec-sub">
+        The strategic foundation every creative decision in this book traces back to.
+      </p>
+
+      <div className="bk-meta-strip">
+        <div className="bk-meta-cell">
+          <div className="bk-meta-k">Client</div>
+          <div className="bk-meta-v">{clientName}</div>
+        </div>
+        <div className="bk-meta-cell">
+          <div className="bk-meta-k">Industry</div>
+          {filled(brand.niche) ? (
+            <div className="bk-meta-v">{brand.niche}</div>
+          ) : (
+            <div className="bk-meta-v bk-meta-v--ghost">to be confirmed at onboarding</div>
+          )}
+        </div>
+        <div className="bk-meta-cell">
+          <div className="bk-meta-k">Timeline</div>
+          {filled(timeline) ? (
+            <div className="bk-meta-v">{timeline}</div>
+          ) : (
+            <div className="bk-meta-v bk-meta-v--ghost">engagement window to come</div>
+          )}
+        </div>
+      </div>
+
+      <div className="bk-disc-grid">
+        {entries.map((entry) => (
+          <div key={entry.label} className="bk-disc-item">
+            <div className="bk-disc-k">{entry.label}</div>
+            {entry.content ?? <GhostCard hint={entry.ghostHint} />}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Chapter 02 — Creative Direction (read-only)
+--------------------------------------------------------------------------- */
+
+/** The moodboard always shows its full shape — assets first, reserved tiles after (spec §5 tier 2). */
+const MOODBOARD_MIN_TILES = 6;
+
+function Moodboard({ assetIds }: { assetIds: string[] }): JSX.Element {
+  const ghostCount = Math.max(0, MOODBOARD_MIN_TILES - assetIds.length);
+  return (
+    <div className="bk-mood-grid">
+      {assetIds.map((assetId, index) => (
+        <figure
+          key={assetId}
+          className={index === 0 ? "bk-mood bk-mood--tall" : "bk-mood"}
+        >
+          <BrandKitAssetImage
+            assetId={assetId}
+            alt={`Moodboard reference ${index + 1}`}
+            fit="cover"
+            fallbackLabel="reference unavailable"
+          />
+          <figcaption className="bk-mood-cap">
+            Reference {String(index + 1).padStart(2, "0")}
+          </figcaption>
+        </figure>
+      ))}
+      {Array.from({ length: ghostCount }, (_, index) => (
+        <div
+          key={`mood-ghost-${index}`}
+          className={
+            assetIds.length === 0 && index === 0 ? "bk-mood-ghost bk-mood--tall" : "bk-mood-ghost"
+          }
+        >
+          <span className="bk-mood-ghost-ico">+</span>
+          <span>Moodboard image · in curation</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** One prose block of the direction spread — filled paragraph or a tier-1 ghost. */
+function ProseBlock({
+  label,
+  text,
+  ghostHint,
+}: {
+  label: string;
+  text: string | null | undefined;
+  ghostHint: string;
+}): JSX.Element {
+  return (
+    <div className="bk-prose-block">
+      <div className="bk-prose-k">{label}</div>
+      {filled(text) ? <p>{text}</p> : <GhostCard hint={ghostHint} />}
+    </div>
+  );
+}
+
+function DirectionSection({ brand }: { brand: ApiBrand }): JSX.Element {
+  const direction = brand.kit?.direction;
+  const assetIds = direction?.moodboard_asset_ids ?? [];
+
+  return (
+    <>
+      <SectionHead kicker="Chapter 02 — Creative Direction" />
+      <h2 className="bk-sec-title">The mood every frame answers to.</h2>
+      <p className="bk-sec-sub">
+        Vetted references from the brand&apos;s asset library, and the reasoning that turns a
+        palette into a point of view.
+      </p>
+
+      <Moodboard assetIds={assetIds} />
+
+      <div className="bk-prose-grid">
+        <ProseBlock
+          label="Colour Palette:"
+          text={direction?.palette_rationale}
+          ghostHint="The palette rationale arrives with creative direction — why each colour earns its place in the system."
+        />
+        <ProseBlock
+          label="Visual Tone:"
+          text={direction?.visual_tone}
+          ghostHint="The visual tone arrives with creative direction — photography, light, and what a busy layout would betray."
+        />
+        <ProseBlock
+          label="How it aligns with the Personality:"
+          text={direction?.personality_alignment}
+          ghostHint="How the look performs the personality — written once the direction locks."
+        />
+        <ProseBlock
+          label="Uniqueness vs Competitors:"
+          text={direction?.competitor_differentiation}
+          ghostHint="What the category default looks like, and the corner this brand owns instead."
+        />
+      </div>
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Chapter 03 — Logo Suite (read-only)
+--------------------------------------------------------------------------- */
+
+/** The suite's fixed shape — every variant row always renders (spec §5 tier 2). */
+interface LogoVariantDef {
+  variant: ApiLogoVariant;
+  label: string;
+  /** Template copy describing the slot's purpose; a slot's own `notes` overrides it. */
+  defaultNote: string;
+  roundFrame: boolean;
+}
+
+const LOGO_VARIANTS: LogoVariantDef[] = [
+  {
+    variant: "primary",
+    label: "Primary Logo",
+    defaultNote: "The brand's signature mark — the anchor of every creative.",
+    roundFrame: false,
+  },
+  {
+    variant: "stacked",
+    label: "Stacked Logo",
+    defaultNote: "For square placements and profile tiles.",
+    roundFrame: false,
+  },
+  {
+    variant: "wordmark",
+    label: "Wordmark",
+    defaultNote: "Full name, set in the brand's heading face, for headers and documents.",
+    roundFrame: false,
+  },
+  {
+    variant: "icon",
+    label: "Icon",
+    defaultNote: "The reduced mark for favicons and app touchpoints.",
+    roundFrame: true,
+  },
+  {
+    variant: "social_icon",
+    label: "Social Icons",
+    defaultNote: "The mark proven on every brand ground before it ships.",
+    roundFrame: true,
+  },
+];
+
+/** Grounds the social icons demo on when a slot names none (spec fallback: primary / ink). */
+const DEFAULT_SOCIAL_ROLES = ["primary", "ink"];
+
+/** One coloured circle ground for the social-icon row; hex null ⇒ reserved (role has no hex yet). */
+interface SocialGround {
+  role: string;
+  hex: string | null;
+}
+
+function resolveSocialGrounds(brand: ApiBrand, slot: ApiLogoVariantSlot | undefined): SocialGround[] {
+  const roles = slot !== undefined && slot.bg_roles.length > 0 ? slot.bg_roles : DEFAULT_SOCIAL_ROLES;
+  return roles.map((role): SocialGround => {
+    const match = brand.tokens.colors.find(
+      (color) => color.name.toLowerCase() === role.toLowerCase(),
+    );
+    return { role, hex: match?.hex ?? null };
+  });
+}
+
+function SocialCircles({
+  brand,
+  slot,
+}: {
+  brand: ApiBrand;
+  slot: ApiLogoVariantSlot | undefined;
+}): JSX.Element {
+  const grounds = resolveSocialGrounds(brand, slot);
+  const assetId = slot?.asset_id ?? null;
+
+  if (assetId === null) {
+    // Tier-2 empty state: the row keeps its full shape — reserved circles, no broken mark.
+    return (
+      <div className="bk-specimen bk-specimen--ghost bk-specimen--social">
+        <div className="bk-soc-circles">
+          {grounds.map((ground) => (
+            <div
+              key={ground.role}
+              className="bk-soc bk-soc--empty"
+              title={`Reserved — ${titleCase(ground.role)} ground`}
+            >
+              +
+            </div>
+          ))}
+        </div>
+        <p className="bk-ghost-spec-label">Social icons · not uploaded</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bk-specimen bk-specimen--social">
+      <div className="bk-soc-circles">
+        {grounds.map((ground) =>
+          ground.hex !== null ? (
+            <div
+              key={ground.role}
+              className="bk-soc"
+              style={{ background: ground.hex }}
+              title={`On ${titleCase(ground.role)}`}
+            >
+              <span className="bk-soc-art">
+                <BrandKitAssetImage
+                  assetId={assetId}
+                  alt={`Social icon on ${titleCase(ground.role)}`}
+                  fit="contain"
+                  fallbackLabel="—"
+                />
+              </span>
+            </div>
+          ) : (
+            <div
+              key={ground.role}
+              className="bk-soc bk-soc--empty"
+              title={`Reserved — ${titleCase(ground.role)} ground, hex pending`}
+            >
+              +
+            </div>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LogoSpecimen({
+  def,
+  slot,
+}: {
+  def: LogoVariantDef;
+  slot: ApiLogoVariantSlot | undefined;
+}): JSX.Element {
+  const assetId = slot?.asset_id ?? null;
+
+  if (assetId === null) {
+    // Tier-2 empty state: a FULL-SIZE labelled specimen placeholder — planned, never broken.
+    return (
+      <div className="bk-specimen bk-specimen--ghost">
+        <div className={def.roundFrame ? "bk-ghost-frame bk-ghost-frame--round" : "bk-ghost-frame"}>
+          {def.roundFrame ? "○" : "▢"}
+        </div>
+        <p className="bk-ghost-spec-label">{def.label} · not uploaded</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bk-specimen">
+      <span className="bk-corner bk-corner--1" />
+      <span className="bk-corner bk-corner--2" />
+      <span className="bk-corner bk-corner--3" />
+      <span className="bk-corner bk-corner--4" />
+      <div className="bk-specimen-art">
+        <BrandKitAssetImage
+          assetId={assetId}
+          alt={def.label}
+          fit="contain"
+          fallbackLabel="logo unavailable"
+        />
+      </div>
+    </div>
+  );
+}
+
+function LogoSuiteSection({ brand }: { brand: ApiBrand }): JSX.Element {
+  const suite = brand.tokens.logo_suite ?? [];
+  const logoSpec = brand.tokens.logo;
+
+  // Back-compat (spec §3.2): an empty suite treats tokens.logo as the PRIMARY variant.
+  const slots = new Map<ApiLogoVariant, ApiLogoVariantSlot>();
+  for (const slot of suite) {
+    slots.set(slot.variant, slot);
+  }
+  if (suite.length === 0 && filled(logoSpec.ref)) {
+    slots.set("primary", {
+      variant: "primary",
+      asset_id: logoSpec.ref,
+      bg_roles: [],
+      notes: logoSpec.assessment,
+    });
+  }
+
+  const hasClearSpace = filled(logoSpec.clear_space);
+  const hasMinSize = logoSpec.min_size_px !== null;
+
+  return (
+    <>
+      <SectionHead kicker="Chapter 03 — Logo Suite" />
+      <h2 className="bk-sec-title">One mark, every context.</h2>
+      <p className="bk-sec-sub">
+        Uploaded variants render live; open slots stay reserved so the suite always shows its
+        full shape.
+      </p>
+
+      {LOGO_VARIANTS.map((def, index) => {
+        const slot = slots.get(def.variant);
+        const slotNotes = slot?.notes;
+        const note = filled(slotNotes) ? slotNotes : def.defaultNote;
+        return (
+          <div
+            key={def.variant}
+            className={index === 0 ? "bk-logo-row bk-logo-row--first" : "bk-logo-row"}
+          >
+            <div className="bk-logo-meta">
+              <div className="bk-logo-k">{def.label}</div>
+              <p className="bk-logo-note">{note}</p>
+              {def.variant === "primary" && (hasMinSize || hasClearSpace) && (
+                <div className="bk-logo-spec">
+                  {hasMinSize && (
+                    <>
+                      Min size · {logoSpec.min_size_px}px wide
+                      <br />
+                    </>
+                  )}
+                  {hasClearSpace && <>Clear space · {logoSpec.clear_space}</>}
+                </div>
+              )}
+            </div>
+            {def.variant === "social_icon" ? (
+              <SocialCircles brand={brand} slot={slot} />
+            ) : (
+              <LogoSpecimen def={def} slot={slot} />
+            )}
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -358,7 +870,7 @@ function Masthead({ brand }: { brand: ApiBrand }): JSX.Element {
 }
 
 /**
- * Brand Kit v2 — the per-client brand book (slice 1: Colours & Fonts, read-only).
+ * Brand Kit v2 — the per-client brand book (chapters 01–04 read-only; 05–06 placeholders).
  *
  * The canvas is its own editorial surface (spec §6): CSS custom properties derived from the
  * client's tokens are written on the canvas root, so the book carries the CLIENT's brand while
@@ -421,9 +933,9 @@ export default async function BrandKitPage({
   const canvasVars = deriveKitCanvasVars(brand) as CSSProperties;
 
   const panels: Record<string, JSX.Element> = {
-    discovery: <PlaceholderChapter number="01" label="Brand Discovery" />,
-    direction: <PlaceholderChapter number="02" label="Creative Direction" />,
-    logo_suite: <PlaceholderChapter number="03" label="Logo Suite" />,
+    discovery: <DiscoverySection brand={brand} clientName={client.name} />,
+    direction: <DirectionSection brand={brand} />,
+    logo_suite: <LogoSuiteSection brand={brand} />,
     colours_fonts: <ColoursFontsSection brand={brand} />,
     applications: <PlaceholderChapter number="05" label="Applications" />,
     launch_templates: <PlaceholderChapter number="06" label="Launch Templates" />,
@@ -433,7 +945,8 @@ export default async function BrandKitPage({
     <AppShell sidebar={sidebar} title="Brand kit" crumb={client.name}>
       <div className="bk-canvas" style={canvasVars}>
         <Masthead brand={brand} />
-        <BrandKitTabs tabs={KIT_TABS} panels={panels} initialKey="colours_fonts" />
+        {/* The book now opens on chapter 01 (the reference's reading order) — slices 1–4 built. */}
+        <BrandKitTabs tabs={KIT_TABS} panels={panels} initialKey="discovery" />
         <footer className="bk-colophon">
           <div className="bk-fleur">❦</div>
           Prepared by Mimik Creations · Brand Kit v2 · rendered from live brand tokens

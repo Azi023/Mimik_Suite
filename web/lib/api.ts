@@ -106,12 +106,43 @@ export interface ApiKitTheme {
   paper_hex: string | null;
 }
 
+/** mimik_contracts.brand_kit.BrandDiscovery — chapter 01 content. Industry and target audience
+ *  are NOT here: they stay on `Brand.niche` / `Brand.target_audience` (reused, not duplicated). */
+export interface ApiBrandDiscovery {
+  purpose: string | null;
+  mission: string | null;
+  vision: string | null;
+  personality: string | null;
+  /** Rendered as chips. */
+  values: string[];
+  /** Long-form; the book falls back to Brand.brand_voice + tone_keywords when unset. */
+  tone_of_voice: string | null;
+  key_usp: string | null;
+  visual_competitor_analysis: string | null;
+  existing_brand_review: string | null;
+  /** "May — July 2026" engagement window. */
+  timeline: string | null;
+}
+
+/** mimik_contracts.brand_kit.CreativeDirection — chapter 02 content. */
+export interface ApiCreativeDirection {
+  /** BrandAsset refs for the moodboard grid; empty slots render as placeholders. */
+  moodboard_asset_ids: string[];
+  /** The "Colour Palette:" rationale paragraph. */
+  palette_rationale: string | null;
+  visual_tone: string | null;
+  personality_alignment: string | null;
+  competitor_differentiation: string | null;
+}
+
 /**
- * mimik_contracts.brand.BrandKit — the per-client brand book attached to a Brand.
- * Only the fields this slice renders are typed; the wire object carries more
- * (discovery, direction, patterns…) which later slices will add here.
+ * mimik_contracts.brand_kit.BrandKit — the per-client brand book attached to a Brand.
+ * Only the fields the built chapters render are typed; the wire object carries more
+ * (patterns, applications, launch_templates…) which later slices will add here.
  */
 export interface ApiBrandKit {
+  discovery: ApiBrandDiscovery;
+  direction: ApiCreativeDirection;
   pending_colors: ApiPendingColor[];
   theme: ApiKitTheme;
   published: boolean;
@@ -123,6 +154,19 @@ export interface ApiLogoSpec {
   clear_space: string | null;
   min_size_px: number | null;
   assessment: string | null;
+}
+
+/** mimik_contracts.enums.LogoVariant — the five slots of the logo suite (chapter 03). */
+export type ApiLogoVariant = "primary" | "stacked" | "wordmark" | "icon" | "social_icon";
+
+/** mimik_contracts.brand.LogoVariantSlot — one slot of the suite; asset_id null ⇒ placeholder. */
+export interface ApiLogoVariantSlot {
+  variant: ApiLogoVariant;
+  /** BrandAsset(kind=LOGO) id; null ⇒ the slot renders as a reserved specimen placeholder. */
+  asset_id: string | null;
+  /** Palette role names to demo the mark on (the social-circle grounds). */
+  bg_roles: string[];
+  notes: string | null;
 }
 
 /** mimik_contracts.brand.Reference */
@@ -172,12 +216,14 @@ export interface ApiBrandLayout {
   show_guides: boolean;
 }
 
-/** mimik_contracts.brand.BrandTokens. `layout` is optional on the wire — the backend fills the
- *  default when omitted (e.g. at brand creation), so older payloads stay valid. */
+/** mimik_contracts.brand.BrandTokens. `layout` and `logo_suite` are optional on the wire — the
+ *  backend fills defaults when omitted (e.g. at brand creation), so older payloads stay valid.
+ *  An empty `logo_suite` ⇒ the book treats `logo` (LogoSpec) as the PRIMARY variant (spec §3.2). */
 export interface ApiBrandTokens {
   colors: ApiColorRole[];
   typography: ApiTypography;
   logo: ApiLogoSpec;
+  logo_suite?: ApiLogoVariantSlot[];
   layout?: ApiBrandLayout;
 }
 
