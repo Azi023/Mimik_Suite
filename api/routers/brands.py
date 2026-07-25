@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -15,7 +17,16 @@ from api.db import repo
 from api.db.mappers import to_brand
 from api.db.session import get_session
 from creative.render.compositor import render_url_element_to_png, render_url_to_pdf
-from mimik_contracts import ActorRole, Brand, BrandKit, BrandTokens, ColorRole, Reference
+from mimik_contracts import (
+    Actor,
+    ActorRole,
+    Brand,
+    BrandKit,
+    BrandTokens,
+    ColorRole,
+    Reference,
+    UpdateBrandKit,
+)
 
 router = APIRouter(prefix="/brands", tags=["brands"])
 
@@ -80,6 +91,61 @@ class UpdateBrandBrief(BaseModel):
     tokens: UpdateBrandColors | None = None
 
 
+def _deep_merge(current: dict[str, object], patch: dict[str, object]) -> dict[str, object]:
+    """Recursively merge models; lists and scalars replace when explicitly supplied."""
+    merged = deepcopy(current)
+    for key, value in patch.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _normalize_kit_clears(patch: dict[str, object]) -> dict[str, object]:
+    """Map explicit nulls on non-nullable kit containers to their empty/default value."""
+    normalized = deepcopy(patch)
+    defaults = BrandKit().model_dump(mode="json")
+    for key in (
+        "discovery",
+        "direction",
+        "pending_colors",
+        "patterns",
+        "applications",
+        "launch_templates",
+        "theme",
+        "published",
+    ):
+        if key in normalized and normalized[key] is None:
+            normalized[key] = defaults[key]
+
+    discovery = normalized.get("discovery")
+    if isinstance(discovery, dict) and "values" in discovery and discovery["values"] is None:
+        discovery["values"] = []
+    direction = normalized.get("direction")
+    if (
+        isinstance(direction, dict)
+        and "moodboard_asset_ids" in direction
+        and direction["moodboard_asset_ids"] is None
+    ):
+        direction["moodboard_asset_ids"] = []
+    theme = normalized.get("theme")
+    if isinstance(theme, dict) and "mode" in theme and theme["mode"] is None:
+        theme["mode"] = defaults["theme"]["mode"]
+    return normalized
+
+
+def _stamp_brand_kit(kit: BrandKit, principal: Principal) -> BrandKit:
+    """Attribute a kit mutation using the shared stable principal snapshot."""
+    return kit.model_copy(
+        update={
+            "updated_at": datetime.now(timezone.utc),
+            "updated_by": Actor.model_validate(principal_audit_actor(principal)),
+        }
+    )
+
+
 @router.post("", response_model=Brand, status_code=201)
 async def create_brand(
     body: CreateBrand,
@@ -104,17 +170,25 @@ async def create_brand(
 @router.patch("/{brand_id}", response_model=Brand)
 async def update_brand(
     brand_id: str,
-    body: UpdateBrandBrief | BrandTokens,
+    body: UpdateBrandBrief | BrandTokens | UpdateBrandKit,
     principal: Principal = Depends(require_role("owner", "admin", "ops", "designer", "team")),
     session: AsyncSession = Depends(get_session),
 ) -> Brand:
-    """Update the editable brief or replace the full brand kit, always tenant-scoped."""
+    """Update brief/tokens or deep-merge a kit patch, always tenant-scoped."""
     row = await repo.get_brand(session, tenant_id=principal.tenant_id, brand_id=brand_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Brand not found")
 
     if isinstance(body, BrandTokens):
         fields: dict[str, object] = {"tokens": body.model_dump(mode="json")}
+    elif isinstance(body, UpdateBrandKit):
+        current_kit = BrandKit.model_validate(row.kit) if row.kit else BrandKit()
+        patch = _normalize_kit_clears(
+            body.kit.model_dump(mode="json", exclude_unset=True)
+        )
+        merged = _deep_merge(current_kit.model_dump(mode="json"), patch)
+        updated_kit = _stamp_brand_kit(BrandKit.model_validate(merged), principal)
+        fields = {"kit": updated_kit.model_dump(mode="json")}
     else:
         # TODO(brief-versioning): v1 edits the brand brief in place; introduce immutable brief
         # versions only when that later locked concern is designed end-to-end.
@@ -173,17 +247,22 @@ async def delete_brand(
 
 
 async def _set_published(
-    session: AsyncSession, *, tenant_id: str, brand_id: str, published: bool
+    session: AsyncSession, *, principal: Principal, brand_id: str, published: bool
 ) -> BrandKit:
     """Flip ONLY `kit.published`, non-destructively (all other kit fields round-trip untouched),
     always tenant-scoped. Raises 404 if the brand isn't in the caller's tenant."""
-    row = await repo.get_brand(session, tenant_id=tenant_id, brand_id=brand_id)
+    row = await repo.get_brand(
+        session, tenant_id=principal.tenant_id, brand_id=brand_id
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Brand not found")
     kit = BrandKit.model_validate(row.kit) if row.kit else BrandKit()
-    kit = kit.model_copy(update={"published": published})
+    kit = _stamp_brand_kit(kit.model_copy(update={"published": published}), principal)
     updated = await repo.update_brand(
-        session, tenant_id=tenant_id, brand_id=brand_id, kit=kit.model_dump(mode="json")
+        session,
+        tenant_id=principal.tenant_id,
+        brand_id=brand_id,
+        kit=kit.model_dump(mode="json"),
     )
     if updated is None:  # lost a race with a concurrent delete/move
         raise HTTPException(status_code=404, detail="Brand not found")
@@ -200,7 +279,7 @@ async def publish_brand_book(
     """Publish the brand book: flip `kit.published` True and mint a long-lived SHARE token whose
     /book/{token} link anyone can read while the book stays published."""
     await _set_published(
-        session, tenant_id=principal.tenant_id, brand_id=brand_id, published=True
+        session, principal=principal, brand_id=brand_id, published=True
     )
     token = issue_brand_book_token(
         brand_id=brand_id, tenant_id=principal.tenant_id, kind="share"
@@ -220,7 +299,7 @@ async def unpublish_brand_book(
     """Unpublish: flip `kit.published` False. The flag is the authority — any share token already
     handed out still verifies cryptographically but the token-read endpoint 404s once unpublished."""
     await _set_published(
-        session, tenant_id=principal.tenant_id, brand_id=brand_id, published=False
+        session, principal=principal, brand_id=brand_id, published=False
     )
     return BrandBookShare(published=False, share_url=None)
 

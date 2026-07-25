@@ -23,6 +23,7 @@ import { DiscoverySection } from "./DiscoverySection";
 import { LogoSuiteSection } from "./LogoSuiteSection";
 import { LaunchTemplatesSection } from "./LaunchTemplatesSection";
 import { KIT_TABS, type BookExportMode, type BookView } from "./registry";
+import type { SaveBrandKitTextField } from "./shared";
 import "./brand-kit.css";
 
 function Masthead({ brand }: { brand: ApiBrand }): JSX.Element {
@@ -65,10 +66,20 @@ function buildPanels(
   brand: ApiBrand,
   clientName: string,
   view: BookView,
+  onSaveTextField?: SaveBrandKitTextField,
 ): Record<string, JSX.Element> {
   return {
-    discovery: <DiscoverySection brand={brand} clientName={clientName} view={view} />,
-    direction: <DirectionSection brand={brand} view={view} />,
+    discovery: (
+      <DiscoverySection
+        brand={brand}
+        clientName={clientName}
+        view={view}
+        onSaveTextField={onSaveTextField}
+      />
+    ),
+    direction: (
+      <DirectionSection brand={brand} view={view} onSaveTextField={onSaveTextField} />
+    ),
     logo_suite: <LogoSuiteSection brand={brand} view={view} />,
     colours_fonts: <ColoursFontsSection brand={brand} view={view} />,
     applications: <ApplicationsSection brand={brand} view={view} />,
@@ -87,6 +98,8 @@ interface BrandBookCanvasProps {
   controls?: ReactNode;
   /** Full-bleed skin for the public route (no shell margins, paper to the viewport edge). */
   fullBleed?: boolean;
+  /** Studio-only inline text persistence; absent on public and export surfaces. */
+  onSaveTextField?: SaveBrandKitTextField;
 }
 
 export function BrandBookCanvas({
@@ -96,9 +109,10 @@ export function BrandBookCanvas({
   exportMode = null,
   controls = null,
   fullBleed = false,
+  onSaveTextField,
 }: BrandBookCanvasProps): JSX.Element {
   const canvasVars = deriveKitCanvasVars(brand) as CSSProperties;
-  const panels = buildPanels(brand, clientName, view);
+  const panels = buildPanels(brand, clientName, view, onSaveTextField);
   const canvasClass = [
     "bk-canvas",
     fullBleed ? "bk-canvas--full" : "",

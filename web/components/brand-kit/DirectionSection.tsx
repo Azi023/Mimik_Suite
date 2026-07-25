@@ -1,5 +1,5 @@
 /**
- * Chapter 02 — Creative Direction (read-only).
+ * Chapter 02 — Creative Direction (studio text editing; client view remains read-only).
  *
  * Studio view: the moodboard always shows its full shape (curation ghosts) and every prose
  * block renders — filled or as a tier-1 ghost card.
@@ -9,11 +9,18 @@
  */
 
 import type { JSX } from "react";
-import type { ApiBrand } from "@/lib/api";
+import type { ApiBrand, ApiCreativeDirectionTextField } from "@/lib/api";
 import { BrandKitAssetImage } from "./BrandKitAssetImage";
 import type { BookView } from "./registry";
 import { CLIENT_MIN_FILLED_FIELDS } from "./registry";
-import { filled, GhostCard, PlaceholderChapter, SectionHead } from "./shared";
+import {
+  EditableTextField,
+  filled,
+  GhostCard,
+  PlaceholderChapter,
+  SectionHead,
+  type SaveBrandKitTextField,
+} from "./shared";
 
 /** The moodboard always shows its full shape — assets first, reserved tiles after (spec §5 tier 2). */
 const MOODBOARD_MIN_TILES = 6;
@@ -76,14 +83,17 @@ interface ProseDef {
   label: string;
   text: string | null | undefined;
   ghostHint: string;
+  field: ApiCreativeDirectionTextField;
 }
 
 export function DirectionSection({
   brand,
   view,
+  onSaveTextField,
 }: {
   brand: ApiBrand;
   view: BookView;
+  onSaveTextField?: SaveBrandKitTextField;
 }): JSX.Element {
   const direction = brand.kit?.direction;
   const assetIds = direction?.moodboard_asset_ids ?? [];
@@ -94,22 +104,26 @@ export function DirectionSection({
       text: direction?.palette_rationale,
       ghostHint:
         "The palette rationale arrives with creative direction — why each colour earns its place in the system.",
+      field: "palette_rationale",
     },
     {
       label: "Visual Tone:",
       text: direction?.visual_tone,
       ghostHint:
         "The visual tone arrives with creative direction — photography, light, and what a busy layout would betray.",
+      field: "visual_tone",
     },
     {
       label: "How it aligns with the Personality:",
       text: direction?.personality_alignment,
       ghostHint: "How the look performs the personality — written once the direction locks.",
+      field: "personality_alignment",
     },
     {
       label: "Uniqueness vs Competitors:",
       text: direction?.competitor_differentiation,
       ghostHint: "What the category default looks like, and the corner this brand owns instead.",
+      field: "competitor_differentiation",
     },
   ];
 
@@ -138,7 +152,25 @@ export function DirectionSection({
       {proseRows.length > 0 && (
         <div className="bk-prose-grid">
           {proseRows.map((def) => (
-            <ProseBlock key={def.label} label={def.label} text={def.text} ghostHint={def.ghostHint} />
+            view === "studio" && onSaveTextField !== undefined ? (
+              <div key={def.field} className="bk-prose-block">
+                <div className="bk-prose-k">{def.label}</div>
+                <EditableTextField
+                  label={def.label}
+                  value={def.text}
+                  hint={def.ghostHint}
+                  target={{ section: "direction", field: def.field }}
+                  onSave={onSaveTextField}
+                />
+              </div>
+            ) : (
+              <ProseBlock
+                key={def.field}
+                label={def.label}
+                text={def.text}
+                ghostHint={def.ghostHint}
+              />
+            )
           ))}
         </div>
       )}

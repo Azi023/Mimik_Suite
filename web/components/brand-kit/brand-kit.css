@@ -538,6 +538,116 @@
   color: var(--bk-ink);
 }
 
+/* ————— studio inline text editing — same book furniture, no app-wide dependency ————— */
+.bk-inline-trigger {
+  position: relative;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 48px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--bk-ink);
+  font: inherit;
+  font-size: 16.5px;
+  line-height: 1.7;
+  text-align: left;
+  cursor: text;
+}
+.bk-inline-trigger--ghost {
+  border: 1.5px dashed var(--bk-ghost);
+  border-radius: 12px;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 10px,
+    rgba(150, 131, 109, 0.045) 10px 20px
+  );
+  padding: 18px 58px 18px 20px;
+  color: var(--bk-muted);
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1.55;
+}
+.bk-inline-trigger--compact {
+  min-height: 28px;
+  padding-right: 42px;
+  font-size: 17px;
+  line-height: 1.45;
+}
+.bk-inline-trigger--compact.bk-inline-trigger--ghost {
+  min-height: auto;
+  padding: 0 42px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--bk-muted-2);
+  font-size: 15px;
+}
+.bk-inline-edit-mark {
+  position: absolute;
+  top: 3px;
+  right: 0;
+  font-family: var(--bk-mono);
+  font-size: 8.5px;
+  font-style: normal;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bk-muted-2);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.bk-inline-trigger:hover .bk-inline-edit-mark,
+.bk-inline-trigger:focus-visible .bk-inline-edit-mark {
+  opacity: 1;
+}
+.bk-inline-trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--bk-brand) 55%, transparent);
+  outline-offset: 5px;
+  border-radius: 4px;
+}
+.bk-inline-editor textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  min-height: 112px;
+  padding: 13px 15px;
+  border: 1px solid var(--bk-line);
+  border-radius: 10px;
+  background: var(--bk-card);
+  color: var(--bk-ink);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.bk-inline-editor--compact textarea {
+  min-height: 68px;
+}
+.bk-inline-editor textarea:focus {
+  outline: 2px solid color-mix(in srgb, var(--bk-brand) 48%, transparent);
+  outline-offset: 2px;
+  border-color: var(--bk-brand);
+}
+.bk-inline-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.bk-inline-actions .bk-btn {
+  padding: 7px 13px;
+  font-size: 9px;
+}
+.bk-inline-actions .bk-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+.bk-inline-editor .bk-inline-error {
+  margin-top: 9px;
+  color: #a83228;
+  font-size: 12.5px;
+  font-style: italic;
+}
+
 /* ————— chapter 03 · logo suite ————— */
 .bk-logo-row {
   display: grid;

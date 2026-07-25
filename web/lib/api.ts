@@ -174,6 +174,8 @@ export interface ApiBrandKit {
   launch_templates: ApiLaunchTemplate[];
   theme: ApiKitTheme;
   published: boolean;
+  updated_at: string | null;
+  updated_by: { id: string; role: string; name?: string | null } | null;
 }
 
 /** mimik_contracts.brand.LogoSpec */
@@ -778,10 +780,43 @@ export interface UpdateBrandBriefBody {
   tokens?: { colors: ApiColorRole[] };
 }
 
+export type ApiBrandDiscoveryTextField =
+  | "purpose"
+  | "mission"
+  | "vision"
+  | "personality"
+  | "tone_of_voice"
+  | "key_usp"
+  | "visual_competitor_analysis"
+  | "existing_brand_review"
+  | "timeline";
+
+export type ApiCreativeDirectionTextField =
+  | "palette_rationale"
+  | "visual_tone"
+  | "personality_alignment"
+  | "competitor_differentiation";
+
+export interface UpdateBrandKitBody {
+  kit: {
+    discovery?: Partial<Record<ApiBrandDiscoveryTextField, string | null>>;
+    direction?: Partial<Record<ApiCreativeDirectionTextField, string | null>>;
+  };
+}
+
 /** PATCH /brands/{id} — update brief fields and palette colors without replacing other tokens. */
 export function updateBrandBrief(
   brandId: string,
   body: UpdateBrandBriefBody,
+  sessionToken?: string,
+): Promise<ApiBrand> {
+  return apiPatch<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, body, sessionToken);
+}
+
+/** PATCH /brands/{id} — deep-merge only the supplied brand-kit fields. */
+export function updateBrandKit(
+  brandId: string,
+  body: UpdateBrandKitBody,
   sessionToken?: string,
 ): Promise<ApiBrand> {
   return apiPatch<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, body, sessionToken);

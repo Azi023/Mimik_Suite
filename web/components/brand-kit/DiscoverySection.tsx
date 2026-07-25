@@ -1,5 +1,5 @@
 /**
- * Chapter 01 — Brand Discovery (read-only).
+ * Chapter 01 — Brand Discovery (studio text editing; client view remains read-only).
  *
  * Studio view: every registry row renders — filled prose, chips, or a tier-1 ghost card.
  * Client view (spec §5): empty rows are OMITTED; fewer than two filled fields collapses the
@@ -7,16 +7,26 @@
  */
 
 import type { JSX } from "react";
-import type { ApiBrand } from "@/lib/api";
+import type { ApiBrand, ApiBrandDiscoveryTextField } from "@/lib/api";
 import type { BookView } from "./registry";
 import { CLIENT_MIN_FILLED_FIELDS } from "./registry";
-import { filled, GhostCard, PlaceholderChapter, SectionHead } from "./shared";
+import {
+  EditableTextField,
+  filled,
+  GhostCard,
+  PlaceholderChapter,
+  SectionHead,
+  type SaveBrandKitTextField,
+} from "./shared";
 
 /** One entry of the two-column discovery list — real prose, chips, or a tier-1 ghost. */
 interface DiscoveryEntry {
   label: string;
   content: JSX.Element | null;
   ghostHint: string;
+  field?: ApiBrandDiscoveryTextField;
+  value?: string | null;
+  displayValue?: string | null;
 }
 
 function discoveryEntries(brand: ApiBrand): DiscoveryEntry[] {
@@ -64,21 +74,29 @@ function discoveryEntries(brand: ApiBrand): DiscoveryEntry[] {
       label: "Purpose",
       content: prose(discovery?.purpose),
       ghostHint: `The purpose arrives with discovery — one sentence on why ${brand.name} exists.`,
+      field: "purpose",
+      value: discovery?.purpose,
     },
     {
       label: "Mission",
       content: prose(discovery?.mission),
       ghostHint: `The mission arrives with discovery — what ${brand.name} does every day to serve that purpose.`,
+      field: "mission",
+      value: discovery?.mission,
     },
     {
       label: "Vision",
       content: prose(discovery?.vision),
       ghostHint: "The vision arrives with discovery — where this brand is headed if everything works.",
+      field: "vision",
+      value: discovery?.vision,
     },
     {
       label: "Personality",
       content: prose(discovery?.personality),
       ghostHint: "The personality arrives with discovery — who this brand is when it speaks.",
+      field: "personality",
+      value: discovery?.personality,
     },
     {
       label: "Brand Values",
@@ -89,21 +107,30 @@ function discoveryEntries(brand: ApiBrand): DiscoveryEntry[] {
       label: "Tone of Voice",
       content: toneContent,
       ghostHint: "The tone of voice arrives with the brief draft — how every caption and panel should sound.",
+      field: "tone_of_voice",
+      value: discovery?.tone_of_voice,
+      displayValue: discovery?.tone_of_voice ?? brand.brand_voice,
     },
     {
       label: "Key USP",
       content: prose(discovery?.key_usp),
       ghostHint: `The key USP arrives with discovery — the one thing only ${brand.name} can claim.`,
+      field: "key_usp",
+      value: discovery?.key_usp,
     },
     {
       label: "Visual Competitor Analysis",
       content: prose(discovery?.visual_competitor_analysis),
       ghostHint: "A short read on 2–3 competitor feeds — what they do visually, and what we deliberately won't.",
+      field: "visual_competitor_analysis",
+      value: discovery?.visual_competitor_analysis,
     },
     {
       label: "Existing Brand Review",
       content: prose(discovery?.existing_brand_review),
       ghostHint: "An honest review of the brand as it stands today — what stays, what the refresh retires.",
+      field: "existing_brand_review",
+      value: discovery?.existing_brand_review,
     },
     {
       label: "Target Audience",
@@ -117,10 +144,12 @@ export function DiscoverySection({
   brand,
   clientName,
   view,
+  onSaveTextField,
 }: {
   brand: ApiBrand;
   clientName: string;
   view: BookView;
+  onSaveTextField?: SaveBrandKitTextField;
 }): JSX.Element {
   const timeline = brand.kit?.discovery.timeline;
   const entries = discoveryEntries(brand);
@@ -162,7 +191,19 @@ export function DiscoverySection({
             </div>
           )
         )}
-        {filled(timeline) ? (
+        {view === "studio" && onSaveTextField !== undefined ? (
+          <div className="bk-meta-cell">
+            <div className="bk-meta-k">Timeline</div>
+            <EditableTextField
+              label="Timeline"
+              value={timeline}
+              hint="engagement window to come"
+              target={{ section: "discovery", field: "timeline" }}
+              onSave={onSaveTextField}
+              compact
+            />
+          </div>
+        ) : filled(timeline) ? (
           <div className="bk-meta-cell">
             <div className="bk-meta-k">Timeline</div>
             <div className="bk-meta-v">{timeline}</div>
@@ -181,7 +222,33 @@ export function DiscoverySection({
         {rows.map((entry) => (
           <div key={entry.label} className="bk-disc-item">
             <div className="bk-disc-k">{entry.label}</div>
-            {entry.content ?? <GhostCard hint={entry.ghostHint} />}
+            {view === "studio" &&
+            onSaveTextField !== undefined &&
+            entry.field !== undefined ? (
+              <>
+                <EditableTextField
+                  label={entry.label}
+                  value={entry.value}
+                  displayValue={entry.displayValue}
+                  hint={entry.ghostHint}
+                  target={{ section: "discovery", field: entry.field }}
+                  onSave={onSaveTextField}
+                />
+                {entry.field === "tone_of_voice" &&
+                  !filled(entry.value) &&
+                  brand.tone_keywords.length > 0 && (
+                    <div className="bk-chips">
+                      {brand.tone_keywords.map((keyword, index) => (
+                        <span key={`${keyword}-${index}`} className="bk-chip">
+                          {keyword}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+              </>
+            ) : (
+              entry.content ?? <GhostCard hint={entry.ghostHint} />
+            )}
           </div>
         ))}
       </div>

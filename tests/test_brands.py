@@ -5,6 +5,8 @@ from __future__ import annotations
 from conftest import superadmin_headers
 from httpx import AsyncClient
 
+from api.core.security import create_access_token
+
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
@@ -182,3 +184,166 @@ async def test_patch_brand_brief_idor(client: AsyncClient) -> None:
     assert leaked.status_code == 404, "IDOR: tenant B edited tenant A's brand brief!"
     fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token_a))
     assert fetched.json()["brand_voice"] is None
+
+
+async def test_patch_brand_kit_updates_only_named_discovery_field(
+    client: AsyncClient,
+) -> None:
+    token = await _new_tenant(client, slug="kit-partial")
+    brand_id = await _new_brand(client, token)
+    seeded = await client.patch(
+        f"/brands/{brand_id}",
+        json={
+            "kit": {
+                "discovery": {
+                    "purpose": "Old purpose",
+                    "mission": "Mission stays intact",
+                }
+            }
+        },
+        headers=_auth(token),
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    updated = await client.patch(
+        f"/brands/{brand_id}",
+        json={"kit": {"discovery": {"purpose": "Sharper purpose"}}},
+        headers=_auth(token),
+    )
+
+    assert updated.status_code == 200, updated.text
+    discovery = updated.json()["kit"]["discovery"]
+    assert discovery["purpose"] == "Sharper purpose"
+    assert discovery["mission"] == "Mission stays intact"
+
+
+async def test_patch_brand_discovery_preserves_other_kit_sections(
+    client: AsyncClient,
+) -> None:
+    token = await _new_tenant(client, slug="kit-sections")
+    brand_id = await _new_brand(client, token)
+    seeded = await client.patch(
+        f"/brands/{brand_id}",
+        json={
+            "kit": {
+                "discovery": {"vision": "Original vision"},
+                "direction": {"visual_tone": "Tactile and restrained"},
+                "applications": [
+                    {"kind": "ig_post", "caption": "Launch application"}
+                ],
+                "launch_templates": [
+                    {"name": "Launch post", "format_key": "ig_post"}
+                ],
+            }
+        },
+        headers=_auth(token),
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    updated = await client.patch(
+        f"/brands/{brand_id}",
+        json={"kit": {"discovery": {"vision": "Expanded vision"}}},
+        headers=_auth(token),
+    )
+
+    assert updated.status_code == 200, updated.text
+    kit = updated.json()["kit"]
+    assert kit["direction"]["visual_tone"] == "Tactile and restrained"
+    assert kit["applications"] == [
+        {
+            "kind": "ig_post",
+            "asset_id": None,
+            "creative_id": None,
+            "caption": "Launch application",
+        }
+    ]
+    assert kit["launch_templates"] == [
+        {
+            "name": "Launch post",
+            "format_key": "ig_post",
+            "creative_id": None,
+            "asset_id": None,
+        }
+    ]
+
+
+async def test_patch_brand_kit_list_field_replaces_wholesale(
+    client: AsyncClient,
+) -> None:
+    token = await _new_tenant(client, slug="kit-lists")
+    brand_id = await _new_brand(client, token)
+    seeded = await client.patch(
+        f"/brands/{brand_id}",
+        json={
+            "kit": {
+                "pending_colors": [
+                    {"name": "old-one", "display_name": "Old One"},
+                    {"name": "old-two", "display_name": "Old Two"},
+                ]
+            }
+        },
+        headers=_auth(token),
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    updated = await client.patch(
+        f"/brands/{brand_id}",
+        json={
+            "kit": {
+                "pending_colors": [
+                    {"name": "new-only", "display_name": "New Only"}
+                ]
+            }
+        },
+        headers=_auth(token),
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["kit"]["pending_colors"] == [
+        {"name": "new-only", "display_name": "New Only", "rationale": None}
+    ]
+
+
+async def test_patch_brand_kit_idor_leaves_owner_kit_unchanged(
+    client: AsyncClient,
+) -> None:
+    token_a = await _new_tenant(client, slug="kit-agency-a")
+    token_b = await _new_tenant(client, slug="kit-agency-b")
+    brand_id = await _new_brand(client, token_a)
+    seeded = await client.patch(
+        f"/brands/{brand_id}",
+        json={"kit": {"discovery": {"purpose": "Tenant A purpose"}}},
+        headers=_auth(token_a),
+    )
+    assert seeded.status_code == 200, seeded.text
+    stored_before = seeded.json()["kit"]
+
+    leaked = await client.patch(
+        f"/brands/{brand_id}",
+        json={"kit": {"discovery": {"purpose": "Tenant B takeover"}}},
+        headers=_auth(token_b),
+    )
+
+    assert leaked.status_code == 404, "IDOR: tenant B edited tenant A's brand kit!"
+    fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token_a))
+    assert fetched.json()["kit"] == stored_before
+
+
+async def test_client_role_cannot_patch_brand_kit(client: AsyncClient) -> None:
+    token = await _new_tenant(client, slug="kit-client-role")
+    brand_id = await _new_brand(client, token)
+    brand = await client.get(f"/brands/{brand_id}", headers=_auth(token))
+    client_token = create_access_token(
+        tenant_id=brand.json()["tenant_id"],
+        role="client",
+    )
+
+    rejected = await client.patch(
+        f"/brands/{brand_id}",
+        json={"kit": {"discovery": {"purpose": "Client-authored overwrite"}}},
+        headers=_auth(client_token),
+    )
+
+    assert rejected.status_code == 403
+    fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token))
+    assert fetched.json()["kit"]["discovery"]["purpose"] is None

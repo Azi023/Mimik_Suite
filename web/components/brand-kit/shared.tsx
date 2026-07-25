@@ -3,7 +3,22 @@
  * All markup stays scoped under `.bk-canvas` (see brand-kit.css).
  */
 
-import type { JSX } from "react";
+"use client";
+
+import { useEffect, useState, type JSX } from "react";
+import type {
+  ApiBrandDiscoveryTextField,
+  ApiCreativeDirectionTextField,
+} from "@/lib/api";
+
+export type BrandKitTextTarget =
+  | { section: "discovery"; field: ApiBrandDiscoveryTextField }
+  | { section: "direction"; field: ApiCreativeDirectionTextField };
+
+export type SaveBrandKitTextField = (
+  target: BrandKitTextTarget,
+  value: string | null,
+) => Promise<void>;
 
 /** True when a nullable wire string actually carries text. */
 export function filled(value: string | null | undefined): value is string {
@@ -48,6 +63,115 @@ export function GhostCard({ hint }: { hint: string }): JSX.Element {
   return (
     <div className="bk-ghost">
       <span className="bk-ghost-hint">{hint}</span>
+    </div>
+  );
+}
+
+interface EditableTextFieldProps {
+  label: string;
+  value: string | null | undefined;
+  displayValue?: string | null;
+  hint: string;
+  target: BrandKitTextTarget;
+  onSave: SaveBrandKitTextField;
+  compact?: boolean;
+}
+
+/** Studio-only click-to-edit text field with local save/cancel/error state. */
+export function EditableTextField({
+  label,
+  value,
+  displayValue = value,
+  hint,
+  target,
+  onSave,
+  compact = false,
+}: EditableTextFieldProps): JSX.Element {
+  const source = value ?? null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(value ?? "");
+  }, [editing, value]);
+
+  const nextValue = draft.trim() === "" ? null : draft.trim();
+  const unchanged = nextValue === source;
+
+  function beginEdit(): void {
+    setDraft(value ?? "");
+    setError(null);
+    setEditing(true);
+  }
+
+  function cancelEdit(): void {
+    setDraft(value ?? "");
+    setError(null);
+    setEditing(false);
+  }
+
+  async function saveEdit(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(target, nextValue);
+      setEditing(false);
+    } catch {
+      setError("Could not save this field. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    const hasDisplay = filled(displayValue);
+    return (
+      <button
+        type="button"
+        className={`bk-inline-trigger${hasDisplay ? "" : " bk-inline-trigger--ghost"}${
+          compact ? " bk-inline-trigger--compact" : ""
+        }`}
+        onClick={beginEdit}
+        aria-label={`Edit ${label}`}
+      >
+        <span>{hasDisplay ? displayValue : hint}</span>
+        <span className="bk-inline-edit-mark" aria-hidden="true">
+          Edit
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div className={`bk-inline-editor${compact ? " bk-inline-editor--compact" : ""}`}>
+      <textarea
+        autoFocus
+        aria-label={label}
+        rows={compact ? 2 : 4}
+        value={draft}
+        disabled={busy}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <div className="bk-inline-actions">
+        <button
+          type="button"
+          className="bk-btn bk-btn--primary"
+          disabled={busy || unchanged}
+          onClick={() => void saveEdit()}
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button type="button" className="bk-btn" disabled={busy} onClick={cancelEdit}>
+          Cancel
+        </button>
+      </div>
+      {error !== null && (
+        <p className="bk-inline-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

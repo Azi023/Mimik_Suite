@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { BrandBookCanvas } from "@/components/brand-kit/BrandBookCanvas";
+import { BrandKitEditor } from "@/components/brand-kit/BrandKitEditor";
 import { BrandKitControls, type KitSectionLink } from "@/components/brand-kit/BrandKitControls";
 import { KIT_TABS } from "@/components/brand-kit/registry";
 import { getClientBrandEditData, getSidebarData } from "@/lib/data";
@@ -21,8 +21,8 @@ function devFallbackAllowed(): boolean {
 }
 
 /**
- * Brand Kit v2 — the per-client brand book, STUDIO surface (chapters 01–04 read-only;
- * 05–06 placeholders). The chapters themselves live in `components/brand-kit/` — one
+ * Brand Kit v2 — the per-client brand book, STUDIO surface (chapters 01–02 inline-editable).
+ * The chapters themselves live in `components/brand-kit/` — one
  * template, two surfaces — and render here with `view="studio"` (ghost cards, full-size
  * specimen placeholders) plus the studio-only publish/share/export control bar.
  * Tenant scoping is enforced at the API; this page only forwards the caller's own session.
@@ -93,10 +93,9 @@ export default async function BrandKitPage({
 
   return (
     <AppShell sidebar={sidebar} title="Brand kit" crumb={client.name}>
-      <BrandBookCanvas
+      <BrandKitEditor
         brand={brand}
         clientName={client.name}
-        view="studio"
         controls={
           <BrandKitControls
             brandId={brand.id}
