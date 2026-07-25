@@ -4,7 +4,114 @@
 
 ---
 
-## ► LATEST (2026-07-25 pm17) — OPERATING MODEL: VPS codex builds on branches → Claude reviews → merge → deploy
+## ► LATEST (2026-07-26 am01) — P0 STORAGE BUG FOUND + FIXED; canvas fix shipped; codex runs LOCALLY now
+
+Read this whole entry before touching prod. The headline is **not** the canvas fix — it's that
+production was **destroying every creative artifact and every uploaded brand asset on every deploy**.
+
+### 🔴 THE P0: no volume on the api service (FIXED, but artifacts already lost are gone)
+- `api/services/creative_generation.py:73` → `CREATIVE_ARTIFACT_ROOT = Path("var/creatives")` and
+  `api/core/config.py:108` → `assets_local_root = "var/assets"`. Both are **container-relative**.
+- The api service had **no volumes and no mounts**. Postgres runs on the VPS host, so **rows survived
+  but files did not**: every `docker compose pull && up -d` wiped all generated creatives (creative.svg /
+  preview.png) AND all uploaded brand assets (logos, fonts, product photos, reference creatives).
+- That is the REAL cause of "Creative not found" for creative `af32eac4` — the DB row existed, the disk
+  had nothing. It is NOT the SVG-fallback bug the pm17 entry blamed.
+- `docker-compose.prod.yml:84` carried the assumption that caused it: *"No named volumes: Postgres is
+  external (Supabase) and redis is ephemeral cache."* — true for DB + cache, but file artifacts are
+  neither, and they are not in Postgres.
+- **FIX (applied + verified):** api now bind-mounts `${VAR_ROOT:-./var}:/app/Mimik_Suite/var`.
+  On the VPS that is `/root/mimik-suite/var`. Verified write-through (wrote inside the container →
+  file appeared on the host). Committed as `c1231fb`; the repo compose now matches prod.
+- **Backup installed:** `/root/backup-var.sh`, cron `17 3 * * *`, keeps 7 rotations in
+  `/root/backups/mimik-var/`. The existing `*/3 * * * * sync-pull.sh` cron was preserved.
+- ⚠ **Artifacts lost before the fix are unrecoverable.** Affected creatives need REGENERATION.
+- ⚠ `/root/mimik-suite/docker-compose.yml` is **NOT a git repo** — the prod compose is VPS-only and had
+  drifted from the repo's `docker-compose.prod.yml`. Both now carry the volume; keep them in sync by hand.
+- Storage direction (operator): stay on VPS local disk for now, move to S3/object storage later.
+  `config.assets_local_root` is already a setting (config change); `CREATIVE_ARTIFACT_ROOT` is a
+  hardcoded `Path` and needs a CODE change to route through the same adapter. Documented in CLAUDE.md.
+
+### ✅ (a) VPS BUILD-ENV GAP FROM pm17 — CLOSED
+- `uv` 0.11.32 installed (installer downloaded + read before running, per the no-blind-curl rule;
+  standard astral cargo-dist script, sha256 `43aff33a…`). PATH added to `/root/.bashrc`.
+- The npm `EAI_AGAIN` was **transient DNS, NOT a firewall** — `npm ping` → PONG 286ms with no network
+  change. `uv sync` + `npm ci` completed; `npm run build` exits 0 on the VPS.
+- So the VPS *can* self-verify now — but see the operating-model change below.
+
+### ✅ (b) lane/fix-canvas-editor — MERGED (`fc9124d`), CI green, DEPLOYED
+- **pm17's diagnosis was wrong.** The failure was in TEST SETUP at `tests/test_creative_versions.py:455`:
+  it called `.unlink()` on a `creative.svg` that `_stub_renderer` never wrote (`_create_creative` never
+  invokes the renderer). `api/routers/exports.py` needed **no change** — its `is_file()` guards were
+  already correct.
+- Fix builds the real scenario explicitly (preview.png present, creative.svg absent) + adds a regression
+  test for neither-artifact-exists → 404 instead of a traceback.
+- Verified independently before merge: pytest 685 passed/1 skipped, `test_tenant_isolation.py` 8/8,
+  ruff clean, `next build` exit 0. Re-checked `_artifact_for_creative`'s `candidate.parent == root`
+  confinement (rejects `../`, absolute paths, and symlink escapes since `resolve()` runs first) and
+  confirmed the generated SVG interpolates only PRESETS ints + base64 with `Content-Disposition:
+  attachment` — no inline-SVG XSS path.
+- ⚠ **This does NOT fix `af32eac4` on prod** — there is no `preview.png` either; the artifacts were
+  wiped by the storage bug. It needs regeneration now that the volume exists.
+
+### 🔄 (c)1 lane/brand-kit-editing — IMPLEMENTED, REVIEW IN PROGRESS, **NOT MERGED**
+Design decided with operator: **in-place deep-merge + audit**, NO versions table, NO migration.
+- Contracts (`../mimik-contracts`, SEPARATE REPO): adds `UpdateBrandDiscovery` / `UpdateCreativeDirection`
+  / `UpdateKitTheme` / `BrandKitPatch` / `UpdateBrandKit`; `_validate_asset_refs` now accepts None and
+  still validates `moodboard_asset_ids`. **UNCOMMITTED on that repo.**
+- Backend `api/routers/brands.py`: PATCH accepts `UpdateBrandBrief | BrandTokens | UpdateBrandKit`;
+  `_deep_merge` (nested dicts merge, lists/scalars replace), `_normalize_kit_clears`, `_stamp_brand_kit`.
+  Tenant scoping via `repo.get_brand/update_brand` with `principal.tenant_id`; role gate unchanged so
+  CLIENT role stays excluded; audit actor derived from the principal AFTER the merge, so a caller
+  cannot spoof `updated_by` via the patch body. `_set_published` now takes the principal + stamps audit.
+- Frontend: inline edit controls in Discovery/Direction sections + `web/app/api/brand-kit/[id]/route.ts`,
+  a same-origin proxy that accepts **exactly one** root key / section / field against a hardcoded
+  allowlist — it cannot be coerced into flipping `published` or replacing `launch_templates`. Good design.
+- **Open review nit (not a blocker, not a vuln):** `route.ts:75` — when `token === null` but the API is
+  configured, it forwards with no bearer instead of 401ing. Verified NOT an auth bypass: `get_principal`
+  depends on `HTTPBearer`, which rejects a missing header before any handler runs. Tidy the branch.
+- ⚠ **MERGE ORDER MATTERS:** CI (`.github/workflows/build-images.yml`) checks out `Azi023/mimik-contracts`
+  at its **DEFAULT BRANCH**. Any contracts change must land on **contracts `main` FIRST**, then Suite
+  `main` — otherwise the image build breaks.
+
+### ⚙ OPERATING MODEL CHANGE: codex runs LOCALLY, not on the VPS
+The VPS codex run **hung for 49 minutes at 0:00.00 CPU** having written nothing. Cause, verbatim from its
+log: `Reading additional input from stdin...` — a backgrounded `ssh` left stdin attached.
+Wrapper rules now (all three are required):
+1. `codex exec … < /dev/null` — mandatory under non-interactive ssh, or it blocks forever.
+2. `--sandbox workspace-write` — `--full-auto` is DEPRECATED in codex 0.145.
+3. Wrap in `timeout` so a hang costs minutes, not an hour.
+4. `--add-dir <path>` to grant a second writable root. Needed for `../mimik-contracts` — without it codex
+   correctly REFUSES to proceed rather than violating schema-first by declaring an API-local model.
+5. Still never chain `codex … && git commit` — codex exits non-zero when its own verify fails.
+6. **NEVER put `git reset --hard` in a lane script.** It destroyed uncommitted operator work this session
+   (recovered from the dropped stash object). Removed from the runner.
+Diagnosis tell: a live codex accumulates CPU time; a hung one sits at exactly `0:00.00`.
+
+### Anti-context (things tried that did NOT work / were wrong)
+- pm17's "the fallback still opens creative.svg when missing" — wrong; the test was lying, the code was fine.
+- "npm EAI_AGAIN = firewall/egress blocked" — wrong; transient DNS, no network change needed.
+- `git status --short --cached` is not a valid flag (breaks `&&` chains mid-script).
+- CLAUDE.md's graphify section rode along inside commit `c1231fb` because `git checkout <stash> -- FILE`
+  STAGES the file. Check `git diff --cached --name-only` before committing.
+
+### Also done
+- **graphify removed** (operator call): instruction block stripped from CLAUDE.md + operative refs in
+  `docs/AUTONOMOUS_OPERATION.md` and `docs/PRODUCTION_ROADMAP.md`; `graphify-out/` (35M) deleted.
+  Historical HANDOFF mentions left intact as audit trail. Commit `8ac4825`.
+
+### NEXT ACTION (in order)
+1. Finish (c)1 review: confirm all four gates green, then commit contracts → push contracts `main` FIRST,
+   then Suite `main`, then deploy. Tidy the `route.ts:75` branch.
+2. **Regenerate creative `af32eac4` (Simply Nikah)** and confirm the canvas editor loads it — that is the
+   only real proof the original symptom is gone. A green suite is not proof.
+3. Confirm a real upload survives a deploy cycle before investing a session in lane (c)3 asset gathering.
+4. Remaining roadmap lanes: (c)2 creative generation quality → (c)3 asset gathering (copyright-aware)
+   → (c)4 CRUD PATCH completeness + tenant list/suspend.
+
+---
+
+## (2026-07-25 pm17) — OPERATING MODEL: VPS codex builds on branches → Claude reviews → merge → deploy
 
 The build loop is now branch-based + verifiable. Read `docs/AUTONOMOUS_OPERATION.md` +
 `docs/PRODUCTION_ROADMAP.md` first. Everything through pm16 is deployed + green.
