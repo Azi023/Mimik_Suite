@@ -4,7 +4,53 @@
 
 ---
 
-## ► LATEST (2026-07-25 pm14) — Brand Kit v2 slices 1–5 + Share LIVE; crash/security fixed; SN content + ch.05/06 remain
+## ► LATEST (2026-07-25 pm15) — super_admin fix + billing removed + ch.05/06 + VPS codex terminal LIVE
+
+Continuation of pm14. Deployed HEAD ~`658a317`, all green + verified. **The app is fully usable AND
+there is now a live codex/agy terminal workspace on the VPS.**
+
+### Shipped + deployed this continuation (verified live)
+- **super_admin gate fix (was blocking the operator!):** `require_role` + `creative_generation._TEAM_ROLES`
+  excluded super_admin → operator couldn't Generate/publish/etc. Fixed in both. Verified: SN generation
+  runs (vector engine, no paid API; Gemini/AI-image fall back gracefully).
+- **Billing/subscription surface REMOVED** (non-destructive): route, BillingView, sidebar link, Stripe
+  API + router tests, lib helpers. KEPT: DB `subscriptions` table, ORM/repo, contract `Subscription`,
+  `MANAGE_BILLING`. (`/billing` → 404.)
+- **Brand-kit book scroll fix** (was clipped in the app shell) + sidebar rail expand-on-hover.
+- **Chapters 05 Applications + 06 Launch Templates** built + deployed (`scripts/curate_brand_kit.py`
+  pulls a brand's APPROVED+rendered CreativeDocs into the book — the human-gate flow: generate→approve→curate).
+- **Share/export from pm14** (publish + `/book/{token}` + PDF/PNG via Playwright) all live + de-risked.
+- Login crash fix (cookie-write-during-render) + `upgrade-insecure-requests` CSP from earlier this continuation.
+
+### VPS codex/agy terminal workspace — LIVE at `/root/mimik-src/`
+- 3 repos side-by-side: `Mimik_Suite` (write remote via deploy key `github-mimik`), `mimik-contracts`,
+  `mimik-knowledge` (read via `github-contracts`/`github-knowledge` deploy keys). `AGENTS.md` context
+  index at root. `tmux` session `mimik`. git identity set (push works). **codex-cli 0.145.0 installed.**
+- Operator TODO on the VPS: `codex login` (auth — headless URL/device flow); install `agy` (Linux build —
+  it's a 161MB custom Go binary, no package manager; operator supplies it). Workflow: edit in the clone →
+  commit → `git push` → CI builds → `cd /root/mimik-suite && docker compose -p mimiksuite pull && … up -d`.
+
+### THE BACKLOG → `docs/PRODUCTION_ROADMAP.md` (codex-ready specs; run from the VPS terminal)
+1. **Systematic CRUD** — DELETE missing on EVERY entity, UPDATE missing on many (matrix in the doc).
+   Soft-delete + PATCH + tenant-scoped + IDOR test extended + UI controls. Uniform pattern.
+2. Fill brand-kit TEXT fields for all 3 brands (vision/competitor/existing-review/alignment/uniqueness/brief).
+3. In-product editing (PUT brand-kit + edit controls) so the operator types into fields live.
+4. External asset gathering (logos/fonts/references) — Claude+browser, COPYRIGHT-AWARE (client's own +
+   licensed fonts + references OK; rehosting others' posters as the client's own = infringement).
+5. Jasmin: a SEPARATE agency = new tenant + `owner` account (super_admin is cross-tenant, not per-tenant).
+   Need Jasmin's email + Supabase UID. super_admin stays operator+Zaid.
+
+### Anti-context (this continuation)
+- NEVER `git commit` without explicit paths while agents run — a concurrent `git mv` got swept in →
+  broke CI (fdfdfa4). Always `git add <paths> && git commit <paths>`.
+- macOS `sed -i` needs `''`; use perl -i. Bash tool cwd persists between calls (a `cd web` broke a later pytest).
+- codex had an upstream 503 outage mid-session → fell back to a Claude general-purpose subagent (worked).
+- GitHub deploy keys are unique per-repo — 3 distinct keys for the 3 repos (or one fine-grained PAT).
+- Generate needs APPROVAL before curation shows it in the book (correct human gate).
+
+---
+
+## ► (2026-07-25 pm14) — Brand Kit v2 slices 1–5 + Share LIVE; crash/security fixed; SN content + ch.05/06 remain
 
 **Deployed HEAD `b94c4a0`, all green + verified live.** Continuation of pm13. The app is fully
 usable: login works, book renders + is populated, share + export work.
