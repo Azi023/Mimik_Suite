@@ -892,6 +892,282 @@
   font-style: italic;
 }
 
+/* ————— chapter 05 · applications ————— */
+.bk-app-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin-top: 34px;
+}
+.bk-app-item {
+  min-width: 0;
+  margin: 0;
+}
+.bk-app-stage {
+  min-height: 300px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 40px 28px 28px;
+  overflow: hidden;
+  border: 1px solid var(--bk-line);
+  border-radius: 14px;
+  background: var(--bk-card-2);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.bk-app-stage:hover {
+  border-color: var(--bk-muted-2);
+  box-shadow: 0 16px 30px -22px rgba(var(--bk-ink-rgb), 0.35);
+}
+.bk-app-label {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 2;
+  font-family: var(--bk-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--bk-ink);
+}
+.bk-app-frame,
+.bk-app-media {
+  position: relative;
+}
+.bk-app-media {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bk-card);
+}
+.bk-app-frame--business_card {
+  width: min(100%, 310px);
+  aspect-ratio: 1.75;
+  transform: rotate(-2deg);
+  border-radius: 10px;
+  box-shadow:
+    0 18px 34px -18px rgba(var(--bk-ink-rgb), 0.55),
+    6px 6px 0 -1px var(--bk-card),
+    7px 7px 0 var(--bk-line);
+}
+.bk-app-frame--business_card .bk-app-media,
+.bk-app-frame--ig_post .bk-app-media,
+.bk-app-frame--other .bk-app-media {
+  border-radius: inherit;
+}
+.bk-app-frame--ig_post {
+  width: min(100%, 270px);
+  aspect-ratio: 1;
+  border: 1px solid var(--bk-line);
+  border-radius: 8px;
+  box-shadow: 0 18px 34px -18px rgba(var(--bk-ink-rgb), 0.4);
+}
+.bk-app-frame--ig_story,
+.bk-app-frame--phone_app {
+  width: 168px;
+  aspect-ratio: 9 / 18.5;
+  padding: 7px;
+  border-radius: 27px;
+  background: var(--bk-ink);
+  box-shadow: 0 22px 40px -20px rgba(var(--bk-ink-rgb), 0.55);
+}
+.bk-app-frame--ig_story::before,
+.bk-app-frame--phone_app::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  left: 50%;
+  width: 54px;
+  height: 14px;
+  transform: translateX(-50%);
+  border-radius: 0 0 10px 10px;
+  background: var(--bk-ink);
+}
+.bk-app-frame--ig_story .bk-app-media,
+.bk-app-frame--phone_app .bk-app-media {
+  border-radius: 20px;
+}
+.bk-app-frame--tablet {
+  width: min(100%, 340px);
+  aspect-ratio: 4 / 3;
+  padding: 8px;
+  border-radius: 18px;
+  background: var(--bk-ink);
+  box-shadow: 0 22px 40px -22px rgba(var(--bk-ink-rgb), 0.5);
+}
+.bk-app-frame--tablet .bk-app-media {
+  border-radius: 11px;
+}
+.bk-app-stage--signage {
+  padding-bottom: 48px;
+}
+.bk-app-frame--signage {
+  width: min(100%, 330px);
+  aspect-ratio: 16 / 9;
+  padding: 7px;
+  border-radius: 4px;
+  background: var(--bk-ink);
+  box-shadow: 0 18px 32px -20px rgba(var(--bk-ink-rgb), 0.55);
+}
+.bk-app-frame--signage::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 5px;
+  height: 34px;
+  transform: translateX(-50%);
+  background: var(--bk-ink);
+}
+.bk-app-frame--packaging {
+  width: min(62%, 210px);
+  aspect-ratio: 4 / 5;
+  padding: 8px;
+  background: var(--bk-card);
+  box-shadow:
+    12px 12px 0 rgba(var(--bk-ink-rgb), 0.08),
+    0 18px 32px -22px rgba(var(--bk-ink-rgb), 0.45);
+}
+.bk-app-frame--other {
+  width: min(100%, 310px);
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--bk-line);
+  border-radius: 10px;
+}
+.bk-app-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1.5px dashed var(--bk-ghost);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--bk-card-2) 0 10px,
+    rgba(150, 131, 109, 0.07) 10px 20px
+  );
+  color: var(--bk-ink);
+  text-align: center;
+}
+.bk-app-placeholder-frame {
+  width: 52px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed var(--bk-ghost);
+  border-radius: 8px;
+  color: var(--bk-muted-2);
+}
+.bk-app-placeholder p {
+  font-family: var(--bk-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.bk-app-placeholder em {
+  font-family: var(--bk-serif);
+  font-size: 13.5px;
+  color: var(--bk-ink);
+}
+.bk-app-item figcaption {
+  padding: 11px 4px 0;
+  color: var(--bk-ink);
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* ————— chapter 06 · launch templates ————— */
+.bk-tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 34px;
+}
+.bk-tpl-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--bk-line);
+  border-radius: 12px;
+  background: var(--bk-card);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.bk-tpl-card:hover {
+  border-color: var(--bk-muted-2);
+  box-shadow: 0 16px 30px -20px rgba(var(--bk-ink-rgb), 0.35);
+}
+.bk-tpl-art {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--bk-card-2);
+}
+.bk-tpl-art--portrait {
+  aspect-ratio: 4 / 5;
+}
+.bk-tpl-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 20px;
+  border: 1.5px dashed var(--bk-ghost);
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 10px,
+    rgba(150, 131, 109, 0.045) 10px 20px
+  );
+  color: var(--bk-ink);
+  text-align: center;
+}
+.bk-tpl-placeholder p {
+  font-family: var(--bk-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.bk-tpl-placeholder em {
+  font-family: var(--bk-serif);
+  font-size: 13.5px;
+  color: var(--bk-ink);
+}
+.bk-tpl-meta {
+  min-height: 64px;
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--bk-line-soft);
+}
+.bk-tpl-name {
+  min-width: 0;
+  color: var(--bk-ink);
+  font-size: 14.5px;
+  font-weight: 600;
+  font-style: italic;
+  line-height: 1.35;
+}
+.bk-tpl-format {
+  flex: none;
+  font-family: var(--bk-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bk-ink);
+}
+
 /* quiet pill button — the book's edit-adjacent affordance */
 .bk-btn {
   font-family: var(--bk-mono);
@@ -1216,8 +1492,12 @@
     grid-column: auto;
   }
   .bk-disc-grid,
-  .bk-prose-grid {
+  .bk-prose-grid,
+  .bk-app-grid {
     grid-template-columns: 1fr;
+  }
+  .bk-tpl-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .bk-mood-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -1245,6 +1525,13 @@
   }
   .bk-mood-grid {
     grid-template-columns: 1fr;
+  }
+  .bk-tpl-grid {
+    grid-template-columns: 1fr;
+  }
+  .bk-app-stage {
+    min-height: 270px;
+    padding-inline: 18px;
   }
   .bk-mood--tall {
     grid-row: auto;

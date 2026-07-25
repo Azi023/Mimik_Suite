@@ -15,13 +15,14 @@
 import type { CSSProperties, JSX, ReactNode } from "react";
 import type { ApiBrand } from "@/lib/api";
 import { deriveKitCanvasVars } from "@/lib/brand-kit";
+import { ApplicationsSection } from "./ApplicationsSection";
 import { BrandKitTabs } from "./BrandKitTabs";
 import { ColoursFontsSection } from "./ColoursFontsSection";
 import { DirectionSection } from "./DirectionSection";
 import { DiscoverySection } from "./DiscoverySection";
 import { LogoSuiteSection } from "./LogoSuiteSection";
+import { LaunchTemplatesSection } from "./LaunchTemplatesSection";
 import { KIT_TABS, type BookExportMode, type BookView } from "./registry";
-import { PlaceholderChapter } from "./shared";
 import "./brand-kit.css";
 
 function Masthead({ brand }: { brand: ApiBrand }): JSX.Element {
@@ -70,8 +71,8 @@ function buildPanels(
     direction: <DirectionSection brand={brand} view={view} />,
     logo_suite: <LogoSuiteSection brand={brand} view={view} />,
     colours_fonts: <ColoursFontsSection brand={brand} view={view} />,
-    applications: <PlaceholderChapter number="05" label="Applications" />,
-    launch_templates: <PlaceholderChapter number="06" label="Launch Templates" />,
+    applications: <ApplicationsSection brand={brand} view={view} />,
+    launch_templates: <LaunchTemplatesSection brand={brand} view={view} />,
   };
 }
 

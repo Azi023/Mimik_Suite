@@ -135,6 +135,32 @@ export interface ApiCreativeDirection {
   competitor_differentiation: string | null;
 }
 
+export type ApiBrandApplicationKind =
+  | "business_card"
+  | "ig_post"
+  | "ig_story"
+  | "phone_app"
+  | "tablet"
+  | "signage"
+  | "packaging"
+  | "other";
+
+/** mimik_contracts.brand_kit.BrandApplication — one chapter 05 surface mockup. */
+export interface ApiBrandApplication {
+  kind: ApiBrandApplicationKind;
+  asset_id: string | null;
+  creative_id: string | null;
+  caption: string | null;
+}
+
+/** mimik_contracts.brand_kit.LaunchTemplate — one ready-to-post chapter 06 creative. */
+export interface ApiLaunchTemplate {
+  name: string;
+  format_key: string;
+  creative_id: string | null;
+  asset_id: string | null;
+}
+
 /**
  * mimik_contracts.brand_kit.BrandKit — the per-client brand book attached to a Brand.
  * Only the fields the built chapters render are typed; the wire object carries more
@@ -144,6 +170,8 @@ export interface ApiBrandKit {
   discovery: ApiBrandDiscovery;
   direction: ApiCreativeDirection;
   pending_colors: ApiPendingColor[];
+  applications: ApiBrandApplication[];
+  launch_templates: ApiLaunchTemplate[];
   theme: ApiKitTheme;
   published: boolean;
 }
