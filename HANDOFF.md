@@ -4,7 +4,76 @@
 
 ---
 
-## ► LATEST (2026-07-24 pm12) — NEXT SESSION = BUILD BRAND KIT v2 (approved) end-to-end + deploy
+## ► LATEST (2026-07-25 pm13) — Brand Kit v2 slices 1–4 LIVE + populated; login/security fixed; slices 5–7 remain
+
+**Headline:** the app is now genuinely usable end-to-end. Login works, it's secure (A grade),
+two super_admins exist, 3 dogfood clients are seeded + brand-kit-enriched, and the Brand Kit v2
+book (chapters 1–4) is deployed and shows real data. Deployed HEAD `794bfe6`. All pushed.
+
+### Live now on suite.mimikcreations.com (all verified)
+- **Security:** securityheaders.com **A** (was F). Added 6 headers via nginx snippet
+  `/etc/nginx/snippets/mimik-security-headers.conf` (HSTS/CSP/XFO/XCTO/Referrer/Permissions),
+  included in both 443 blocks of `/etc/nginx/sites-enabled/mimik-suite`. Backups in
+  `/root/nginx-backups/`. TLS cert valid (LE, exp Oct 19). CSP is permissive
+  (`unsafe-inline`/`unsafe-eval`) so Next works — tighten with nonces later (the only A→A+ gap).
+- **Login (was fully broken):** root causes were (1) EMPTY DB (no tenant/user), (2) web container
+  missing `SUPABASE_URL`/`SUPABASE_ANON_KEY` → "Authentication is not configured", (3) redirects
+  built from `request.url` → `https://0.0.0.0:3000` (SSL error + CSP form-action block). Fixed:
+  bootstrap script created tenant "Mimik Creations" + accounts; added the 3 env vars to the web
+  service in `/root/mimik-suite/docker-compose.yml`; `publicOrigin()` in `web/lib/session.ts` now
+  uses `APP_BASE_URL` (open-redirect-hardened — do NOT reintroduce Host-header trust).
+- **Accounts (super_admin):** `atheequeniyas23@gmail.com` (UID 02a633f2-…) and Zaid
+  `zaidxdesigns@gmail.com` (UID 89eeefa3-…), both in tenant `mimik-creations`
+  (id 87c42869-902d-44bb-8f92-823e99f93db6). Login = their Supabase password. NOTE: no
+  self-serve signup — new users need a Supabase auth user created in the dashboard first, then
+  `scripts/bootstrap_superadmin.py` (idempotent) or the invite flow. **No impersonation/"view as
+  role" feature exists** — super_admin sees all as themselves (build it if the operator wants true POV switching).
+- **Data:** `scripts/seed_profiles.py` seeded 3 clients (Simply Nikah, Glo2Go, Island Cart);
+  `scripts/seed_brand_kit.py` enriched their kits (named colours+rationale, font_roles incl.
+  Amiri/arabic for SN, Glo2Go pending "Soft Lilac", discovery/direction copy from STYLE_PROFILES).
+- **Brand Kit v2 book** at `web/app/clients/[id]/brand-kit/`: canvas themed from client tokens
+  (`web/lib/brand-kit.ts`), 6-chapter folder-tab registry (`web/components/BrandKitTabs.tsx`),
+  chapters **1–4 built** (Brand Discovery, Creative Direction, Logo Suite, Colours & Fonts) with
+  §5 graceful empty-states. `GET /brands/{id}/font-pack` zip endpoint (`api/routers/fonts.py`).
+
+### Contracts + persistence (shipped this session)
+- mimik-contracts **v0.2.0** pushed (`551c519`): ColorRole +display_name/rationale/confirmed,
+  FontRole, LogoVariant/LogoVariantSlot, Typography.font_roles, BrandTokens.logo_suite, new
+  `brand_kit.py` (BrandKit + 7 sub-models), Brand.kit. 34 tests.
+- `brands.kit` JSON column: migration **3d91b84ad827** (revises c7e90f4a1b32) + ORM/mapper.
+  api auto-migrates on boot (entrypoint runs `alembic upgrade head`) — applied on prod.
+
+### REMAINING — slices 5–7 (the "last stretch") + polish
+1. **P5-KIT-EXPORT** — SSR the book template + `GET /brands/{id}/brand-book.pdf` (Playwright
+   `page.pdf`, print CSS already in `brand-kit.css`) + per-section PNG
+   `GET /brands/{id}/brand-book/{section_key}.png` (element screenshot of `[data-kit-section]`).
+   REUSE `creative/render/compositor.py` (existing Playwright stack). Record as `Delivery`.
+   NOTE: scroll-reveal animations don't fire headless — inject `*{opacity:1!important;animation:none!important}` when capturing.
+2. **P6-KIT-SHARE** — `BrandKit.published` flag + hosted client-view via the client-portal
+   magic-link pattern (read-only §5 rules, no edit affordances). "Gives look to the website."
+3. **P7-KIT-EDIT** — studio edit controls (shadcn — NOT YET INSTALLED in web/, see below) + PUT
+   brand-kit endpoint (versioned, non-destructive) + logo/font/moodboard upload wiring
+   (`BrandAsset` kind=LOGO/FONT + variant tag). Applications + Launch Templates tabs (chapters
+   05/06) wired to delivered `CreativeDoc`s + `formats.PRESETS`.
+4. **Polish:** Glo2Go shows "Clinical Plum" twice (base seed had 2 near-identical darks; enrichment
+   named both) — dedup in `seed_brand_kit.py` by hex and re-run. shadcn/ui is NOT installed in
+   `web/` (plain CSS on `design/tokens.css`); constraint 9 wants it — adopt before the edit UI.
+
+### Executor pattern that WORKED this session
+Opus specs/reviews/commits/deploys; **codex** `codex exec --full-auto` w/ decision-complete
+prompts (prompt files in job tmp) for contracts/backend/seed; **Fable-model agents** + frontend-design
+skill for the tabbed UI (approved reference = `docs/brand-kit-prototype.html`). Commit per-lane by
+explicit path. Verify `npm run build` locally before push (CI `next build` gates deploy). Deploy:
+push main → CI build-images (~4min) → `ssh hetzner-vps` → `cd /root/mimik-suite && docker compose
+-p mimiksuite pull && docker compose -p mimiksuite up -d`.
+
+### Operator TODO (non-blocking)
+- **Rotate the Supabase DB password** — 4 chars partially leaked to a session transcript this session.
+- Confirm login + that the 3 clients / brand-kit book render as expected.
+
+---
+
+## ► (2026-07-24 pm12) — NEXT SESSION = BUILD BRAND KIT v2 (approved) end-to-end + deploy
 
 **State:** branch `main`, HEAD ~`4a3119f`, **661 tests green**. Everything from pm11 is pushed + **deployed live** on suite.mimikcreations.com and CONFIGURED/WORKING: Graph email (M365, tested — real email delivered), Drive archive, Gemini critic+copy, super-admin. Prod `.env` at `/root/mimik-suite/.env` now has all of: SUPABASE/JWT/DATABASE + SUPERADMIN_EMAILS + APP_BASE_URL + GRAPH_* (EMAIL_PROVIDER=graph, sender atheeque@mimikcreations.com) + GOOGLE_OAUTH_* + ARCHIVE_BACKEND + DRIVE_ROOT_FOLDER_ID + GEMINI_API_KEY. **Still off:** WhatsApp (Meta portfolio under automation-restriction review — operator handles the appeal). Stripe deferred.
 
