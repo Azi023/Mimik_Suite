@@ -4,7 +4,72 @@
 
 ---
 
-## ► LATEST (2026-07-25 pm13) — Brand Kit v2 slices 1–4 LIVE + populated; login/security fixed; slices 5–7 remain
+## ► LATEST (2026-07-25 pm14) — Brand Kit v2 slices 1–5 + Share LIVE; crash/security fixed; SN content + ch.05/06 remain
+
+**Deployed HEAD `b94c4a0`, all green + verified live.** Continuation of pm13. The app is fully
+usable: login works, book renders + is populated, share + export work.
+
+### Shipped + deployed this continuation (all verified on prod)
+- **Login crash (P0) FIXED:** `/brand-kit` + `/onboarding` 500'd with "Cookies can only be
+  modified in a Server Action or Route Handler" — `getSessionToken→refreshSession→
+  writeSessionCookies` wrote cookies during a Server Component render once the access token aged
+  out. Fix: try/catch around the `store.set` in `web/lib/session.ts` (returns fresh token, cookies
+  re-persist on next route handler). Both routes now 307→login (healthy).
+- **Security:** added `upgrade-insecure-requests` to the nginx CSP snippet (auto-upgrades any stray
+  http subresource → the usual cause of a "Not Secure" chip on a valid-cert page). Also hardened
+  `publicOrigin()` earlier (no Host-header trust — open-redirect). Still A grade.
+- **Discoverability:** the book was unreachable because seeded clients had NO Brief and the UI
+  resolves brand via `latestBrief.brand_id` (`getClientBrandEditData`). Created a DRAFT brief per
+  client (clears "Brand setup required"); added "Open Brand Kit →" link on the client editor;
+  added hover tooltips to the sidebar icon rail (`web/components/Sidebar.tsx`).
+- **Share + Export (slice P5/P6) LIVE:** `api/core/brand_book_token.py` (share 30d / export 5m),
+  public `GET /brand-book/{token}` (honours live `published`, calm 404s), `POST .../brand-book/
+  publish|unpublish` (non-destructive flag flip), `GET .../brand-book.pdf` + `.../{section}.png`
+  via Playwright on the internal `http://web:3000/book/{export_token}` route (animations frozen).
+  Download auth via same-origin web proxies (`web/app/api/brand-kit/[id]/brand-book.pdf`, `.../section/[section]`).
+  Public read-only book at `web/app/book/[token]` (client-view §5 rules). Studio Publish/Copy-link/
+  Download-PDF/Export-PNG controls. **Verified: chromium launches in api container + api reaches
+  web:3000 (render path works), all endpoints correctly gated.** 15 share/export tests pass.
+- Book chapters refactored into `web/components/brand-kit/` (view: studio|client) — one template, two surfaces.
+
+### Current Brand Kit state
+- Chapters **1–4 LIVE + populated** (Discovery, Creative Direction, Logo Suite, Colours & Fonts) —
+  Simply Nikah + Glo2Go are the fullest (enriched via `scripts/seed_brand_kit.py`).
+- Chapters **05 Applications + 06 Launch Templates = still placeholders** (need real CreativeDocs).
+- Share/export work against the live book.
+
+### REMAINING (next session)
+1. **Simply Nikah content (operator explicitly wants this):** there are NO static SN image files
+   locally — SN is CODE (`creative/render/nikah_vectors.py` / `nikah_primitives.py` /
+   `nikah_templates.py`). To populate the SN client: RUN the nikah template renderer → import
+   outputs as `BrandAsset` (kind=LOGO / reference_creative) + `CreativeDoc` rows for the prod SN
+   client (brand_id `cc05d62c-cb47-4d01-862a-27e4f085c47d`, client_id `6eb877c3-…`). Assets are
+   stored under `assets_local_root/{tenant}/{brand}/…` — check `api/routers/assets.py` upload path.
+   This doubles as dogfooding the Generate loop (Gemini is configured on prod).
+2. **Chapters 05/06 (Applications + Launch Templates):** wire to delivered `CreativeDoc`s +
+   `formats.PRESETS` (spec §2/§3.4). Depends on (1) producing creatives.
+3. **Editing (P7):** studio edit controls + PUT brand-kit (versioned) + logo/font/moodboard upload —
+   so the operator can add logo/fonts THROUGH the product (their stated goal). shadcn NOT installed in web/ (plain CSS).
+4. **Curate Glo2Go + Island Cart** similarly (regenerate via pipeline — operator's chosen approach).
+5. **Polish:** Glo2Go "Clinical Plum" shows twice (base seed had 2 near-identical darks — dedup by
+   hex in `seed_brand_kit.py`, re-run). Full labeled nav (rail expands on hover already; consider
+   default-expanded). Tighten CSP (drop unsafe-inline/eval via nonces). `publish` response returns
+   an extra harmless `token` field beyond `{published, share_url}`.
+
+### Anti-context (learned this continuation)
+- **NEVER `git commit` without an explicit path when agents run concurrently.** A background Fable
+  agent's staged `git mv` got swept into my commit → deleted files the committed page.tsx imported →
+  broken CI build (fdfdfa4). Always `git add <explicit paths> && git commit <same paths>`.
+- **codex had an upstream outage** (`503 biscuit_baker circuit open`, wss://chatgpt.com/backend-api/
+  codex) — fell back to a Claude general-purpose subagent for the backend, which worked. The earlier
+  "web-only sandbox" block was the same outage aborting early, not a real permission scope.
+- Bash tool cwd persists between calls — a `cd web` for the build made a later root-relative `pytest`
+  miss; run suite from repo root.
+- Prod DB brand IDs: Glo2Go `d319e984-…`, Island Cart `6bcf3ff1-…`, Simply Nikah `cc05d62c-…`.
+
+---
+
+## ► (2026-07-25 pm13) — Brand Kit v2 slices 1–4 LIVE + populated; login/security fixed; slices 5–7 remain
 
 **Headline:** the app is now genuinely usable end-to-end. Login works, it's secure (A grade),
 two super_admins exist, 3 dogfood clients are seeded + brand-kit-enriched, and the Brand Kit v2
