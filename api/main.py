@@ -15,7 +15,6 @@ from api.routers import (
     admin,
     approvals,
     assets,
-    billing,
     brand_book,
     brands,
     briefs,
@@ -98,7 +97,6 @@ app.include_router(approvals.router)
 app.include_router(ops.router)
 app.include_router(tasks.router)
 app.include_router(preferences.router)
-app.include_router(billing.router)
 app.include_router(invitations.router)
 app.include_router(me.router)
 app.include_router(portal.router)

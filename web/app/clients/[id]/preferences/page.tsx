@@ -64,8 +64,8 @@ export default async function PreferencesPage({
           <p className="empty-state__body">
             This client&apos;s taste profile isn&apos;t available. It builds as they pick, edit, and approve creatives.
           </p>
-          <Link href="/billing" className="btn-ghost">
-            Back to billing
+          <Link href={`/clients/${encodeURIComponent(id)}/edit`} className="btn-ghost">
+            Back to client
           </Link>
         </div>
       </AppShell>
