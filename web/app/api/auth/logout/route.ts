@@ -6,9 +6,9 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { clearSession } from "@/lib/session";
+import { clearSession, publicOrigin } from "@/lib/session";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   await clearSession();
-  return NextResponse.redirect(new URL("/login", request.url), { status: 303 });
+  return NextResponse.redirect(new URL("/login", publicOrigin(request)), { status: 303 });
 }

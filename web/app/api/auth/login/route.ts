@@ -8,11 +8,16 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { isSupabaseConfigured, sanitizeNextPath, signInWithPassword } from "@/lib/session";
+import {
+  isSupabaseConfigured,
+  publicOrigin,
+  sanitizeNextPath,
+  signInWithPassword,
+} from "@/lib/session";
 
 /** Bounce back to /login with a URL-safe error message, preserving the `next` return path. */
 function loginError(request: NextRequest, message: string, next: string): NextResponse {
-  const url = new URL("/login", request.url);
+  const url = new URL("/login", publicOrigin(request));
   url.searchParams.set("error", message);
   if (next !== "") {
     url.searchParams.set("next", next);
@@ -44,5 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 303 so the browser follows with a GET. Return to the in-flight path (e.g. invite-accept) if one
   // was carried through the round-trip, else the (now-authenticated) board.
-  return NextResponse.redirect(new URL(next !== "" ? next : "/", request.url), { status: 303 });
+  return NextResponse.redirect(new URL(next !== "" ? next : "/", publicOrigin(request)), {
+    status: 303,
+  });
 }

@@ -24,6 +24,27 @@
  */
 
 import { cookies } from "next/headers";
+import type { NextRequest } from "next/server";
+
+/**
+ * Canonical public origin for server-issued redirects. Behind the nginx reverse proxy,
+ * `request.url` resolves to the container's internal bind address (`0.0.0.0:3000`), which
+ * produces broken redirects (`https://0.0.0.0:3000/...` → ERR_SSL_PROTOCOL_ERROR and a
+ * CSP `form-action 'self'` block). Prefer the explicitly-configured `APP_BASE_URL`, then
+ * the proxy's forwarded host/proto headers, and only fall back to `request.url` last.
+ */
+export function publicOrigin(request: NextRequest): string {
+  const configured = process.env.APP_BASE_URL;
+  if (configured !== undefined && configured !== "") {
+    return configured.replace(/\/+$/, "");
+  }
+  const proto = request.headers.get("x-forwarded-proto") ?? "https";
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (host !== null && host !== "") {
+    return `${proto}://${host}`;
+  }
+  return new URL(request.url).origin;
+}
 
 /** httpOnly cookie holding the Supabase access token (JWT). */
 export const ACCESS_COOKIE = "mimik_sb_access";
