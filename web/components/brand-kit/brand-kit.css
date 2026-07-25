@@ -938,7 +938,8 @@
     background: var(--bk-paper) !important;
   }
   .bk-tabs,
-  .bk-btn {
+  .bk-btn,
+  .bk-ctlbar {
     display: none !important;
   }
   .bk-masthead {
@@ -996,6 +997,198 @@
   }
 }
 
+/* ————— studio control bar · share & export (studio surface only) ————— */
+.bk-ctlbar {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 26px 32px 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.bk-ctl-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 240px;
+}
+.bk-ctl-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bk-muted-2);
+  box-shadow: 0 0 0 3px rgba(var(--bk-ink-rgb), 0.05);
+  flex: none;
+}
+.bk-ctl-dot--live {
+  background: var(--bk-brand);
+}
+.bk-ctl-k {
+  font-family: var(--bk-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--bk-ink);
+}
+.bk-ctl-note {
+  font-size: 13.5px;
+  font-style: italic;
+  color: var(--bk-muted);
+}
+.bk-ctl-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.bk-ctl-actions .bk-btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+.bk-ctl-menu {
+  position: relative;
+}
+.bk-ctl-summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.bk-ctl-summary::-webkit-details-marker {
+  display: none;
+}
+.bk-ctl-menu[open] .bk-ctl-summary {
+  background: var(--bk-card-2);
+}
+.bk-ctl-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 240px;
+  background: var(--bk-card);
+  border: 1px solid var(--bk-line);
+  border-radius: 12px;
+  box-shadow: 0 18px 34px -22px rgba(var(--bk-ink-rgb), 0.4);
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+}
+.bk-ctl-menu-list a {
+  font-family: var(--bk-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bk-ink);
+  text-decoration: none;
+  padding: 9px 11px;
+  border-radius: 8px;
+}
+.bk-ctl-menu-list a:hover {
+  background: var(--bk-card-2);
+}
+.bk-ctl-share {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--bk-line);
+  border-radius: 12px;
+  background: var(--bk-card);
+  padding: 8px 8px 8px 14px;
+}
+.bk-ctl-share code {
+  flex: 1;
+  font-family: var(--bk-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--bk-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bk-ctl-err {
+  width: 100%;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--bk-muted);
+}
+
+/* ————— public share view — full-bleed, zero admin chrome ————— */
+.bk-canvas--full {
+  margin: 0;
+  border-radius: 0;
+  min-height: 100vh;
+}
+
+/* ————— export renders (?export=pdf | ?export=png&section=…) ————— */
+/* Static registry render: every chapter visible, no tab nav, no interactive chrome. */
+.bk-canvas--export .bk-panel--export {
+  display: block;
+}
+.bk-canvas--export .bk-panel--export + .bk-panel--export {
+  margin-top: 64px;
+  border-top: 1px solid var(--bk-line-soft);
+  padding-top: 56px;
+}
+.bk-canvas--export .bk-btn {
+  display: none !important;
+}
+.bk-canvas--export .bk-panel--export > * {
+  animation: none !important;
+}
+
+/* ————— unavailable page (public route's calm terminal state) ————— */
+/* House skin literals: no brand is in hand when the token doesn't resolve. */
+.bk-void {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+  background: #f4ece1;
+  background-image: radial-gradient(
+    ellipse 90% 60% at 50% -10%,
+    rgba(122, 46, 31, 0.06),
+    transparent 60%
+  );
+  color: #7a2e1f;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  text-align: center;
+}
+.bk-void-card {
+  max-width: 460px;
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+.bk-void-card .bk-fleur {
+  font-size: 24px;
+  opacity: 0.45;
+}
+.bk-void-card h1 {
+  font-size: clamp(26px, 5vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+.bk-void-card p {
+  font-size: 16px;
+  font-style: italic;
+  line-height: 1.6;
+  color: #96836d;
+}
+.bk-void-colophon {
+  margin-top: 14px;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #b4a48d;
+}
+
 /* ————— responsive ————— */
 @media (max-width: 900px) {
   .bk-font-row,
@@ -1030,6 +1223,9 @@
 @media (max-width: 560px) {
   .bk-masthead {
     padding: 40px 20px 28px;
+  }
+  .bk-ctlbar {
+    padding: 20px 16px 0;
   }
   .bk-bookwrap {
     padding: 0 16px 50px;

@@ -736,6 +736,57 @@ export function updateBrandBrief(
   return apiPatch<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, body, sessionToken);
 }
 
+/* ---------------------------------------------------------------------------
+   Brand book — publish/share + the public token read (Brand Kit v2, spec §8).
+--------------------------------------------------------------------------- */
+
+/** POST /brands/{id}/brand-book/publish|unpublish response — the share state. */
+export interface ApiBrandBookShare {
+  published: boolean;
+  /** Absolute public share URL when published; null after unpublish. */
+  share_url: string | null;
+}
+
+/**
+ * POST /brands/{id}/brand-book/publish (or /unpublish) — flip the kit's `published` gate.
+ * Team-gated at the API; called ONLY from the same-origin `/api/brand-kit/[id]/publish`
+ * route handler so the bearer stays server-side.
+ */
+export function setBrandBookPublished(
+  brandId: string,
+  publish: boolean,
+  sessionToken?: string,
+): Promise<ApiBrandBookShare> {
+  const action = publish ? "publish" : "unpublish";
+  return apiPost<ApiBrandBookShare>(
+    `/brands/${encodeURIComponent(brandId)}/brand-book/${action}`,
+    {},
+    sessionToken,
+  );
+}
+
+/**
+ * GET /brand-book/{token} — resolve a share token to its published brand (the PUBLIC
+ * read: deliberately NO bearer, mirroring the magic-link portal pattern; the token IS
+ * the capability). Returns null on 404/expiry/network failure — the caller renders a
+ * calm "not available" page, never an error surface.
+ */
+export async function getPublishedBrandBook(token: string): Promise<ApiBrand | null> {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/brand-book/${encodeURIComponent(token)}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as ApiBrand;
+  } catch {
+    return null;
+  }
+}
+
 /** GET /jobs — optionally filtered to one client. */
 export function listJobs(clientId?: string, sessionToken?: string): Promise<ApiJob[]> {
   const query = clientId !== undefined ? `?client_id=${encodeURIComponent(clientId)}` : "";
