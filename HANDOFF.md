@@ -22,11 +22,29 @@ The build loop is now branch-based + verifiable. Read `docs/AUTONOMOUS_OPERATION
   is either (a) manually start a fresh Claude session to review the branch, or (b) `/schedule` a
   recurring Claude Code cloud agent that reviews open `lane/*` branches. Recommended: set up (b).
 
-### IN-FLIGHT (needs review before merge)
-- **VPS codex is building `lane/fix-canvas-editor`** — the "Creative not found" canvas-editor bug
-  (creative EXISTS + renders on board/review; only the /creatives/[id]/edit route fails). When pushed:
-  `git fetch && git checkout lane/fix-canvas-editor`, run security-review + pattern-reviewer, confirm
-  `npm run build` + `uv run pytest -q` green, then merge to main + deploy. DO NOT merge unreviewed.
+### IN-FLIGHT — `lane/fix-canvas-editor` REVIEWED, NOT MERGED (has a failing test)
+- VPS codex correctly diagnosed the "Creative not found" bug: PNG-only/programmatically-generated
+  creatives lack the canonical `creative.svg`, and the SVG-export path (`api/routers/exports.py`,
+  which the canvas editor loads) treated the missing artifact as not-found. Its fix adds a
+  path-safe SVG fallback (security review PASSED — `_artifact_for_creative` confines to the creative's
+  own dir; tenant-scoping + deleted_at preserved).
+- **BUT its test fails locally**: `test_svg_export_falls_back_to_existing_preview...` →
+  `FileNotFoundError .../creative.svg` — the fallback still opens `creative.svg` when it's MISSING
+  (the exact case). So the fix is incomplete → **NOT merged, main is clean, prod untouched.**
+- **NEXT:** iterate on the branch (make the fallback guard `creative.svg` existence before opening it +
+  fix the test), re-verify locally, then merge + deploy. Branch has the WIP.
+- **This validated the model:** pure-autonomous-to-main would have shipped a failing-test change; the
+  Claude review gate caught it. Keep the gate.
+
+### ⚠ VPS BUILD-ENV GAP (blocks VPS self-verify)
+The VPS clone CANNOT run the verify gates: **no `node_modules`** (npm registry blocked: `EAI_AGAIN`),
+**no `uv`** installed. So VPS codex can EDIT but not `npm run build` / `uv run pytest`. Until fixed,
+verification MUST happen locally or in CI (CI build-images is the real gate on merge to main).
+FIX OPTIONS: install `uv` on the VPS (`curl -LsSf https://astral.sh/uv/install.sh` — read-then-run) +
+resolve npm registry access (`EAI_AGAIN` = DNS/egress to registry.npmjs.org; check VPS DNS/firewall) +
+`npm ci` once. THEN codex on the VPS can self-verify before pushing.
+Wrapper bug learned: `codex exec && git commit` — codex exits non-zero when ITS verify fails, so `&&`
+skips the commit. Use `codex exec ; git add <paths> ; git commit ; git push` (don't gate commit on codex's exit).
 
 ### Also done this turn
 - Filled `kit.discovery.mission` for all 3 brands (was the last visible ghost card).
