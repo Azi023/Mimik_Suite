@@ -128,8 +128,17 @@ async function writeSessionCookies(tokens: GoTrueTokenResponse): Promise<void> {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const accessExp = tokens.expires_at ?? nowSeconds + (tokens.expires_in ?? 3600);
   const accessMaxAge = Math.max(accessExp - nowSeconds, 60);
-  store.set(ACCESS_COOKIE, tokens.access_token, cookieOptions(accessMaxAge));
-  store.set(REFRESH_COOKIE, tokens.refresh_token, cookieOptions(60 * 60 * 24 * 30));
+  try {
+    store.set(ACCESS_COOKIE, tokens.access_token, cookieOptions(accessMaxAge));
+    store.set(REFRESH_COOKIE, tokens.refresh_token, cookieOptions(60 * 60 * 24 * 30));
+  } catch {
+    // Next.js 15 forbids cookie writes during a Server Component render — only Server Actions
+    // and Route Handlers may mutate cookies. When a token refresh happens mid-render (a page
+    // load whose access token just aged out), we still return the fresh access token for THIS
+    // request; the rotated cookies re-persist on the next route-handler navigation. Swallowing
+    // here is what keeps read-only server pages (brand-kit, onboarding, …) from crashing with
+    // "Cookies can only be modified in a Server Action or Route Handler".
+  }
 }
 
 /** POST to a GoTrue token grant endpoint; normalize the outcome. */
