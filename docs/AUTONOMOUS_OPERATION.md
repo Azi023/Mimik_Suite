@@ -8,7 +8,7 @@
 1. **Full context, always.** Every agent session reads, in order: this repo's `AGENTS.md` (at
    `/root/mimik-src/`), `Mimik_Suite/HANDOFF.md` (top entry), `Mimik_Suite/CLAUDE.md`,
    `Mimik_Suite/docs/PRODUCTION_ROADMAP.md`, `Mimik_Suite/docs/AUTONOMOUS_OPERATION.md` (this
-   file), and `graphify-out/wiki/`. All three repos are cloned side-by-side so path deps resolve.
+   file). All three repos are cloned side-by-side so path deps resolve.
 2. **Skip-permissions (no yes/yes prompts).** Run agents in auto-approve mode:
    - codex: `codex exec --full-auto "<task>"` (never stops to ask; pre-answer decisions in the prompt).
    - agy: run in its auto/full-access mode (the operator's session is already logged in).

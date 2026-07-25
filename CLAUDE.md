@@ -53,12 +53,15 @@ own the self-serve tool; we don't fight them there.)
 → Job(format, publish_date, assignee, status, sla) → CreativeDoc(manifest) → Layer(L1..L5, recipe)
 → Approval(actor, action, ts) → Delivery(drive_path) → Task(type, status) → PreferenceProfile(client-scoped)`
 
-## graphify
+## Artifact storage (local disk today, object storage later)
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+Creative artifacts (`var/creatives`) and uploaded brand assets (`var/assets`) are the only
+stateful files on the box — everything else lives in Postgres. They are bind-mounted from
+`VAR_ROOT` (`/root/mimik-suite/var` on the VPS) so image pulls cannot destroy them; without
+that mount a deploy wipes them while the DB rows survive, which surfaces as "Creative not
+found". **Back up that directory — nothing else on the VPS is stateful.**
 
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+Migration path to S3/object storage when it's wanted: `config.assets_local_root` is already a
+setting, so assets are a config change. Creatives are not — `creative_generation.py`
+`CREATIVE_ARTIFACT_ROOT` is a hardcoded relative `Path`, so that one needs a code change to go
+through the same adapter before either can point at a bucket.

@@ -86,16 +86,16 @@ A codex/agy/claude session on the VPS is only as good as the context it can see.
   library, golden set, rubrics, evals, learning-loop) as siblings under `/root/mimik-src/`.
 - **In-repo durable context (already travels via git):** `CLAUDE.md` (project brain), `HANDOFF.md`
   (rolling state — read top entry first), `SESSION_LOG.md` (decision audit), `docs/` (BRAND_KIT_V2_SPEC,
-  STYLE_PROFILES, DESIGN_REFERENCES, this ROADMAP), `graphify-out/` (knowledge graph + wiki).
+  STYLE_PROFILES, DESIGN_REFERENCES, this ROADMAP).
 - **A top-level `AGENTS.md` / `CONTEXT.md` index** at `/root/mimik-src/` that points every agent to:
-  read HANDOFF top entry → CLAUDE.md → this roadmap → graphify wiki, before acting. Mirror the global
+  read HANDOFF top entry → CLAUDE.md → this roadmap, before acting. Mirror the global
   `~/ai-dotfiles/AGENTS.md` conventions.
 - **claude-mem (episodic) is machine-local + rebuildable** — it does NOT auto-travel to the VPS, and
   per CLAUDE.md the DOCS are the durable source of truth (claude-mem is scratchpad). So the handoff +
   SESSION_LOG + docs ARE the R&D memory for the VPS. If deeper episodic recall is wanted there,
   rebuild claude-mem on the VPS from the git history, or export key observations into `docs/`.
 - **Refresh discipline:** a `git pull` on session start (mirror the local `session-start` hook) keeps
-  the VPS context current; `graphify update .` after code changes keeps the graph fresh.
+  the VPS context current.
 - Secrets stay ONLY in `/root/mimik-suite/.env` (the compose dir) — never in the source clone.
 
 ## 7. superadmin scope — operator wants super_admin = ONLY themselves (they are the owner)
