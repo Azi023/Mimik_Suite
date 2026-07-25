@@ -8,6 +8,7 @@ import logging
 import shutil
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -545,6 +546,7 @@ async def _render_nikah_artifacts(
     archetype_override: str | None = None,
     heading_font_ref: str | None = None,
     body_font_ref: str | None = None,
+    layer_overrides: Mapping[str, object] | None = None,
 ) -> tuple[str, bytes]:
     """Render a Simply Nikah creative through the vector engine (M-01). Returns (svg, png)
     so live QA can read the semantic-layer geometry. SN never takes a photo.
@@ -562,7 +564,7 @@ async def _render_nikah_artifacts(
         copy["cta"] = copy_block.cta
     if highlight is not None:
         copy["highlight"] = highlight
-    svg = nikah_templates.build_nikah_svg(
+    rendered = await nikah_templates.render_nikah_with_layout(
         archetype,
         copy=copy,
         format_key=format_key,
@@ -570,9 +572,9 @@ async def _render_nikah_artifacts(
         logo_ref=brand.tokens.logo.ref,
         heading_font_ref=heading_font_ref,
         body_font_ref=body_font_ref,
+        layer_overrides=layer_overrides,
     )
-    preview = await svg_export.rasterize_svg_to_png(svg, format_key)
-    return svg, preview
+    return rendered.svg, rendered.png
 
 
 async def _render_creative_artifacts(
@@ -596,8 +598,8 @@ async def _render_creative_artifacts(
     profile_render_path: Path | None = None
     # Simply Nikah renders through the vector engine (M-01) — faceless flat-vector, no photo.
     # Vector composition IS the master here, so this REPLACES the photo-based render_creative_svg.
-    # Defensive: any nikah render failure falls back to the generic path so live generation never
-    # breaks. On success QA sees the true source kind (generated_vector), not the placeholder tag.
+    # Simply Nikah is fail-closed: emitting the generic photo/template path on a vector-layout
+    # fault silently changes the selected archetype and can preserve stale layer geometry.
     nikah_render: tuple[str, bytes] | None = None
     effective_source_kind = source_kind
     if profile_id == "simply-nikah":
@@ -609,14 +611,19 @@ async def _render_creative_artifacts(
                 archetype_override=render_params.get("nikah_archetype"),
                 heading_font_ref=heading_font_ref,
                 body_font_ref=body_font_ref,
+                layer_overrides=(
+                    render_params.get("layer_overrides")
+                    if isinstance(render_params.get("layer_overrides"), Mapping)
+                    else None
+                ),
             )
             effective_source_kind = "generated_vector"
-        except Exception as exc:  # noqa: BLE001 — never let a render fault break generation
-            logger.warning(
-                "nikah render failed for format=%s (%s); using generic fallback",
+        except Exception:
+            logger.exception(
+                "nikah render failed closed for format=%s",
                 format_key,
-                exc,
             )
+            raise
 
     if profile_id == "glo2go-aesthetics":
         profile_png = await glo2go_templates.render_glo2go(
@@ -1054,6 +1061,40 @@ def _set_rendered_artifacts(
     qa_report: QAReport | None = None,
     critique_outcome: _CriticRenderOutcome | None = None,
 ) -> None:
+    layout_geometry = (
+        nikah_templates.layout_layers_from_svg(svg_path.read_text(encoding="utf-8"))
+        if svg_path.is_file()
+        else None
+    )
+    if layout_geometry is not None:
+        scaffold, message = layout_geometry
+        geometry_layers = (
+            (LayerKind.L3_SCAFFOLD, scaffold.model_dump(mode="json")),
+            (LayerKind.L4_MESSAGE, message.model_dump(mode="json")),
+        )
+        for kind, params in geometry_layers:
+            layer = manifest.layer(kind)
+            if layer is None:
+                insert_at = next(
+                    (
+                        index
+                        for index, candidate in enumerate(manifest.layers)
+                        if candidate.kind == LayerKind.L5_FINISH
+                    ),
+                    len(manifest.layers),
+                )
+                manifest.layers.insert(
+                    insert_at,
+                    Layer(
+                        kind=kind,
+                        recipe=LayerRecipe(params=params),
+                        artifact_ref=str(svg_path),
+                    ),
+                )
+            else:
+                layer.recipe = LayerRecipe(params=params)
+                layer.artifact_ref = str(svg_path)
+
     artifact_params = {
         "svg_ref": str(svg_path),
         "preview_ref": str(preview_path),
@@ -1644,24 +1685,13 @@ async def generate_client_creative(
             reference_urls=reference_urls,
             params=l1_params,
         )
-        manifest.layers.append(
-            Layer(
-                kind=LayerKind.L5_FINISH,
-                recipe=LayerRecipe(
-                    params={
-                        "svg_ref": str(svg_path),
-                        "preview_ref": str(preview_path),
-                        **(
-                            {"profile_render_ref": str(profile_render_path)}
-                            if profile_render_path is not None
-                            else {}
-                        ),
-                        **_qa_params(qa_report),
-                        **_critique_params(critique_outcome),
-                    }
-                ),
-                artifact_ref=str(preview_path),
-            )
+        _set_rendered_artifacts(
+            manifest,
+            svg_path=svg_path,
+            preview_path=preview_path,
+            profile_render_path=profile_render_path,
+            qa_report=qa_report,
+            critique_outcome=critique_outcome,
         )
         # M-05: attach the A/B set only when >=2 were rendered, so single-generate manifests stay
         # exactly as before (empty variants list). No variant is selected yet — record_variant_pick

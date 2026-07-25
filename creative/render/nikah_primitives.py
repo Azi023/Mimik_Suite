@@ -289,6 +289,7 @@ def highlighted_word_box(
     pad_x_em: float = 0.45,
     pad_y_em: float = 0.22,
     rx: float = 14.0,
+    text_width: float | None = None,
 ) -> tuple[str, float, float]:
     """The decisive deep-plum box with one uppercase key word reversed out in Cloud White.
 
@@ -296,7 +297,12 @@ def highlighted_word_box(
     same conservative 0.60×font glyph factor the glo2go/svg code uses, so callers can centre/flow it.
     """
     up = word.upper()
-    box_w = len(up) * _HEAVY_GLYPH_FACTOR * font_size + 2 * pad_x_em * font_size
+    measured_width = (
+        text_width
+        if text_width is not None
+        else len(up) * _HEAVY_GLYPH_FACTOR * font_size
+    )
+    box_w = measured_width + 2 * pad_x_em * font_size
     box_h = font_size + 2 * pad_y_em * font_size
     svg = (
         '<g data-role="highlight-word">'
@@ -358,11 +364,17 @@ def cta_pill(
     fill: str,
     text_fill: str,
     font_family: str,
+    text_width: float | None = None,
 ) -> tuple[str, float]:
     """Rounded pill CTA centred on ``cx`` with its top at ``y``. Returns ``(svg, pill_width)``."""
     font_size = height * 0.40
     pad_x = height * 0.72
-    pill_w = max(height * 2.2, len(label) * _HEAVY_GLYPH_FACTOR * font_size + 2 * pad_x)
+    measured_width = (
+        text_width
+        if text_width is not None
+        else len(label) * _HEAVY_GLYPH_FACTOR * font_size
+    )
+    pill_w = max(height * 2.2, measured_width + 2 * pad_x)
     left = cx - pill_w / 2
     svg = (
         '<g data-role="cta">'

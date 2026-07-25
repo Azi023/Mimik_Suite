@@ -377,6 +377,102 @@ async def test_live_qa_simply_nikah_allows_generated_vector() -> None:
     assert not any(f.startswith("source:") for f in report.failures), report.failures
 
 
+async def test_live_qa_fails_when_hero_occludes_text() -> None:
+    """Catches the critic accepting a hero/ornament bbox over body or headline text."""
+    svg = _qa_svg(ink="#2B0A2E", ground="#FAF7FB").replace(
+        "</svg>",
+        (
+            '<g id="layer-hero" data-bbox="180 180 720 720" '
+            'data-occluding="true"><rect x="180" y="180" width="720" height="720" '
+            'fill="#F9C6DE"/></g></svg>'
+        ),
+    )
+    preview = _solid_png("#FAF7FB", 1080, 1080)
+    report = await run_live_qa(
+        preview,
+        svg,
+        brand=_qa_brand(),
+        profile=get_style_profile("simply-nikah"),
+        format_key="ig_post",
+        source_kind="generated_vector",
+        expect_logo=False,
+    )
+    assert not report.passed
+    assert any(failure.startswith("overlap:") for failure in report.failures), report.failures
+
+
+async def test_live_qa_reports_malformed_measured_text_geometry() -> None:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" '
+        'data-layout-engine="nikah-layout-v1">'
+        '<g id="layer-headline" data-bbox="120 120 400 100">'
+        '<text data-role="headline" data-bbox="bad bad bad bad" '
+        'fill="#2B0A2E">Clear intention</text></g></svg>'
+    )
+    report = await run_live_qa(
+        _solid_png("#FAF7FB", 1080, 1080),
+        svg,
+        brand=_qa_brand(),
+        profile=get_style_profile("simply-nikah"),
+        format_key="ig_post",
+        source_kind="generated_vector",
+        expect_logo=False,
+    )
+    assert not report.passed
+    assert any(failure.startswith("geometry:") for failure in report.failures)
+
+
+def test_rendered_manifest_contains_scaffold_and_message_layers(tmp_path: Path) -> None:
+    """Catches L3/L4 being omitted while only L1 and L5 are persisted."""
+    from api.services import creative_generation as cg
+    from creative.pipeline import build_manifest
+    from creative.render.nikah_templates import build_nikah_svg
+    from mimik_contracts import LayerKind
+
+    brand = Brand(
+        tenant_id="t1",
+        client_id="c1",
+        slug="simply-nikah",
+        name="Simply Nikah",
+        tokens=BrandTokens(),
+    )
+    copy = CopyBlock(
+        headline="Involve your family from the very first step",
+        subhead="Keep both families part of the journey.",
+        cta="Begin",
+    )
+    svg = build_nikah_svg(
+        "protection_symbol_hero",
+        copy={"headline": copy.headline, "sub": copy.subhead or "", "cta": copy.cta or ""},
+        format_key="ig_post",
+    )
+    svg_path = tmp_path / "creative.svg"
+    preview_path = tmp_path / "preview.png"
+    svg_path.write_text(svg, encoding="utf-8")
+    preview_path.write_bytes(_solid_png("#FAF7FB", 1080, 1080))
+    manifest = build_manifest(
+        brand,
+        copy,
+        "ig_post",
+        template_key="protection_symbol_hero",
+        image_artifact="source.png",
+    )
+
+    cg._set_rendered_artifacts(
+        manifest,
+        svg_path=svg_path,
+        preview_path=preview_path,
+        profile_render_path=None,
+    )
+
+    scaffold = manifest.layer(LayerKind.L3_SCAFFOLD)
+    message = manifest.layer(LayerKind.L4_MESSAGE)
+    assert scaffold is not None
+    assert message is not None
+    assert scaffold.recipe.params["regions"]
+    assert message.recipe.params["lines"]
+
+
 # --- M-10: a resolved brand font threads into every render path's SVG -------------------------
 #
 # _render_creative_artifacts is the single seam every caller (generate/revise/revert) flows
@@ -474,3 +570,42 @@ async def test_render_without_brand_font_has_no_font_face(tmp_path: Path, monkey
     svg = svg_path.read_text()
     assert "@font-face" not in svg
     assert "MimikBrand" not in svg
+
+
+async def test_simply_nikah_renderer_fault_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.services import creative_generation as cg
+
+    async def fail_render(**_kwargs: object) -> tuple[str, bytes]:
+        raise RuntimeError("renderer fault")
+
+    monkeypatch.setattr(cg, "_render_nikah_artifacts", fail_render)
+    image = tmp_path / "source.png"
+    image.write_bytes(_solid_png("#CCCCCC", 8, 8))
+    artifact_dir = tmp_path / "art"
+    artifact_dir.mkdir()
+    brand = Brand(
+        tenant_id="t1",
+        client_id="c1",
+        slug="simply-nikah",
+        name="Simply Nikah",
+        tokens=BrandTokens(),
+    )
+
+    with pytest.raises(RuntimeError, match="renderer fault"):
+        await cg._render_creative_artifacts(
+            brand=brand,
+            profile_id="simply-nikah",
+            copy_block=CopyBlock(
+                headline="Marry with clear intention",
+                subhead="A gentle beginning",
+                cta="Begin",
+            ),
+            format_key="ig_post",
+            image_path=image,
+            artifact_dir=artifact_dir,
+            render_params={},
+            source_kind="brand_placeholder",
+        )

@@ -10,13 +10,18 @@ from xml.etree import ElementTree
 import pytest
 
 from creative.render.compositor import browser_available, png_size
+from creative.render.compositor import chromium_page
 from creative.render import nikah_primitives as prim
 from creative.render.nikah_templates import (
+    _ARCHETYPE_PARAMS,
+    NikahLayoutError,
     NikahTemplateContext,
     build_nikah_svg,
     modesty_report,
     render_nikah,
+    render_nikah_with_layout,
 )
+from mimik_contracts import get_format
 
 _SVG_NS = "http://www.w3.org/2000/svg"
 _LAYER_IDS = (
@@ -55,6 +60,86 @@ _AYAH_COPY = {
     "cta": "Begin with intention",
 }
 
+_COPY_LENGTHS = {
+    "highlighted_word_hero": (
+        {
+            "headline": "Choose FAMILY",
+            "highlight": "FAMILY",
+            "sub": "Begin together.",
+            "cta": "Begin",
+        },
+        {
+            "headline": "Involve your FAMILY from the very first step",
+            "highlight": "FAMILY",
+            "sub": "A thoughtful introduction keeps trust and intention clear.",
+            "cta": "Start well",
+        },
+        {
+            "headline": "Keep your FAMILY involved from the very first conversation",
+            "highlight": "FAMILY",
+            "sub": "Bring trusted people into each stage so every conversation stays purposeful.",
+            "cta": "Start with family",
+        },
+    ),
+    "protection_symbol_hero": (
+        {
+            "headline": "Privacy first",
+            "sub": "Feel protected.",
+            "cta": "Learn how",
+        },
+        {
+            "headline": "Involve your family from the very first step",
+            "sub": "Private conversations should still feel intentional and clear.",
+            "cta": "Learn how",
+        },
+        {
+            "headline": "Build trust through private introductions",
+            "sub": "Thoughtful boundaries protect both families and keep each next step clear.",
+            "cta": "Protect the journey",
+        },
+    ),
+    "ayah_translation": (
+        {
+            "ayah": "وَمِنْ آيَاتِهِ",
+            "translation": "And among His signs.",
+            "cta": "Begin",
+        },
+        _AYAH_COPY,
+        {
+            "ayah": _AYAH_COPY["ayah"],
+            "translation": (
+                "He created spouses for you so that you may find tranquillity together."
+            ),
+            "cta": "Begin with intention",
+        },
+    ),
+}
+
+
+def _bbox_tuple(element: ElementTree.Element) -> tuple[int, int, int, int]:
+    return tuple(int(round(float(value))) for value in element.attrib["data-bbox"].split())  # type: ignore[return-value]
+
+
+def _intersects(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    ax, ay, aw, ah = first
+    bx, by, bw, bh = second
+    return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+
+def _assert_inside(
+    bbox: tuple[int, int, int, int],
+    safe: tuple[int, int, int, int],
+) -> None:
+    x, y, width, height = bbox
+    sx, sy, sw, sh = safe
+    assert x >= sx
+    assert y >= sy
+    assert x + width <= sx + sw
+    assert y + height <= sy + sh
+
 
 def _idat_distinct_bytes(png: bytes) -> int:
     """Distinct byte count of the decompressed IDAT stream — a PIL-free non-blank signal.
@@ -76,6 +161,214 @@ def _idat_distinct_bytes(png: bytes) -> int:
 # ---------------------------------------------------------------------------------------------
 # Exact-dims, non-blank PNG (browser-gated, like the glo2go/compositor PNG tests)
 # ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+async def test_measured_render_exposes_real_line_geometry() -> None:
+    """Catches regression to average-glyph wrapping or a separate measure-browser launch."""
+    from creative.render import nikah_templates
+
+    render_with_layout = getattr(nikah_templates, "render_nikah_with_layout", None)
+    assert callable(render_with_layout), "Nikah needs a measured render result, not PNG-only output"
+
+    result = await render_with_layout(
+        "protection_symbol_hero",
+        copy=_PROTECTION_COPY,
+        format_key="ig_post",
+        hero_symbol="shield_crescent",
+    )
+    assert result.message.lines
+    assert 'data-text-metrics="chromium"' in result.svg
+    assert all(line.bbox.width > 0 and line.bbox.height > 0 for line in result.message.lines)
+    assert png_size(result.png) == (1080, 1080)
+    repeated = await render_with_layout(
+        "protection_symbol_hero",
+        copy=_PROTECTION_COPY,
+        format_key="ig_post",
+        hero_symbol="shield_crescent",
+    )
+    assert repeated.svg == result.svg
+    assert repeated.png == result.png
+
+
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+async def test_layer_override_is_reflected_in_final_chromium_geometry() -> None:
+    baseline = await render_nikah_with_layout(
+        "protection_symbol_hero",
+        copy=_PROTECTION_COPY,
+        format_key="ig_post",
+    )
+    shifted = await render_nikah_with_layout(
+        "protection_symbol_hero",
+        copy=_PROTECTION_COPY,
+        format_key="ig_post",
+        layer_overrides={"layer-headline": {"dx": 12}},
+    )
+    baseline_headline = next(
+        line for line in baseline.message.lines if line.role == "headline"
+    )
+    shifted_headline = next(
+        line for line in shifted.message.lines if line.role == "headline"
+    )
+    assert shifted_headline.bbox.x == baseline_headline.bbox.x + 12
+
+
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+async def test_layer_override_that_breaks_layout_fails_loud() -> None:
+    with pytest.raises(NikahLayoutError, match="safe margins"):
+        await render_nikah_with_layout(
+            "protection_symbol_hero",
+            copy=_PROTECTION_COPY,
+            format_key="ig_post",
+            layer_overrides={"layer-headline": {"dx": 700}},
+        )
+
+
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+async def test_wordmark_override_cannot_intersect_hero() -> None:
+    with pytest.raises(NikahLayoutError, match=r"wordmark intersects layer-(?:hero|glow)"):
+        await render_nikah_with_layout(
+            "protection_symbol_hero",
+            copy=_PROTECTION_COPY,
+            format_key="ig_post",
+            layer_overrides={"layer-wordmark": {"dy": 384}},
+        )
+
+
+@pytest.mark.parametrize("archetype", tuple(_ARCHETYPE_PARAMS))
+@pytest.mark.parametrize("format_key", tuple(key for key, _width, _height in _FORMATS))
+@pytest.mark.parametrize("length_index", (0, 1, 2), ids=("short", "medium", "long"))
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+async def test_layout_matrix_keeps_content_inside_safe_area_without_occlusion(
+    archetype: str,
+    format_key: str,
+    length_index: int,
+) -> None:
+    """Catches fixed-fraction hero placement and unbounded content stacks."""
+    result = await render_nikah_with_layout(
+        archetype,
+        copy=_COPY_LENGTHS[archetype][length_index],
+        format_key=format_key,
+        direction="rtl" if archetype == "ayah_translation" else "ltr",
+    )
+    svg = result.svg
+    root = ElementTree.fromstring(svg)
+    fmt = get_format(format_key)
+    safe = (
+        fmt.safe_zone.left,
+        fmt.safe_zone.top,
+        fmt.width - fmt.safe_zone.left - fmt.safe_zone.right,
+        fmt.height - fmt.safe_zone.top - fmt.safe_zone.bottom,
+    )
+    text_boxes = [
+        _bbox_tuple(element)
+        for element in root.findall(f".//{{{_SVG_NS}}}text[@data-bbox]")
+    ]
+    decoration_boxes = [
+        _bbox_tuple(element)
+        for element in root.findall(
+            f".//{{{_SVG_NS}}}g[@data-occluding='true'][@data-bbox]"
+        )
+    ]
+    assert text_boxes, (archetype, format_key, length_index)
+    assert decoration_boxes or archetype == "ayah_translation"
+    for bbox in (*text_boxes, *decoration_boxes):
+        _assert_inside(bbox, safe)
+    for text_bbox in text_boxes:
+        assert not any(_intersects(text_bbox, decoration) for decoration in decoration_boxes)
+
+
+@pytest.mark.parametrize("archetype", tuple(_ARCHETYPE_PARAMS))
+@pytest.mark.parametrize("format_key", tuple(key for key, _width, _height in _FORMATS))
+async def test_overlong_copy_fails_loud(archetype: str, format_key: str) -> None:
+    """Catches silent overflow when even the permitted font shrink range cannot fit."""
+    if archetype == "ayah_translation":
+        copy = {
+            "ayah": " ".join(["وَمِنْ آيَاتِهِ"] * 80),
+            "translation": " ".join(["A deliberately overlong translation"] * 80),
+            "cta": "Begin",
+        }
+    else:
+        headline = " ".join(["deliberately overlong headline"] * 80)
+        copy = {
+            "headline": f"{headline} FAMILY" if archetype == "highlighted_word_hero" else headline,
+            "sub": " ".join(["deliberately overlong support copy"] * 80),
+            "cta": "Begin",
+        }
+        if archetype == "highlighted_word_hero":
+            copy["highlight"] = "FAMILY"
+
+    with pytest.raises(ValueError, match="does not fit"):
+        await render_nikah_with_layout(
+            archetype,
+            copy=copy,
+            format_key=format_key,
+            direction="rtl" if archetype == "ayah_translation" else "ltr",
+        )
+
+
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+async def test_wrap_avoids_single_short_final_word_when_a_balanced_break_exists() -> None:
+    """Catches the verified 'very' orphan caused by average-character wrapping."""
+    result = await render_nikah_with_layout(
+        "protection_symbol_hero",
+        copy={
+            "headline": "Involve your family from the very first step",
+            "sub": "Keep both families part of the journey.",
+        },
+        format_key="ig_post",
+    )
+    svg = result.svg
+    root = ElementTree.fromstring(svg)
+    lines = [
+        (element.text or "").strip()
+        for element in root.findall(
+            f".//{{{_SVG_NS}}}g[@id='layer-headline']/{{{_SVG_NS}}}text"
+        )
+    ]
+    assert len(lines) >= 2
+    assert len(lines[-1].split()) > 1, lines
+
+
+@pytest.mark.skipif(not browser_available(), reason="playwright not installed")
+async def test_rtl_actual_chromium_ink_stays_inside_safe_area() -> None:
+    """Catches SVG direction/text-anchor combinations whose metadata lies about actual ink."""
+    result = await render_nikah_with_layout(
+        "protection_symbol_hero",
+        copy={
+            "headline": "بداية تحفظ الخصوصية",
+            "sub": "تعارف هادف تقوده القيم",
+            "cta": "ابدأ الآن",
+        },
+        format_key="ig_post",
+        direction="rtl",
+    )
+    fmt = get_format("ig_post")
+    async with chromium_page(fmt.width, fmt.height) as page:
+        await page.set_content(result.svg, wait_until="load")
+        await page.evaluate("document.fonts.ready")
+        boxes = await page.eval_on_selector_all(
+            "text[data-bbox]",
+            """elements => elements.map(element => {
+              const box = element.getBBox();
+              const declared = element.dataset.bbox.split(" ").map(Number);
+              return {
+                x: box.x, y: box.y, width: box.width, height: box.height,
+                declaredX: declared[0], declaredY: declared[1],
+                declaredWidth: declared[2], declaredHeight: declared[3],
+              };
+            })""",
+        )
+    assert boxes
+    for box in boxes:
+        assert box["x"] >= fmt.safe_zone.left
+        assert box["y"] >= fmt.safe_zone.top
+        assert box["x"] + box["width"] <= fmt.width - fmt.safe_zone.right
+        assert box["y"] + box["height"] <= fmt.height - fmt.safe_zone.bottom
+        assert abs(box["x"] - box["declaredX"]) <= 2
+        assert abs(box["y"] - box["declaredY"]) <= 2
+        assert abs(box["width"] - box["declaredWidth"]) <= 2
+        assert abs(box["height"] - box["declaredHeight"]) <= 2
 
 
 @pytest.mark.skipif(not browser_available(), reason="playwright not installed")
@@ -132,7 +425,12 @@ def test_svg_emits_the_nine_named_layers_for_both_archetypes() -> None:
             assert f'inkscape:label="{layer_id}"' in svg
         assert svg.count('inkscape:groupmode="layer"') == 9
         assert svg.count('data-editable="true"') == 9
-        assert svg.count("data-bbox=") == 9
+        root = ElementTree.fromstring(svg)
+        assert sum(
+            "data-bbox" in group.attrib
+            for group in root.findall(f".//{{{_SVG_NS}}}g[@data-layer]")
+        ) == 9
+        assert root.findall(f".//{{{_SVG_NS}}}text[@data-bbox]")
 
 
 def test_nikah_ltr_default_matches_frozen_pre_rtl_serialization() -> None:
@@ -149,7 +447,7 @@ def test_nikah_ltr_default_matches_frozen_pre_rtl_serialization() -> None:
         direction="ltr",
     )
     assert hashlib.sha256(default_svg.encode()).hexdigest() == (
-        "be95530fc68caecc2213acd5981c64f51b5fe3346f73a8660a8ba6c133959d36"
+        "52895bd2a41e01d978dcdf210b5c23cc13b6ab7ebc6cf36296c4a74c4243fae9"
     )
 
 
@@ -169,7 +467,7 @@ def test_ayah_translation_uses_rtl_amiri_panel_and_ltr_translation() -> None:
     headline_layer = svg.split('id="layer-headline"', 1)[1].split("</g>", 1)[0]
     support_layer = svg.split('id="layer-support"', 1)[1].split("</g>", 1)[0]
     assert 'direction="rtl"' in headline_layer
-    assert 'text-anchor="end"' in headline_layer
+    assert 'text-anchor="start"' in headline_layer
     assert 'direction="ltr"' in support_layer
     assert 'text-anchor="middle"' in support_layer
     root = ElementTree.fromstring(svg)
@@ -199,7 +497,7 @@ def test_rtl_nikah_right_aligns_arabic_headline_support_and_cta() -> None:
         assert texts
         for text in texts:
             assert text.attrib["direction"] == "rtl"
-            assert text.attrib["text-anchor"] == "end"
+            assert text.attrib["text-anchor"] == "start"
             assert "MimikScriptArabic" in text.attrib["font-family"]
 
 

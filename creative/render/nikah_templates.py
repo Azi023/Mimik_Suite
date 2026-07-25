@@ -16,22 +16,35 @@ Design contract: docs/STYLE_PROFILES.md Profile 1. Build spec: docs/NIKAH_ENGINE
 from __future__ import annotations
 
 import base64
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from xml.etree import ElementTree
 
 from pydantic import field_validator
 
-from mimik_contracts import get_format
+from mimik_contracts import (
+    CreativeRect,
+    MessageGeometry,
+    MessageLineGeometry,
+    ScaffoldGeometry,
+    ScaffoldRegion,
+    get_format,
+)
 
-from creative.export.svg import rasterize_svg_to_png  # reuse the established rasterizer
 from creative.knowledge.feedback import load_rules
 from creative.render import nikah_primitives as prim
 from creative.render.builtin_fonts import builtin_arabic_font_path, contains_arabic
-from creative.render.fonts import embed_font_face, font_family_stack
+from creative.render.compositor import (
+    TextMeasurement,
+    TextMeasureRequest,
+    chromium_page,
+    measure_svg_text,
+    render_svg_with_geometry_on_page,
+)
+from creative.render.fonts import EmbeddedFont, embed_font_face, font_family_stack
 from creative.render.nikah_vectors import get_vector
 from creative.render.templates import (
     LayoutTemplate,
@@ -72,6 +85,10 @@ _IMAGE_MIME_BY_SUFFIX = {
 
 HeroSymbol = Literal["hands_heart", "shield_crescent", "heart_shield", "heart", "crescent"]
 
+
+class NikahLayoutError(ValueError):
+    """Copy cannot be laid out without violating the measured safe-area invariants."""
+
 # Layer ids in paint order (bottom→top) — the SN named-layer contract.
 _LAYER_IDS: tuple[str, ...] = (
     "layer-background",
@@ -85,7 +102,9 @@ _LAYER_IDS: tuple[str, ...] = (
     "layer-cta",
 )
 _EDITABLE_LAYER_IDS = frozenset(_LAYER_IDS)
-_OVERRIDE_KEYS = frozenset({"dx", "dy", "scale", "rotation", "visible", "fill"})
+_OVERRIDE_KEYS = frozenset(
+    {"dx", "dy", "scale", "scale_x", "scale_y", "rotation", "visible", "fill"}
+)
 
 # Copy keys that would smuggle a photo into a profile that must never take one.
 _BANNED_PHOTO_KEYS = ("image_ref", "image", "photo", "photo_path", "image_path")
@@ -186,29 +205,115 @@ def _embed_local_image(image_ref: str) -> str:
 
 
 # =============================================================================================
-# Text wrapping (conservative, deterministic)
+# Text wrapping (measured, balanced, deterministic)
 # =============================================================================================
 
 
-def _wrap(text: str, max_chars: int, max_lines: int) -> tuple[str, ...]:
+MeasureText = Callable[[str, int, int, str, str], TextMeasurement]
+
+
+def _fallback_measure(
+    text: str,
+    font_size: int,
+    _font_weight: int,
+    _font_family: str,
+    _direction: str,
+) -> TextMeasurement:
+    """Deterministic structural fallback for synchronous SVG-only callers.
+
+    Production rendering supplies Chromium measurements. This fallback deliberately models
+    individual glyph classes instead of using a character-count/average-glyph threshold.
+    """
+    width_units = 0.0
+    for character in text:
+        if character.isspace():
+            width_units += 0.28
+        elif character in "ilI.,'!|":
+            width_units += 0.30
+        elif character in "MW@%&":
+            width_units += 0.88
+        elif contains_arabic(character):
+            width_units += 0.62
+        elif character.isupper():
+            width_units += 0.64
+        else:
+            width_units += 0.54
+    return TextMeasurement(
+        x=0.0,
+        y=-0.80 * font_size,
+        width=width_units * font_size,
+        height=float(font_size),
+    )
+
+
+def _wrap(
+    text: str,
+    max_width: float,
+    max_lines: int,
+    *,
+    measure: MeasureText,
+    font_size: int,
+    font_weight: int,
+    font_family: str,
+    direction: str,
+) -> tuple[str, ...] | None:
+    """Return the best measured line breaks, or None when the text cannot fit."""
     if not text:
         return ()
-    lines: list[str] = []
-    current = ""
-    for word in text.split():
-        trial = word if not current else f"{current} {word}"
-        if len(trial) <= max_chars or not current:
-            current = trial
-        else:
-            lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    if len(lines) > max_lines:
-        head = lines[: max_lines - 1]
-        tail = " ".join(lines[max_lines - 1 :])
-        lines = head + [tail]
-    return tuple(lines)
+    words = text.split()
+    if not words:
+        return ()
+
+    widths: dict[tuple[int, int], float] = {}
+
+    def _width(start: int, end: int) -> float:
+        key = (start, end)
+        if key not in widths:
+            widths[key] = measure(
+                " ".join(words[start:end]),
+                font_size,
+                font_weight,
+                font_family,
+                direction,
+            ).width
+        return widths[key]
+
+    # Prefer the fewest lines that fit. Within that line count minimize ragging, with a strong
+    # widow penalty when the final line is one short word and a balanced break exists.
+    for line_count in range(1, max_lines + 1):
+        best: tuple[float, tuple[str, ...]] | None = None
+
+        def _search(start: int, remaining: int, lines: tuple[str, ...], score: float) -> None:
+            nonlocal best
+            if remaining == 1:
+                if start >= len(words) or _width(start, len(words)) > max_width:
+                    return
+                final = " ".join(words[start:])
+                final_score = score + (max_width - _width(start, len(words))) ** 2 * 0.15
+                if len(words) - start == 1 and len(words[start]) <= 5 and lines:
+                    final_score += max_width**2
+                candidate = (*lines, final)
+                if best is None or (final_score, candidate) < best:
+                    best = (final_score, candidate)
+                return
+
+            last_end = len(words) - remaining + 1
+            for end in range(start + 1, last_end + 1):
+                width = _width(start, end)
+                if width > max_width:
+                    break
+                line = " ".join(words[start:end])
+                _search(
+                    end,
+                    remaining - 1,
+                    (*lines, line),
+                    score + (max_width - width) ** 2,
+                )
+
+        _search(0, line_count, (), 0.0)
+        if best is not None:
+            return best[1]
+    return None
 
 
 # =============================================================================================
@@ -218,14 +323,35 @@ def _wrap(text: str, max_chars: int, max_lines: int) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class _TextLine:
+    role: Literal["headline", "highlight", "support", "cta"]
     text: str
     x: int
     baseline: int
     font: int
     weight: int
+    font_family: str
     fill: str
     opacity: float
     anchor: str
+    bbox: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class _ResolvedFonts:
+    heading: EmbeddedFont | None
+    body: EmbeddedFont | None
+    script: EmbeddedFont | None
+    heading_family: str
+    body_family: str
+    script_family: str
+
+    @property
+    def face_css(self) -> str:
+        return "".join(
+            font.face_css
+            for font in (self.heading, self.body, self.script)
+            if font is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -237,6 +363,8 @@ class _NikahComposition:
     rule_ids: str
     palette: dict[str, str]
     font_family: str
+    metrics_source: Literal["chromium", "fallback"]
+    safe_bbox: tuple[int, int, int, int]
     ground_gradient: bool
     lattice_on: bool
     # wordmark
@@ -253,6 +381,7 @@ class _NikahComposition:
     highlight_x: int
     highlight_y: int
     highlight_font: int
+    highlight_family: str
     highlight_bbox: tuple[int, int, int, int]
     # support
     support_lines: tuple[_TextLine, ...]
@@ -272,10 +401,125 @@ class _NikahComposition:
     cta_cx: int
     cta_top: int
     cta_h: int
+    cta_family: str
     cta_bbox: tuple[int, int, int, int]
+    cta_text_bbox: tuple[int, int, int, int]
     # backdrop bboxes
     bg_bbox: tuple[int, int, int, int]
     motif_bbox: tuple[int, int, int, int]
+
+    @property
+    def message(self) -> MessageGeometry:
+        lines = (*self.headline_lines, *self.support_lines)
+        if self.highlight_word:
+            lines = (
+                *lines,
+                _TextLine(
+                    role="highlight",
+                    text=self.highlight_word,
+                    x=self.highlight_x,
+                    baseline=self.highlight_y + round(self.highlight_bbox[3] / 2),
+                    font=self.highlight_font,
+                    weight=760,
+                    font_family=self.highlight_family,
+                    fill=self.palette["cloud"],
+                    opacity=1.0,
+                    anchor="start",
+                    bbox=_highlight_text_bbox(self),
+                ),
+            )
+        if self.cta_label:
+            lines = (
+                *lines,
+                _TextLine(
+                    role="cta",
+                    text=self.cta_label,
+                    x=self.cta_cx,
+                    baseline=self.cta_top + round(self.cta_h / 2),
+                    font=round(self.cta_h * 0.40),
+                    weight=700,
+                    font_family=self.cta_family,
+                    fill=self.palette["cloud"],
+                    opacity=1.0,
+                    anchor="middle",
+                    bbox=self.cta_text_bbox,
+                ),
+            )
+        return MessageGeometry(
+            lines=[
+                MessageLineGeometry(
+                    role=line.role,
+                    text=line.text,
+                    bbox=_rect(line.bbox),
+                    baseline=line.baseline,
+                    font_family=line.font_family,
+                    font_size=line.font,
+                    font_weight=line.weight,
+                    colour=line.fill,
+                    opacity=line.opacity,
+                )
+                for line in lines
+            ]
+        )
+
+    @property
+    def scaffold(self) -> ScaffoldGeometry:
+        regions = [
+            ScaffoldRegion(name="logo", role="content", bbox=_rect(self.wm_bbox)),
+            ScaffoldRegion(name="headline", role="content", bbox=_rect(self.headline_bbox)),
+        ]
+        if self.highlight_word:
+            regions.append(
+                ScaffoldRegion(
+                    name="highlight",
+                    role="content",
+                    bbox=_rect(self.highlight_bbox),
+                )
+            )
+        if self.support_lines:
+            regions.append(
+                ScaffoldRegion(name="support", role="content", bbox=_rect(self.support_bbox))
+            )
+        if self.cta_label:
+            regions.append(
+                ScaffoldRegion(name="cta", role="content", bbox=_rect(self.cta_bbox))
+            )
+        hero_role: Literal["decoration", "container"] = (
+            "container" if self.archetype == "ayah_translation" else "decoration"
+        )
+        regions.extend(
+            (
+                ScaffoldRegion(name="hero", role=hero_role, bbox=_rect(self.hero_bbox)),
+                ScaffoldRegion(name="glow", role=hero_role, bbox=_rect(self.glow_bbox)),
+            )
+        )
+        return ScaffoldGeometry(
+            archetype=self.archetype,
+            measurement_engine=self.metrics_source,
+            safe_area=_rect(self.safe_bbox),
+            regions=regions,
+        )
+
+
+@dataclass(frozen=True)
+class NikahRenderResult:
+    svg: str
+    png: bytes
+    scaffold: ScaffoldGeometry
+    message: MessageGeometry
+
+
+def _rect(bbox: tuple[int, int, int, int]) -> CreativeRect:
+    return CreativeRect(x=bbox[0], y=bbox[1], width=bbox[2], height=bbox[3])
+
+
+def _highlight_text_bbox(comp: _NikahComposition) -> tuple[int, int, int, int]:
+    return (
+        comp.highlight_x + round(0.45 * comp.highlight_font),
+        comp.highlight_y + round(0.22 * comp.highlight_font),
+        max(1, comp.highlight_bbox[2] - round(0.90 * comp.highlight_font)),
+        max(1, comp.highlight_bbox[3] - round(0.44 * comp.highlight_font)),
+    )
 
 
 # Per-archetype composition parameters. Kept as data so both archetypes share one code path.
@@ -322,6 +566,78 @@ _ARCHETYPE_PARAMS = {
 }
 
 
+def _resolve_fonts(
+    *,
+    heading_font_ref: str | None,
+    body_font_ref: str | None,
+    script_font_ref: str | None,
+    needs_script: bool,
+) -> _ResolvedFonts:
+    heading = (
+        embed_font_face(heading_font_ref, family=_HEADING_FONT_FAMILY)
+        if heading_font_ref
+        else None
+    )
+    body = (
+        embed_font_face(body_font_ref, family=_BODY_FONT_FAMILY)
+        if body_font_ref
+        else None
+    )
+    script = (
+        embed_font_face(
+            script_font_ref or str(builtin_arabic_font_path()),
+            family=_SCRIPT_FONT_FAMILY,
+        )
+        if needs_script
+        else None
+    )
+    return _ResolvedFonts(
+        heading=heading,
+        body=body,
+        script=script,
+        heading_family=(
+            font_family_stack(heading.family, _SYSTEM_FONT) if heading else _SYSTEM_FONT
+        ),
+        body_family=font_family_stack(body.family, _SYSTEM_FONT) if body else _SYSTEM_FONT,
+        script_family=(
+            font_family_stack(script.family, _SYSTEM_FONT) if script else _SYSTEM_FONT
+        ),
+    )
+
+
+def _positioned_text_bbox(
+    metric: TextMeasurement,
+    *,
+    x: float,
+    baseline: float,
+    anchor: str,
+) -> tuple[int, int, int, int]:
+    if anchor == "middle":
+        left = x - metric.width / 2
+    elif anchor == "end":
+        left = x - metric.width
+    else:
+        left = x
+    return (
+        round(left),
+        round(baseline + metric.y),
+        max(1, round(metric.width)),
+        max(1, round(metric.height)),
+    )
+
+
+def _union_bboxes(
+    bboxes: list[tuple[int, int, int, int]],
+) -> tuple[int, int, int, int] | None:
+    if not bboxes:
+        return None
+    left = min(bbox[0] for bbox in bboxes)
+    top = min(bbox[1] for bbox in bboxes)
+    right = max(bbox[0] + bbox[2] for bbox in bboxes)
+    bottom = max(bbox[1] + bbox[3] for bbox in bboxes)
+    return left, top, max(1, right - left), max(1, bottom - top)
+
+
 def _compose(
     archetype: str,
     *,
@@ -331,6 +647,10 @@ def _compose(
     logo_ref: str | None,
     lattice_backdrop: bool,
     ground_gradient: bool | None = None,
+    measure: MeasureText = _fallback_measure,
+    fonts: _ResolvedFonts | None = None,
+    direction: str = "ltr",
+    metrics_source: Literal["chromium", "fallback"] = "fallback",
 ) -> _NikahComposition:
     if archetype not in _ARCHETYPE_PARAMS:
         choices = ", ".join(sorted(_ARCHETYPE_PARAMS))
@@ -342,9 +662,20 @@ def _compose(
     palette = _palette(profile)
     fmt = get_format(format_key)  # fail loud through the established format registry
     w, h = fmt.width, fmt.height
-    # Left/right insets are unused: SN centres its single content column (generous whitespace),
-    # so only the top/bottom safe zone drives vertical placement.
-    st, sb = fmt.safe_zone.top, fmt.safe_zone.bottom
+    safe_left = fmt.safe_zone.left
+    safe_top = fmt.safe_zone.top
+    safe_right = w - fmt.safe_zone.right
+    safe_bottom = h - fmt.safe_zone.bottom
+    safe_width = safe_right - safe_left
+    safe_height = safe_bottom - safe_top
+    safe_bbox = (safe_left, safe_top, safe_width, safe_height)
+    if fonts is None:
+        fonts = _resolve_fonts(
+            heading_font_ref=None,
+            body_font_ref=None,
+            script_font_ref=None,
+            needs_script=direction == "rtl" or archetype == "ayah_translation",
+        )
 
     grid_step = max(8, round(min(w, h) / 24))
     rule_ids = " ".join(rule.id for rule in load_rules(_NIKAH_PROFILE_ID))
@@ -372,34 +703,30 @@ def _compose(
     if is_ayah and not _contains_latin(support):
         raise ValueError("'ayah_translation' requires Latin-script 'translation' copy")
     cta_label = _copy_value(copy, "cta")
+    if len(headline.split()) > 60 or (support is not None and len(support.split()) > 80):
+        raise NikahLayoutError(
+            f"Simply Nikah {archetype} content does not fit {format_key} "
+            "within the permitted copy capacity"
+        )
 
     # --- wordmark -----------------------------------------------------------------------------
     wm_cx = round(w / 2)
-    wm_baseline = round(st + 0.040 * h)
     wm_h = max(40, round(0.033 * h))
-    wm_w = round(w * 0.5)
-    wm_bbox = (round(w / 2 - wm_w / 2), wm_baseline - wm_h, wm_w, round(wm_h * 1.4))
+    wm_baseline = safe_top + wm_h
+    wm_w = min(round(w * 0.5), safe_width)
+    wm_bbox = (round(w / 2 - wm_w / 2), safe_top, wm_w, round(wm_h * 1.15))
 
     # --- headline column ----------------------------------------------------------------------
-    head_font = round(params["headline_font_frac"] * w)
+    base_head_font = round(params["headline_font_frac"] * w)
     head_weight = int(params["headline_weight"])
-    head_lh = round(head_font * 1.08)
-    if is_ayah:
-        panel_x = round(w * 0.10)
-        panel_y = round(st + 0.14 * h)
-        panel_w = round(w * 0.80)
-        panel_h = round(min(0.30 * h, 0.52 * w))
-        panel_padding = round(w * 0.065)
-        head_width = panel_w - 2 * panel_padding
-        head_x0 = panel_x + panel_padding
-        head_cx = panel_x + panel_w - panel_padding
-        head_top = panel_y + round(panel_h * 0.15)
-    else:
-        head_width = round(w * 0.778)
-        head_x0 = round((w - head_width) / 2)
-        head_cx = round(w / 2)
-        head_top = round(st + 0.115 * h)
-    max_chars = max(1, int(head_width / (head_font * prim._HEAVY_GLYPH_FACTOR)))
+    head_width = min(round(w * 0.778), safe_width)
+    head_x0 = round((w - head_width) / 2)
+    head_cx = round(w / 2)
+    head_top = wm_bbox[1] + wm_bbox[3] + round(0.035 * h)
+    heading_direction = "rtl" if is_ayah else direction
+    heading_family = (
+        fonts.script_family if is_ayah or contains_arabic(headline) else fonts.heading_family
+    )
 
     # Split the headline around the (case-insensitive) highlight occurrence. v1 stacks the boxed
     # word on its own centred line (before-words above, after-words below) rather than true inline
@@ -410,145 +737,330 @@ def _compose(
     if highlight is not None:
         idx = headline.lower().find(highlight.lower())
         if idx < 0:
-            raise ValueError(
+            raise NikahLayoutError(
                 f"'highlight' {highlight!r} must be a case-insensitive substring of the headline"
             )
         before_text = headline[:idx].strip()
         highlight_word = headline[idx : idx + len(highlight)].strip()
         after_text = headline[idx + len(highlight) :].strip()
 
-    y = head_top
-    headline_lines: list[_TextLine] = []
-
-    def _emit_block(text: str) -> None:
-        nonlocal y
-        for line in _wrap(text, max_chars, params["headline_max_lines"]):
-            baseline = y + head_font
-            headline_lines.append(
-                _TextLine(
-                    line,
-                    head_cx,
-                    baseline,
-                    head_font,
-                    head_weight,
-                    palette["plum"],
-                    1.0,
-                    "end" if is_ayah else "middle",
-                )
-            )
-            y += head_lh
-
-    _emit_block(before_text)
-
-    highlight_x = head_x0
-    highlight_y = y
-    highlight_font = head_font
-    highlight_bbox = (head_x0, y, head_width, 1)
-    if highlight_word:
-        box_w = len(highlight_word) * prim._HEAVY_GLYPH_FACTOR * head_font + 2 * 0.45 * head_font
-        box_h = head_font + 2 * 0.22 * head_font
-        highlight_x = round(head_cx - box_w / 2)
-        highlight_y = round(y)
-        highlight_bbox = (highlight_x, highlight_y, round(box_w), round(box_h))
-        y += round(box_h) + round(head_font * 0.14)
-
-    _emit_block(after_text)
-
-    headline_block_bottom = y
-    if headline_lines:
-        top_of_block = headline_lines[0].baseline - head_font
-    else:
-        top_of_block = head_top
-    headline_bbox = (head_x0, top_of_block, head_width, max(1, headline_block_bottom - top_of_block))
-
-    # --- support ------------------------------------------------------------------------------
-    support_font = round(params["support_font_frac"] * w)
-    support_lh = round(support_font * 1.45)
-    support_margin = round(params["support_margin_frac"] * w)
-    support_top = (
-        panel_y + panel_h + round(0.045 * h)
-        if is_ayah
-        else headline_block_bottom + support_margin
-    )
-    support_lines: list[_TextLine] = []
-    if support:
-        sup_chars = max(1, int(head_width / (support_font * 0.52)))
-        sy = support_top
-        support_x = round(w / 2) if is_ayah else head_cx
-        for line in _wrap(support, sup_chars, 2):
-            baseline = sy + support_font
-            support_lines.append(
-                _TextLine(
-                    line,
-                    support_x,
-                    baseline,
-                    support_font,
-                    430,
-                    palette["plum"],
-                    float(params["support_opacity"]),
-                    "middle",
-                )
-            )
-            sy += support_lh
-        support_block_bottom = sy
-    else:
-        support_block_bottom = support_top
-    support_bbox = (head_x0, support_top, head_width, max(1, support_block_bottom - support_top))
-
     # --- cta ----------------------------------------------------------------------------------
     cta_h = round(0.062 * h)
-    # Pill bottom flush against the bottom safe zone (the table's placement; see the build note in
-    # the report — the spec's extra "-0.030·H" term contradicts its own coordinate table).
-    cta_top = h - sb - cta_h
+    cta_top = safe_bottom - cta_h
+    cta_font = round(cta_h * 0.40)
+    cta_family = (
+        fonts.script_family
+        if cta_label and contains_arabic(cta_label)
+        else fonts.body_family
+    )
     if cta_label:
-        cta_font = cta_h * 0.40
-        pill_w = max(cta_h * 2.2, len(cta_label) * prim._HEAVY_GLYPH_FACTOR * cta_font + 2 * cta_h * 0.72)
+        cta_metric = measure(cta_label, cta_font, 700, cta_family, direction)
+        pill_w = max(cta_h * 2.2, cta_metric.width + 2 * cta_h * 0.72)
+        if pill_w > safe_width:
+            raise NikahLayoutError(
+                f"Simply Nikah {archetype} content does not fit {format_key}: CTA exceeds safe width"
+            )
         cta_bbox = (round(w / 2 - pill_w / 2), cta_top, round(pill_w), cta_h)
+        cta_text_bbox = (
+            round(w / 2 - cta_metric.width / 2),
+            round(cta_top + cta_h / 2 - cta_metric.height / 2),
+            max(1, round(cta_metric.width)),
+            max(1, round(cta_metric.height)),
+        )
     else:
         cta_bbox = (round(w / 2), cta_top, 0, 0)
+        cta_text_bbox = (round(w / 2), cta_top, 1, 1)
 
-    # --- hero + glow --------------------------------------------------------------------------
-    if is_ayah:
-        hero_cx = round(w / 2)
-        hero_cy = panel_y + round(panel_h / 2)
-        hero_box = panel_w
-        glow_rx = round(panel_w * 0.52)
-        glow_ry = round(panel_h * 0.62)
-        hero_bbox = (panel_x, panel_y, panel_w, panel_h)
-        glow_bbox = (
-            hero_cx - glow_rx,
-            hero_cy - glow_ry,
-            2 * glow_rx,
-            2 * glow_ry,
+    # --- measured text stack + largest remaining hero rectangle -------------------------------
+    base_support_font = round(params["support_font_frac"] * w)
+    min_scale = 0.78
+    selected: tuple[
+        int,
+        int,
+        list[_TextLine],
+        tuple[int, int, int, int],
+        str | None,
+        int,
+        int,
+        tuple[int, int, int, int],
+        list[_TextLine],
+        tuple[int, int, int, int],
+        tuple[int, int, int, int],
+        tuple[int, int, int, int],
+        int,
+        int,
+        int,
+        int,
+        int,
+    ] | None = None
+
+    min_head_font = max(1, round(base_head_font * min_scale))
+    min_support_font = max(1, round(base_support_font * min_scale))
+    for head_font in range(base_head_font, min_head_font - 1, -2):
+        head_lh = round(head_font * 1.08)
+        before_lines = _wrap(
+            before_text,
+            head_width,
+            int(params["headline_max_lines"]),
+            measure=measure,
+            font_size=head_font,
+            font_weight=head_weight,
+            font_family=heading_family,
+            direction=heading_direction,
         )
-    else:
-        hero_cx = round(w / 2)
-        hero_cy = round(st + params["hero_center_frac"] * (h - st - sb))
-        hero_frac_box = params["hero_frac"] * w
-        free_gap = cta_top - support_block_bottom
-        hero_box = (
-            round(min(hero_frac_box, 0.85 * free_gap))
-            if free_gap > 0
-            else round(hero_frac_box)
+        after_lines = _wrap(
+            after_text,
+            head_width,
+            int(params["headline_max_lines"]),
+            measure=measure,
+            font_size=head_font,
+            font_weight=head_weight,
+            font_family=heading_family,
+            direction=heading_direction,
         )
-        hero_box = max(hero_box, round(hero_frac_box * 0.5))
-        half = hero_box / 2
-        glow_rx = round(1.35 * half)
-        glow_ry = round(1.20 * half)
-        hero_bbox = (
-            round(hero_cx - half),
-            round(hero_cy - half),
-            hero_box,
-            hero_box,
-        )
-        glow_bbox = (
-            hero_cx - glow_rx,
-            hero_cy - glow_ry,
-            2 * glow_rx,
-            2 * glow_ry,
+        if before_lines is None or after_lines is None:
+            continue
+        if len(before_lines) + len(after_lines) > int(params["headline_max_lines"]):
+            continue
+
+        for support_font in range(base_support_font, min_support_font - 1, -1):
+            support_family = (
+                fonts.script_family
+                if support and contains_arabic(support)
+                else fonts.body_family
+            )
+            support_direction = "ltr" if is_ayah else direction
+            wrapped_support = (
+                _wrap(
+                    support,
+                    head_width,
+                    2,
+                    measure=measure,
+                    font_size=support_font,
+                    font_weight=430,
+                    font_family=support_family,
+                    direction=support_direction,
+                )
+                if support
+                else ()
+            )
+            if wrapped_support is None:
+                continue
+
+            y = head_top
+            built_headline: list[_TextLine] = []
+
+            def _append_headline(line_text: str) -> None:
+                nonlocal y
+                metric = measure(
+                    line_text,
+                    head_font,
+                    head_weight,
+                    heading_family,
+                    heading_direction,
+                )
+                baseline = y - metric.y
+                anchor = "end" if is_ayah else "middle"
+                x = head_x0 + head_width if is_ayah else head_cx
+                built_headline.append(
+                    _TextLine(
+                        role="headline",
+                        text=line_text,
+                        x=x,
+                        baseline=round(baseline),
+                        font=head_font,
+                        weight=head_weight,
+                        font_family=heading_family,
+                        fill=palette["plum"],
+                        opacity=1.0,
+                        anchor=anchor,
+                        bbox=_positioned_text_bbox(metric, x=x, baseline=baseline, anchor=anchor),
+                    )
+                )
+                y += head_lh
+
+            for line_text in before_lines:
+                _append_headline(line_text)
+
+            highlight_x = head_x0
+            highlight_y = round(y)
+            highlight_bbox = (head_x0, round(y), 1, 1)
+            if highlight_word:
+                highlight_metric = measure(
+                    highlight_word.upper(),
+                    head_font,
+                    760,
+                    heading_family,
+                    direction,
+                )
+                box_w = round(highlight_metric.width + 2 * 0.45 * head_font)
+                box_h = round(highlight_metric.height + 2 * 0.22 * head_font)
+                if box_w > head_width:
+                    continue
+                highlight_x = round(head_cx - box_w / 2)
+                highlight_bbox = (highlight_x, highlight_y, box_w, box_h)
+                y += box_h + round(head_font * 0.14)
+
+            for line_text in after_lines:
+                _append_headline(line_text)
+
+            headline_bbox = _union_bboxes(
+                [line.bbox for line in built_headline]
+                + ([highlight_bbox] if highlight_word else [])
+            )
+            if headline_bbox is None:
+                headline_bbox = (head_x0, head_top, 1, 1)
+
+            if is_ayah:
+                panel_padding = round(w * 0.045)
+                panel_x = max(safe_left, round(w * 0.10))
+                panel_w = min(round(w * 0.80), safe_width)
+                panel_y = max(safe_top, headline_bbox[1] - panel_padding)
+                panel_bottom = headline_bbox[1] + headline_bbox[3] + panel_padding
+                panel_h = panel_bottom - panel_y
+                hero_bbox = (panel_x, panel_y, panel_w, panel_h)
+                support_top = panel_bottom + round(0.035 * h)
+            else:
+                hero_bbox = (0, 0, 1, 1)
+                support_top = headline_bbox[1] + headline_bbox[3] + round(
+                    params["support_margin_frac"] * w
+                )
+
+            support_lh = round(support_font * 1.45)
+            sy = support_top
+            built_support: list[_TextLine] = []
+            for line_text in wrapped_support:
+                metric = measure(
+                    line_text,
+                    support_font,
+                    430,
+                    support_family,
+                    support_direction,
+                )
+                baseline = sy - metric.y
+                built_support.append(
+                    _TextLine(
+                        role="support",
+                        text=line_text,
+                        x=head_cx,
+                        baseline=round(baseline),
+                        font=support_font,
+                        weight=430,
+                        font_family=support_family,
+                        fill=palette["plum"],
+                        opacity=float(params["support_opacity"]),
+                        anchor="middle",
+                        bbox=_positioned_text_bbox(
+                            metric,
+                            x=head_cx,
+                            baseline=baseline,
+                            anchor="middle",
+                        ),
+                    )
+                )
+                sy += support_lh
+            support_bbox = _union_bboxes([line.bbox for line in built_support])
+            if support_bbox is None:
+                support_bbox = (head_cx, round(support_top), 1, 1)
+            support_bottom = support_bbox[1] + support_bbox[3]
+
+            if is_ayah:
+                glow_pad_x = round(hero_bbox[2] * 0.04)
+                glow_pad_y = round(hero_bbox[3] * 0.08)
+                glow_bbox = (
+                    max(safe_left, hero_bbox[0] - glow_pad_x),
+                    max(safe_top, hero_bbox[1] - glow_pad_y),
+                    min(safe_right, hero_bbox[0] + hero_bbox[2] + glow_pad_x)
+                    - max(safe_left, hero_bbox[0] - glow_pad_x),
+                    min(safe_bottom, hero_bbox[1] + hero_bbox[3] + glow_pad_y)
+                    - max(safe_top, hero_bbox[1] - glow_pad_y),
+                )
+                if support_bottom + round(0.025 * h) > cta_top:
+                    continue
+                hero_cx = hero_bbox[0] + round(hero_bbox[2] / 2)
+                hero_cy = hero_bbox[1] + round(hero_bbox[3] / 2)
+                hero_box = hero_bbox[2]
+                glow_rx = round(glow_bbox[2] / 2)
+                glow_ry = round(glow_bbox[3] / 2)
+            else:
+                free_top = support_bottom + round(0.025 * h)
+                free_bottom = cta_top - round(0.025 * h)
+                free_height = free_bottom - free_top
+                max_hero = round(float(params["hero_frac"]) * w)
+                hero_box = round(
+                    min(max_hero, safe_width / 1.35, free_height / 1.20)
+                )
+                min_hero = round(w * 0.10)
+                if hero_box < min_hero:
+                    continue
+                hero_cx = round((safe_left + safe_right) / 2)
+                hero_cy = round((free_top + free_bottom) / 2)
+                half = hero_box / 2
+                hero_bbox = (
+                    round(hero_cx - half),
+                    round(hero_cy - half),
+                    hero_box,
+                    hero_box,
+                )
+                glow_rx = round(1.35 * half)
+                glow_ry = round(1.20 * half)
+                glow_bbox = (
+                    hero_cx - glow_rx,
+                    hero_cy - glow_ry,
+                    2 * glow_rx,
+                    2 * glow_ry,
+                )
+
+            selected = (
+                head_font,
+                support_font,
+                built_headline,
+                headline_bbox,
+                highlight_word,
+                highlight_x,
+                highlight_y,
+                highlight_bbox,
+                built_support,
+                support_bbox,
+                hero_bbox,
+                glow_bbox,
+                hero_cx,
+                hero_cy,
+                hero_box,
+                glow_rx,
+                glow_ry,
+            )
+            break
+        if selected is not None:
+            break
+
+    if selected is None:
+        raise NikahLayoutError(
+            f"Simply Nikah {archetype} content does not fit {format_key} "
+            "within safe margins and permitted font shrink range"
         )
 
-    return _NikahComposition(
+    (
+        head_font,
+        _support_font,
+        headline_lines,
+        headline_bbox,
+        highlight_word,
+        highlight_x,
+        highlight_y,
+        highlight_bbox,
+        support_lines,
+        support_bbox,
+        hero_bbox,
+        glow_bbox,
+        hero_cx,
+        hero_cy,
+        hero_box,
+        glow_rx,
+        glow_ry,
+    ) = selected
+
+    composition = _NikahComposition(
         archetype=archetype,
         w=w,
         h=h,
@@ -556,6 +1068,8 @@ def _compose(
         rule_ids=rule_ids,
         palette=palette,
         font_family=_SYSTEM_FONT,
+        metrics_source=metrics_source,
+        safe_bbox=safe_bbox,
         ground_gradient=ground_gradient,
         lattice_on=lattice_backdrop,
         wm_cx=wm_cx,
@@ -568,7 +1082,8 @@ def _compose(
         highlight_word=highlight_word,
         highlight_x=highlight_x,
         highlight_y=highlight_y,
-        highlight_font=highlight_font,
+        highlight_font=head_font,
+        highlight_family=heading_family,
         highlight_bbox=highlight_bbox,
         support_lines=tuple(support_lines),
         support_bbox=support_bbox,
@@ -585,10 +1100,65 @@ def _compose(
         cta_cx=round(w / 2),
         cta_top=cta_top,
         cta_h=cta_h,
+        cta_family=cta_family,
         cta_bbox=cta_bbox,
+        cta_text_bbox=cta_text_bbox,
         bg_bbox=(0, 0, w, h),
         motif_bbox=(0, 0, w, h),
     )
+    _validate_composition(composition)
+    return composition
+
+
+def _validate_composition(comp: _NikahComposition) -> None:
+    safe_x, safe_y, safe_width, safe_height = comp.safe_bbox
+    safe_right = safe_x + safe_width
+    safe_bottom = safe_y + safe_height
+
+    def _inside(bbox: tuple[int, int, int, int]) -> bool:
+        x, y, width, height = bbox
+        return (
+            x >= safe_x
+            and y >= safe_y
+            and x + width <= safe_right
+            and y + height <= safe_bottom
+        )
+
+    checked = [comp.wm_bbox, comp.headline_bbox, comp.hero_bbox, comp.glow_bbox]
+    if comp.highlight_word:
+        checked.append(comp.highlight_bbox)
+    if comp.support_lines:
+        checked.append(comp.support_bbox)
+    if comp.cta_label:
+        checked.append(comp.cta_bbox)
+    if not all(_inside(bbox) for bbox in checked):
+        raise NikahLayoutError(
+            f"Simply Nikah {comp.archetype} layout violates the safe margins"
+        )
+
+    if comp.archetype == "ayah_translation":
+        return
+    decorations = (comp.hero_bbox, comp.glow_bbox)
+    for line in comp.message.lines:
+        text_bbox = (
+            line.bbox.x,
+            line.bbox.y,
+            line.bbox.width,
+            line.bbox.height,
+        )
+        if any(_bbox_intersects(text_bbox, decoration) for decoration in decorations):
+            raise NikahLayoutError(
+                f"Simply Nikah {comp.archetype} layout has text/decoration overlap"
+            )
+
+
+def _bbox_intersects(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    ax, ay, aw, ah = first
+    bx, by, bw, bh = second
+    return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
 
 
 # =============================================================================================
@@ -720,6 +1290,9 @@ def build_nikah_svg(
     body_font_ref: str | None = None,
     direction: str = "ltr",
     script_font_ref: str | None = None,
+    _measure: MeasureText | None = None,
+    _composition: _NikahComposition | None = None,
+    _fonts: _ResolvedFonts | None = None,
 ) -> str:
     """Standalone layered SVG matching svg.py's named-layer contract.
 
@@ -740,36 +1313,27 @@ def build_nikah_svg(
     if direction not in {"ltr", "rtl"}:
         raise ValueError("Simply Nikah text direction must be 'ltr' or 'rtl'")
 
-    comp = _compose(
+    needs_script_font = direction == "rtl" or archetype == "ayah_translation"
+    fonts = _fonts or _resolve_fonts(
+        heading_font_ref=heading_font_ref,
+        body_font_ref=body_font_ref,
+        script_font_ref=script_font_ref,
+        needs_script=needs_script_font,
+    )
+    comp = _composition or _compose(
         archetype,
         copy=copy,
         format_key=format_key,
         hero_symbol=hero_symbol,
         logo_ref=logo_ref,
         lattice_backdrop=lattice_backdrop,
+        measure=_measure or _fallback_measure,
+        fonts=fonts,
+        direction=direction,
     )
-
-    # Resolve optional brand fonts up front (fail loud before building the tree). Distinct
-    # @font-face families let heading and body use different files simultaneously; None => the
-    # system font stack, so the un-branded render is byte-identical to today.
-    heading_font = embed_font_face(heading_font_ref, family=_HEADING_FONT_FAMILY) if heading_font_ref else None
-    body_font = embed_font_face(body_font_ref, family=_BODY_FONT_FAMILY) if body_font_ref else None
-    needs_script_font = direction == "rtl" or archetype == "ayah_translation"
-    script_font = (
-        embed_font_face(
-            script_font_ref or str(builtin_arabic_font_path()),
-            family=_SCRIPT_FONT_FAMILY,
-        )
-        if needs_script_font
-        else None
-    )
-    heading_family = (
-        font_family_stack(heading_font.family, _SYSTEM_FONT) if heading_font else _SYSTEM_FONT
-    )
-    body_family = font_family_stack(body_font.family, _SYSTEM_FONT) if body_font else _SYSTEM_FONT
-    script_family = (
-        font_family_stack(script_font.family, _SYSTEM_FONT) if script_font else _SYSTEM_FONT
-    )
+    heading_family = fonts.heading_family
+    body_family = fonts.body_family
+    script_family = fonts.script_family
 
     p = comp.palette
     root = ElementTree.Element(
@@ -781,19 +1345,18 @@ def build_nikah_svg(
             "viewBox": f"0 0 {comp.w} {comp.h}",
             "data-grid-step": str(comp.grid_step),
             "data-design-rule-ids": comp.rule_ids,
+            "data-layout-engine": "nikah-layout-v1",
+            "data-text-metrics": comp.metrics_source,
+            "data-archetype": comp.archetype,
+            "data-safe-area": " ".join(str(value) for value in comp.safe_bbox),
         },
     )
 
     # Optional brand-font faces go in a document <style> so Playwright loads them before paint.
     # Only emitted when a font is supplied — the no-font path adds nothing (byte-identical).
-    face_blocks = [
-        font.face_css
-        for font in (heading_font, body_font, script_font)
-        if font is not None
-    ]
-    if face_blocks:
+    if fonts.face_css:
         style = ElementTree.SubElement(root, _svg_tag("style"), {"type": "text/css"})
-        style.text = "".join(face_blocks)
+        style.text = fonts.face_css
 
     layers: dict[str, ElementTree.Element] = {}
     bboxes: dict[str, tuple[int, int, int, int]] = {}
@@ -820,6 +1383,12 @@ def build_nikah_svg(
 
     # layer-glow: blush radial glow behind the hero
     glow = _layer(root, "layer-glow", comp.glow_bbox)
+    glow.set(
+        "data-occluding",
+        "false" if comp.archetype == "ayah_translation" else "true",
+    )
+    if comp.archetype == "ayah_translation":
+        glow.set("data-container", "true")
     _embed_fragment(
         glow,
         prim.glow_ellipse(
@@ -831,6 +1400,12 @@ def build_nikah_svg(
 
     # layer-hero: the vector hero symbol (figure groups inside carry data-figure/data-faceless)
     hero = _layer(root, "layer-hero", comp.hero_bbox)
+    hero.set(
+        "data-occluding",
+        "false" if comp.archetype == "ayah_translation" else "true",
+    )
+    if comp.archetype == "ayah_translation":
+        hero.set("data-container", "true")
     _embed_fragment(hero, _render_hero_fragment(comp))
     layers["layer-hero"], bboxes["layer-hero"] = hero, comp.hero_bbox
 
@@ -876,12 +1451,19 @@ def build_nikah_svg(
             comp.highlight_word,
             x=comp.highlight_x, y=comp.highlight_y, font_size=comp.highlight_font,
             box_fill=p["plum"], text_fill=p["cloud"], font_family=highlight_family,
+            text_width=_highlight_text_bbox(comp)[2],
         )
         _embed_fragment(highlight, box_svg)
+        for text in highlight.iter(_svg_tag("text")):
+            text.set("data-role", "highlight")
+            text.set(
+                "data-bbox",
+                " ".join(str(value) for value in _highlight_text_bbox(comp)),
+            )
         if direction == "rtl" and archetype != "ayah_translation":
             for text in highlight.iter(_svg_tag("text")):
                 text.set("direction", "rtl")
-                text.set("text-anchor", "end")
+                text.set("text-anchor", "start")
                 text.set(
                     "x",
                     f"{comp.highlight_x + _bw - 0.45 * comp.highlight_font:g}",
@@ -915,13 +1497,20 @@ def build_nikah_svg(
         pill_svg, _pw = prim.cta_pill(
             comp.cta_cx, comp.cta_top, height=comp.cta_h, label=comp.cta_label,
             fill=p["plum"], text_fill=p["cloud"], font_family=cta_family,
+            text_width=comp.cta_text_bbox[2],
         )
         _embed_fragment(cta, pill_svg)
+        for text in cta.iter(_svg_tag("text")):
+            text.set("data-role", "cta")
+            text.set(
+                "data-bbox",
+                " ".join(str(value) for value in comp.cta_text_bbox),
+            )
         if direction == "rtl" and archetype != "ayah_translation":
             cta_right = comp.cta_cx + _pw / 2 - comp.cta_h * 0.72
             for text in cta.iter(_svg_tag("text")):
                 text.set("direction", "rtl")
-                text.set("text-anchor", "end")
+                text.set("text-anchor", "start")
                 text.set("x", f"{cta_right:g}")
     layers["layer-cta"], bboxes["layer-cta"] = cta, comp.cta_bbox
 
@@ -939,11 +1528,15 @@ def _add_text_line_with_font(
     right_edge: int | None = None,
     emit_ltr: bool = False,
 ) -> None:
-    anchor = "end" if direction == "rtl" else line.anchor
+    # In SVG, ``start`` is the visual right edge when direction=rtl. Using ``end`` places the
+    # glyph run to the right of x and makes metadata claim a box different from Chromium ink.
+    anchor = "start" if direction == "rtl" else line.anchor
     x = right_edge if direction == "rtl" and right_edge is not None else line.x
     attrs = {
         "x": str(x),
         "y": str(line.baseline),
+        "data-role": line.role,
+        "data-bbox": " ".join(str(value) for value in line.bbox),
         "fill": line.fill,
         "font-family": font_family,
         "font-size": str(line.font),
@@ -957,6 +1550,179 @@ def _add_text_line_with_font(
         attrs["fill-opacity"] = f"{line.opacity:.2f}"
     text = ElementTree.SubElement(layer, _svg_tag("text"), attrs)
     text.text = line.text
+
+
+def layout_layers_from_svg(
+    svg: str,
+) -> tuple[ScaffoldGeometry, MessageGeometry] | None:
+    """Recover typed L3/L4 geometry from a measured Simply Nikah SVG."""
+    root = ElementTree.fromstring(svg)
+    if root.get("data-layout-engine") != "nikah-layout-v1":
+        return None
+    raw_safe = root.get("data-safe-area", "").split()
+    if len(raw_safe) != 4:
+        raise ValueError("Measured Nikah SVG is missing a valid data-safe-area")
+    safe_bbox = tuple(int(round(float(value))) for value in raw_safe)
+    archetype = root.get("data-archetype")
+    if not archetype:
+        raise ValueError("Measured Nikah SVG is missing data-archetype")
+
+    regions: list[ScaffoldRegion] = []
+    region_map = {
+        "layer-wordmark": ("logo", "content"),
+        "layer-headline": ("headline", "content"),
+        "layer-highlight-word": ("highlight", "content"),
+        "layer-support": ("support", "content"),
+        "layer-cta": ("cta", "content"),
+        "layer-hero": ("hero", "decoration"),
+        "layer-glow": ("glow", "decoration"),
+    }
+    for group in root.iter(_svg_tag("g")):
+        layer_id = group.get("id")
+        if layer_id not in region_map:
+            continue
+        if layer_id in {"layer-highlight-word", "layer-support", "layer-cta"}:
+            if not any(True for _ in group.iter(_svg_tag("text"))):
+                continue
+        raw_bbox = group.get("data-bbox", "").split()
+        if len(raw_bbox) != 4:
+            continue
+        bbox = tuple(int(round(float(value))) for value in raw_bbox)
+        name, default_role = region_map[layer_id]
+        role = "container" if group.get("data-container") == "true" else default_role
+        regions.append(
+            ScaffoldRegion(
+                name=name,
+                role=cast(Literal["content", "decoration", "container"], role),
+                bbox=_rect(cast(tuple[int, int, int, int], bbox)),
+            )
+        )
+
+    lines: list[MessageLineGeometry] = []
+    for text in root.iter(_svg_tag("text")):
+        role = text.get("data-role")
+        raw_bbox = text.get("data-bbox", "").split()
+        if role not in {"headline", "highlight", "support", "cta"} or len(raw_bbox) != 4:
+            continue
+        bbox = tuple(int(round(float(value))) for value in raw_bbox)
+        lines.append(
+            MessageLineGeometry(
+                role=cast(Literal["headline", "highlight", "support", "cta"], role),
+                text=text.text or "",
+                bbox=_rect(cast(tuple[int, int, int, int], bbox)),
+                baseline=round(float(text.get("y", "0"))),
+                font_family=text.get("font-family", _SYSTEM_FONT),
+                font_size=max(1, round(float(text.get("font-size", "1")))),
+                font_weight=max(1, round(float(text.get("font-weight", "400")))),
+                colour=text.get("fill", _PLUM_FALLBACK),
+                opacity=float(text.get("fill-opacity", "1")),
+            )
+        )
+
+    return (
+        ScaffoldGeometry(
+            archetype=archetype,
+            measurement_engine=cast(
+                Literal["chromium", "fallback"],
+                root.get("data-text-metrics", "fallback"),
+            ),
+            safe_area=_rect(cast(tuple[int, int, int, int], safe_bbox)),
+            regions=regions,
+        ),
+        MessageGeometry(lines=lines),
+    )
+
+
+def _validate_rendered_geometry(svg: str, *, format_key: str) -> None:
+    """Validate Chromium-normalized boxes after editor transforms are applied."""
+    root = ElementTree.fromstring(svg)
+    raw_safe = root.get("data-safe-area", "").split()
+    if len(raw_safe) != 4:
+        raise NikahLayoutError("Measured Simply Nikah SVG has no valid safe area")
+    safe = tuple(int(round(float(value))) for value in raw_safe)
+    safe_x, safe_y, safe_width, safe_height = safe
+    safe_right = safe_x + safe_width
+    safe_bottom = safe_y + safe_height
+
+    def _bbox(element: ElementTree.Element) -> tuple[int, int, int, int]:
+        raw = element.get("data-bbox", "").split()
+        if len(raw) != 4:
+            label = element.get("id") or element.get("data-role") or element.tag
+            raise NikahLayoutError(f"Measured Simply Nikah element {label!r} has no valid bbox")
+        values = tuple(int(round(float(value))) for value in raw)
+        x, y, width, height = values
+        if width <= 0 or height <= 0:
+            raise NikahLayoutError("Measured Simply Nikah element has an empty bbox")
+        return cast(tuple[int, int, int, int], values)
+
+    def _inside(bbox: tuple[int, int, int, int]) -> bool:
+        x, y, width, height = bbox
+        return (
+            x >= safe_x
+            and y >= safe_y
+            and x + width <= safe_right
+            and y + height <= safe_bottom
+        )
+
+    layers = {
+        group.get("id"): group
+        for group in root.iter(_svg_tag("g"))
+        if group.get("id", "").startswith("layer-")
+    }
+    safe_layer_ids = {
+        "layer-wordmark",
+        "layer-headline",
+        "layer-highlight-word",
+        "layer-support",
+        "layer-cta",
+        "layer-hero",
+        "layer-glow",
+    }
+    for layer_id in safe_layer_ids:
+        layer = layers.get(layer_id)
+        if layer is None or layer.get("data-hidden") == "true":
+            continue
+        if layer_id in {"layer-highlight-word", "layer-support", "layer-cta"} and not any(
+            True for _ in layer.iter(_svg_tag("text"))
+        ):
+            continue
+        if not _inside(_bbox(layer)):
+            raise NikahLayoutError(
+                f"Simply Nikah {format_key} layer {layer_id} violates the safe margins"
+            )
+
+    text_boxes: list[tuple[str, tuple[int, int, int, int]]] = []
+    for text in root.iter(_svg_tag("text")):
+        if text.get("data-role") not in {"headline", "highlight", "support", "cta"}:
+            continue
+        bbox = _bbox(text)
+        if not _inside(bbox):
+            raise NikahLayoutError(
+                f"Simply Nikah {format_key} text {text.get('data-role')} violates the safe margins"
+            )
+        text_boxes.append((text.get("data-role", "text"), bbox))
+
+    wordmark = layers.get("layer-wordmark")
+    if wordmark is not None and wordmark.get("data-hidden") != "true":
+        for text in wordmark.iter(_svg_tag("text")):
+            bbox = _bbox(text)
+            if not _inside(bbox):
+                raise NikahLayoutError(
+                    f"Simply Nikah {format_key} wordmark text violates the safe margins"
+                )
+            text_boxes.append(("wordmark", bbox))
+
+    decoration_boxes = [
+        (layer_id, _bbox(layer))
+        for layer_id, layer in layers.items()
+        if layer.get("data-occluding") == "true" and layer.get("data-hidden") != "true"
+    ]
+    for text_role, text_bbox in text_boxes:
+        for layer_id, decoration_bbox in decoration_boxes:
+            if _bbox_intersects(text_bbox, decoration_bbox):
+                raise NikahLayoutError(
+                    f"Simply Nikah {format_key} text {text_role} intersects {layer_id}"
+                )
 
 
 # =============================================================================================
@@ -989,7 +1755,7 @@ def _apply_layer_overrides(
 
         dx = _int_override(override_value, "dx")
         dy = _int_override(override_value, "dy")
-        scale = _scale_override(override_value)
+        scale_x, scale_y = _axis_scale_overrides(override_value)
         rotation = _rotation_override(override_value)
 
         parts: list[str] = []
@@ -997,9 +1763,13 @@ def _apply_layer_overrides(
             parts.append(f"translate({dx},{dy})")
         if rotation != 0.0:
             parts.append(f"rotate({rotation:g},{cx:g},{cy:g})")
-        if scale != 1.0:
+        if scale_x != 1.0 or scale_y != 1.0:
             parts.extend(
-                (f"translate({cx:g},{cy:g})", f"scale({scale:g})", f"translate({-cx:g},{-cy:g})")
+                (
+                    f"translate({cx:g},{cy:g})",
+                    f"scale({scale_x:g},{scale_y:g})",
+                    f"translate({-cx:g},{-cy:g})",
+                )
             )
         if parts:
             existing = layer.attrib.get("transform")
@@ -1032,6 +1802,27 @@ def _scale_override(override: Mapping[object, object]) -> float:
     scale = float(value)
     if not isfinite(scale) or scale <= 0:
         raise ValueError("Layer override 'scale' must be a positive finite number")
+    return min(scale, 3.0)
+
+
+def _axis_scale_overrides(override: Mapping[object, object]) -> tuple[float, float]:
+    """Apply legacy uniform scale unless either explicit axis scale is present."""
+    if "scale_x" not in override and "scale_y" not in override:
+        uniform = _scale_override(override)
+        return uniform, uniform
+    return (
+        _bounded_axis_scale(override, "scale_x"),
+        _bounded_axis_scale(override, "scale_y"),
+    )
+
+
+def _bounded_axis_scale(override: Mapping[object, object], key: str) -> float:
+    value = override[key] if key in override else 1.0
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"Layer override {key!r} must be a float")
+    scale = float(value)
+    if not isfinite(scale) or scale <= 0:
+        raise ValueError(f"Layer override {key!r} must be a positive finite number")
     return min(scale, 3.0)
 
 
@@ -1218,6 +2009,200 @@ def build_nikah_html(
     )
 
 
+def _all_phrases(text: str) -> tuple[str, ...]:
+    words = text.split()
+    return tuple(
+        " ".join(words[start:end])
+        for start in range(len(words))
+        for end in range(start + 1, len(words) + 1)
+    )
+
+
+def _measurement_plan(
+    archetype: str,
+    *,
+    copy: dict[str, str],
+    format_key: str,
+    fonts: _ResolvedFonts,
+    direction: str,
+) -> tuple[
+    list[TextMeasureRequest],
+    dict[tuple[str, int, int, str, str], str],
+]:
+    params = _ARCHETYPE_PARAMS[archetype]
+    fmt = get_format(format_key)
+    is_ayah = archetype == "ayah_translation"
+    headline = _copy_value(
+        copy,
+        "ayah" if is_ayah else "headline",
+        required=True,
+    )
+    assert headline is not None
+    support = (
+        _copy_value(copy, "translation", "sub", "subhead", required=True)
+        if is_ayah
+        else _copy_value(copy, "sub", "subhead")
+    )
+    if len(headline.split()) > 60 or (support is not None and len(support.split()) > 80):
+        raise NikahLayoutError(
+            f"Simply Nikah {archetype} content does not fit {format_key} "
+            "within the permitted copy capacity"
+        )
+    highlight = _copy_value(copy, "highlight", "highlight_word")
+    before = headline
+    after = ""
+    if highlight:
+        index = headline.lower().find(highlight.lower())
+        if index < 0:
+            raise ValueError(
+                f"'highlight' {highlight!r} must be a case-insensitive substring of the headline"
+            )
+        before = headline[:index].strip()
+        after = headline[index + len(highlight) :].strip()
+
+    heading_direction = "rtl" if is_ayah else direction
+    heading_family = (
+        fonts.script_family if is_ayah or contains_arabic(headline) else fonts.heading_family
+    )
+    support_direction = "ltr" if is_ayah else direction
+    support_family = (
+        fonts.script_family if support and contains_arabic(support) else fonts.body_family
+    )
+    base_head = round(float(params["headline_font_frac"]) * fmt.width)
+    min_head = max(1, round(base_head * 0.78))
+    base_support = round(float(params["support_font_frac"]) * fmt.width)
+    min_support = max(1, round(base_support * 0.78))
+
+    specs: set[tuple[str, int, int, str, str]] = set()
+    for size in range(base_head, min_head - 1, -2):
+        for phrase in (*_all_phrases(before), *_all_phrases(after)):
+            specs.add((phrase, size, int(params["headline_weight"]), heading_family, heading_direction))
+        if highlight:
+            specs.add((highlight.upper(), size, 760, heading_family, direction))
+    if support:
+        for size in range(base_support, min_support - 1, -1):
+            for phrase in _all_phrases(support):
+                specs.add((phrase, size, 430, support_family, support_direction))
+    cta = _copy_value(copy, "cta")
+    if cta:
+        cta_size = round(round(0.062 * fmt.height) * 0.40)
+        cta_family = fonts.script_family if contains_arabic(cta) else fonts.body_family
+        specs.add((cta, cta_size, 700, cta_family, direction))
+
+    ordered = sorted(specs)
+    keys = {spec: f"text-{index}" for index, spec in enumerate(ordered)}
+    requests = [
+        TextMeasureRequest(
+            key=keys[spec],
+            text=spec[0],
+            font_size=spec[1],
+            font_weight=spec[2],
+            font_family=spec[3],
+            direction=spec[4],
+        )
+        for spec in ordered
+    ]
+    return requests, keys
+
+
+async def render_nikah_with_layout(
+    archetype: str,
+    *,
+    copy: dict[str, str],
+    format_key: str,
+    hero_symbol: HeroSymbol = "hands_heart",
+    logo_ref: str | None = None,
+    lattice_backdrop: bool = True,
+    heading_font_ref: str | None = None,
+    body_font_ref: str | None = None,
+    direction: str = "ltr",
+    script_font_ref: str | None = None,
+    layer_overrides: Mapping[str, object] | None = None,
+) -> NikahRenderResult:
+    """Measure and render on one Chromium page, returning typed L3/L4 geometry."""
+    if direction not in {"ltr", "rtl"}:
+        raise ValueError("Simply Nikah text direction must be 'ltr' or 'rtl'")
+    if archetype not in _ARCHETYPE_PARAMS:
+        choices = ", ".join(sorted(_ARCHETYPE_PARAMS))
+        raise ValueError(f"Unknown Simply Nikah archetype {archetype!r}; choose from: {choices}")
+
+    fmt = get_format(format_key)
+    fonts = _resolve_fonts(
+        heading_font_ref=heading_font_ref,
+        body_font_ref=body_font_ref,
+        script_font_ref=script_font_ref,
+        needs_script=direction == "rtl" or archetype == "ayah_translation",
+    )
+    requests, keys = _measurement_plan(
+        archetype,
+        copy=copy,
+        format_key=format_key,
+        fonts=fonts,
+        direction=direction,
+    )
+
+    async with chromium_page(fmt.width, fmt.height) as page:
+        measurements = await measure_svg_text(page, requests, font_css=fonts.face_css)
+
+        def _measured(
+            text: str,
+            font_size: int,
+            font_weight: int,
+            font_family: str,
+            text_direction: str,
+        ) -> TextMeasurement:
+            spec = (text, font_size, font_weight, font_family, text_direction)
+            try:
+                return measurements[keys[spec]]
+            except KeyError as exc:
+                raise ValueError(f"Missing Chromium text measurement for {spec!r}") from exc
+
+        composition = _compose(
+            archetype,
+            copy=copy,
+            format_key=format_key,
+            hero_symbol=hero_symbol,
+            logo_ref=logo_ref,
+            lattice_backdrop=lattice_backdrop,
+            measure=_measured,
+            fonts=fonts,
+            direction=direction,
+            metrics_source="chromium",
+        )
+        svg = build_nikah_svg(
+            archetype,
+            copy=copy,
+            format_key=format_key,
+            hero_symbol=hero_symbol,
+            logo_ref=logo_ref,
+            lattice_backdrop=lattice_backdrop,
+            heading_font_ref=heading_font_ref,
+            body_font_ref=body_font_ref,
+            direction=direction,
+            script_font_ref=script_font_ref,
+            layer_overrides=layer_overrides,
+            _composition=composition,
+            _fonts=fonts,
+        )
+        svg, png = await render_svg_with_geometry_on_page(
+            page,
+            svg,
+            fmt.width,
+            fmt.height,
+        )
+        geometry = layout_layers_from_svg(svg)
+        if geometry is None:
+            raise NikahLayoutError("Measured Simply Nikah SVG is missing L3/L4 geometry")
+        scaffold, message = geometry
+        _validate_rendered_geometry(svg, format_key=format_key)
+    return NikahRenderResult(
+        svg=svg,
+        png=png,
+        scaffold=scaffold,
+        message=message,
+    )
+
+
 async def render_nikah(
     archetype: str,
     *,
@@ -1230,6 +2215,7 @@ async def render_nikah(
     body_font_ref: str | None = None,
     direction: str = "ltr",
     script_font_ref: str | None = None,
+    layer_overrides: Mapping[str, object] | None = None,
 ) -> bytes:
     """Render a Simply Nikah archetype to PNG through the established Playwright rasterizer.
 
@@ -1241,13 +2227,20 @@ async def render_nikah(
     build_nikah_svg (see there); None keeps the system-font render (byte-identical).
     ``direction`` and ``script_font_ref`` use the same RTL/Arabic behavior as build_nikah_svg.
     """
-    svg = build_nikah_svg(
-        archetype, copy=copy, format_key=format_key,
-        hero_symbol=hero_symbol, logo_ref=logo_ref, lattice_backdrop=lattice_backdrop,
-        heading_font_ref=heading_font_ref, body_font_ref=body_font_ref,
-        direction=direction, script_font_ref=script_font_ref,
+    result = await render_nikah_with_layout(
+        archetype,
+        copy=copy,
+        format_key=format_key,
+        hero_symbol=hero_symbol,
+        logo_ref=logo_ref,
+        lattice_backdrop=lattice_backdrop,
+        heading_font_ref=heading_font_ref,
+        body_font_ref=body_font_ref,
+        direction=direction,
+        script_font_ref=script_font_ref,
+        layer_overrides=layer_overrides,
     )
-    return await rasterize_svg_to_png(svg, format_key)
+    return result.png
 
 
 # =============================================================================================

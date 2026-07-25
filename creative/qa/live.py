@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import logging
 import struct
+from math import isfinite
 from xml.etree import ElementTree
 
 from creative.qa.checks import (
@@ -56,9 +57,15 @@ _REAL_PHOTO_SOURCES = frozenset(
 
 _SVG_NS = "http://www.w3.org/2000/svg"
 
-# Which named SVG layers are text (headline/subhead/cta) vs the logo-bearing layer (badge).
-_TEXT_LAYER_IDS = ("layer-headline", "layer-subhead", "layer-cta")
-_LOGO_LAYER_ID = "layer-badge"
+# Named message/logo layers across the generic, Glo2Go, and Simply Nikah render families.
+_TEXT_LAYER_IDS = (
+    "layer-headline",
+    "layer-subhead",
+    "layer-highlight-word",
+    "layer-support",
+    "layer-cta",
+)
+_LOGO_LAYER_IDS = ("layer-badge", "layer-wordmark")
 _HEADLINE_LAYER_ID = "layer-headline"
 
 
@@ -91,6 +98,10 @@ def _parse_layers(svg: str) -> dict[str, ElementTree.Element]:
     return layers
 
 
+def _is_measured_nikah(svg: str) -> bool:
+    return ElementTree.fromstring(svg).get("data-layout-engine") == "nikah-layout-v1"
+
+
 def _layer_bbox(layer: ElementTree.Element) -> ZoneRect | None:
     """Parse the `data-bbox="x y w h"` a layer carries into a ZoneRect (None if absent/empty)."""
     raw = layer.get("data-bbox")
@@ -99,10 +110,25 @@ def _layer_bbox(layer: ElementTree.Element) -> ZoneRect | None:
     parts = raw.split()
     if len(parts) != 4:
         return None
-    x, y, w, h = (int(round(float(value))) for value in parts)
+    try:
+        numeric = tuple(float(value) for value in parts)
+    except ValueError:
+        return None
+    if not all(isfinite(value) for value in numeric):
+        return None
+    x, y, w, h = (int(round(value)) for value in numeric)
     if w <= 0 or h <= 0:
         return None
     return ZoneRect(x=x, y=y, w=w, h=h)
+
+
+def _intersects(first: ZoneRect, second: ZoneRect) -> bool:
+    return (
+        first.x < second.x + second.w
+        and second.x < first.x + first.w
+        and first.y < second.y + second.h
+        and second.y < first.y + first.h
+    )
 
 
 def _first_attr(layer: ElementTree.Element, local_name: str, attr: str) -> str | None:
@@ -163,6 +189,7 @@ async def run_live_qa(
 
     fmt = get_format(format_key)
     layers = _parse_layers(svg)
+    measured_nikah = _is_measured_nikah(svg)
 
     # 1. Dims: the raster must match the requested format exactly. A preview that is not even a
     #    decodable PNG is itself a QA failure — record it, never let it crash generation (the
@@ -177,13 +204,23 @@ async def run_live_qa(
             f"dims: expected {fmt.width}x{fmt.height}, got {actual[0]}x{actual[1]}"
         )
 
-    # 2. Safe zones: every text + logo layer bbox fully inside the format's safe area.
-    for layer_id in (*_TEXT_LAYER_IDS, _LOGO_LAYER_ID):
+    # 2. Safe zones: every content/occluding layer bbox stays inside the safe area.
+    checked_ids = [*_TEXT_LAYER_IDS, *_LOGO_LAYER_IDS]
+    checked_ids.extend(
+        layer_id
+        for layer_id, layer in layers.items()
+        if layer.get("data-occluding") == "true" or layer.get("data-container") == "true"
+    )
+    for layer_id in dict.fromkeys(checked_ids):
         layer = layers.get(layer_id)
         if layer is None:
             continue
+        if layer.get("data-hidden") == "true":
+            continue
         zone = _layer_bbox(layer)
         if zone is None:
+            if measured_nikah:
+                failures.append(f"geometry: {layer_id} is missing a valid bbox")
             continue
         overflows = _safe_zone_overflows(zone, format_key)
         if overflows:
@@ -192,7 +229,53 @@ async def run_live_qa(
                 f"safe_zone: {name} breaches safe area ({', '.join(overflows)})"
             )
 
-    # 3. Headline contrast: sample the preview under the headline bbox, compare to the ink the
+    # 3. Occlusion: no message layer may intersect a hero/ornament marked as occluding.
+    decorations: list[tuple[str, ZoneRect]] = []
+    for layer_id, layer in layers.items():
+        if layer.get("data-occluding") != "true" or layer.get("data-hidden") == "true":
+            continue
+        zone = _layer_bbox(layer)
+        if zone is None:
+            if measured_nikah:
+                failures.append(f"geometry: {layer_id} is missing a valid bbox")
+            continue
+        decorations.append((layer_id, zone))
+
+    text_boxes: list[tuple[str, ZoneRect]] = []
+    for text_id in (*_TEXT_LAYER_IDS, *_LOGO_LAYER_IDS):
+        text_layer = layers.get(text_id)
+        if text_layer is None or text_layer.get("data-hidden") == "true":
+            continue
+        if measured_nikah:
+            for index, text_element in enumerate(text_layer.iter(_svg_tag("text"))):
+                text_zone = _layer_bbox(text_element)
+                if text_zone is None:
+                    failures.append(
+                        f"geometry: {text_id} text line {index + 1} is missing a valid bbox"
+                    )
+                    continue
+                text_boxes.append((text_id, text_zone))
+                overflows = _safe_zone_overflows(text_zone, format_key)
+                if overflows:
+                    failures.append(
+                        f"safe_zone: {text_id.removeprefix('layer-')} text breaches safe area "
+                        f"({', '.join(overflows)})"
+                    )
+        else:
+            text_zone = _layer_bbox(text_layer)
+            if text_zone is not None:
+                text_boxes.append((text_id, text_zone))
+
+    for text_id, text_zone in text_boxes:
+        for decoration_id, decoration_zone in decorations:
+            if _intersects(text_zone, decoration_zone):
+                failures.append(
+                    "overlap: "
+                    f"{text_id.removeprefix('layer-')} intersects "
+                    f"{decoration_id.removeprefix('layer-')}"
+                )
+
+    # 4. Headline contrast: sample the preview under the headline bbox, compare to the ink the
     #    headline actually rendered with. Browser-gated exactly like checks.py's imagery path.
     headline_layer = layers.get(_HEADLINE_LAYER_ID)
     if headline_layer is not None and actual is not None and browser_available():
@@ -210,11 +293,14 @@ async def run_live_qa(
                 )
                 needs_scrim = True
 
-    # 4. Logo visibility (the Glo2Go dogfood lesson: a purple mark on the purple badge ground
+    # 5. Logo visibility (the Glo2Go dogfood lesson: a purple mark on the purple badge ground
     #    renders invisible while every text check passes). The SVG embeds the logo as a data
     #    URI, so logo_mean_luminance can sample it; the badge <rect> fill is the true ground.
     if expect_logo:
-        logo_layer = layers.get(_LOGO_LAYER_ID)
+        logo_layer = next(
+            (layers[layer_id] for layer_id in _LOGO_LAYER_IDS if layer_id in layers),
+            None,
+        )
         logo_href = (
             _first_attr(logo_layer, "image", "href") if logo_layer is not None else None
         )
@@ -234,7 +320,7 @@ async def run_live_qa(
                         "— use a knockout/light logo variant or a lighter badge ground"
                     )
 
-    # 5. Profile guardrails (code-checkable subset).
+    # 6. Profile guardrails (code-checkable subset).
     if profile is not None:
         failures.extend(_source_guardrail_failures(profile, source_kind))
         # TODO(palette): palette-adherence — sample the rendered creative's dominant hues and
