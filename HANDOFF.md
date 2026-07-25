@@ -4,7 +4,48 @@
 
 ---
 
-## ► LATEST (2026-07-25 pm15) — super_admin fix + billing removed + ch.05/06 + VPS codex terminal LIVE
+## ► LATEST (2026-07-25 pm16) — text-fill + CRUD soft-delete deployed; agy live; git auto-sync; Jasmin/Shevin
+
+Continuation of pm15. Deployed HEAD `9956ac6`, all green + verified.
+
+### Shipped + deployed this turn
+- **Text-fill (P3-KIT-COPY):** `scripts/seed_brand_copy.py` — authored + applied to prod: all 3 brands'
+  discovery(vision/competitor/existing-review) + direction(alignment/uniqueness) + full brief sections.
+  Idempotent, non-destructive. The book's ghost cards now show real copy.
+- **CRUD soft-delete (P8-CRUD) DEPLOYED:** migration `7a6f2d1c9b04` (deleted_at, audited) applied on prod.
+  DELETE endpoints for assets/clients/brands/briefs/creatives/tasks (`require_role owner/admin` +
+  super_admin bypass, tenant-scoped, soft-delete); missing PATCH added (creatives/tasks/asset-meta);
+  all list/get filter `deleted_at IS NULL`. IDOR test extended to every new route (20 CRUD+IDOR pass).
+  Web: Remove/Edit controls in asset library, clients/briefs/tasks lists, review panel, brand-kit slots
+  (`web/app/crud-actions.ts`, `ClientsListView.tsx`, etc.). `principal_audit_actor()` in auth.py.
+- **VPS terminal fully live:** codex logged in + **agy v1.1.7 installed & logged in** (Google/Gemini).
+  `/root/mimik-src/` = 3 repos + AGENTS.md + tmux `mimik`. **Git auto-sync:** cron `*/3 * * * *`
+  `/root/mimik-src/sync-pull.sh` (ff-only, skip-if-dirty) keeps the VPS current with main.
+- **Jasmin tenant** (id `3c9fb673…`) + **Shevin** (`shevin.fernando10@gmail.com`, role=owner, UID
+  `13c98a67…`, tenant-isolated to Jasmin). NOTE: if Shevin can't log in ("Invalid email or password"),
+  it's a SUPABASE-side credential issue (reset his password + confirm his email in the dashboard —
+  do NOT delete+recreate or his UID changes and breaks the account binding).
+
+### REMAINING (roadmap `docs/PRODUCTION_ROADMAP.md`) — run from the VPS terminal (codex/agy)
+1. **In-product brand-kit editing** — inline edit controls on the book's chapters + PUT brand-kit
+   (versioned). CRUD lane already added asset/task/creative metadata editors; the BOOK's field editing
+   (vision/USP/palette rationale inline) is the remaining piece. (Ready to dispatch — no longer conflicts
+   with CRUD.)
+2. **Asset gathering** (logos/fonts/references) — Claude+browser or agy; copyright-aware (client's own +
+   licensed fonts + Pinterest references OK; others' posters = references only). Sequence AFTER editing.
+3. CRUD PATCH-everywhere completeness (jobs, approvals) if wanted; tenant list/suspend (super_admin).
+4. Content curation: run `scripts/curate_brand_kit.py --slug <brand>` after generating+approving creatives.
+
+### Anti-context (this turn)
+- Two concurrent codex lanes (text-fill scripts vs CRUD routers/web) worked because scopes were DISJOINT;
+  committed each by explicit path. In-product-editing was deliberately NOT run concurrently with CRUD
+  (same web/api files → conflict).
+- Shevin "Invalid email or password" = Supabase credential/confirmation, NOT a deploy bug (login verified live).
+- Data-only scripts (seed_brand_copy) applied to prod via `docker exec -i … python -` stdin — no rebuild needed.
+
+---
+
+## ► (2026-07-25 pm15) — super_admin fix + billing removed + ch.05/06 + VPS codex terminal LIVE
 
 Continuation of pm14. Deployed HEAD ~`658a317`, all green + verified. **The app is fully usable AND
 there is now a live codex/agy terminal workspace on the VPS.**
