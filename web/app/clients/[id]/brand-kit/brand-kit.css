@@ -1,0 +1,654 @@
+/* ————————————————————————————————————————————————————————————————
+   BRAND KIT v2 — editorial brand-book canvas (template v1 in web/).
+   Source of truth for the look: docs/brand-kit-prototype.html.
+
+   This is the book's OWN surface, themed from the client's tokens:
+   every colour below reads a --bk-* custom property written on the
+   .bk-canvas root by lib/brand-kit.ts (KitTheme auto mode:
+   ink = darkest brand colour, paper = warm off-white constant;
+   house fallback = deep brick + cream).
+
+   All selectors are scoped under .bk-canvas — the app chrome
+   (mono-admin shell) is never restyled from here.
+   ———————————————————————————————————————————————————————————————— */
+
+.bk-canvas {
+  --bk-r: 16px;
+  margin: 0 -8px;
+  border-radius: 12px;
+  background: var(--bk-paper);
+  background-image:
+    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(var(--bk-ink-rgb), 0.055), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 2px, rgba(var(--bk-ink-rgb), 0.008) 2px 4px);
+  color: var(--bk-ink);
+  font-family: var(--bk-serif);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.bk-canvas ::selection {
+  background: var(--bk-brand);
+  color: var(--bk-card);
+}
+
+.bk-mono {
+  font-family: var(--bk-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ————— masthead ————— */
+.bk-masthead {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 56px 32px 40px;
+  text-align: center;
+}
+.bk-eyebrow {
+  font-family: var(--bk-mono);
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--bk-brand);
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.bk-eyebrow::before,
+.bk-eyebrow::after {
+  content: "";
+  width: 36px;
+  height: 1px;
+  background: var(--bk-brand);
+  opacity: 0.4;
+  display: inline-block;
+}
+.bk-masthead h1 {
+  font-family: var(--bk-font-heading);
+  font-size: clamp(40px, 6vw, 72px);
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  margin: 20px 0 14px;
+  color: var(--bk-ink);
+}
+.bk-masthead h1 em {
+  font-style: italic;
+  color: var(--bk-brand);
+}
+.bk-dek {
+  color: var(--bk-muted);
+  font-size: 18px;
+  font-style: italic;
+  max-width: 520px;
+  margin: 0 auto;
+}
+.bk-edition {
+  margin-top: 22px;
+  font-family: var(--bk-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--bk-muted-2);
+}
+
+/* ————— folder tabs ————— */
+.bk-bookwrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 32px 70px;
+}
+.bk-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 22px;
+  position: relative;
+  z-index: 3;
+}
+.bk-tab {
+  appearance: none;
+  border: 1px solid var(--bk-line);
+  border-bottom: none;
+  cursor: pointer;
+  background: var(--bk-card-2);
+  color: var(--bk-muted);
+  font-family: var(--bk-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  padding: 13px 18px 15px;
+  border-radius: 12px 12px 0 0;
+  position: relative;
+  top: 1px;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    padding 0.18s ease;
+  white-space: nowrap;
+}
+.bk-tab-n {
+  color: var(--bk-muted-2);
+  margin-right: 8px;
+  transition: color 0.18s ease;
+}
+.bk-tab:hover {
+  background: var(--bk-card);
+  color: var(--bk-ink);
+}
+.bk-tab[aria-selected="true"] {
+  background: var(--bk-card);
+  color: var(--bk-ink);
+  padding-top: 16px;
+  box-shadow: 0 -6px 14px rgba(var(--bk-ink-rgb), 0.05);
+}
+.bk-tab[aria-selected="true"] .bk-tab-n {
+  color: var(--bk-brand);
+}
+.bk-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--bk-card);
+}
+
+/* ————— the sheet (stacked paper) ————— */
+.bk-sheet {
+  position: relative;
+  background: var(--bk-card);
+  border: 1px solid var(--bk-line);
+  border-radius: var(--bk-r);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 24px 50px -30px rgba(var(--bk-ink-rgb), 0.28);
+  padding: clamp(28px, 4.5vw, 64px);
+}
+.bk-sheet::before,
+.bk-sheet::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  height: 14px;
+  z-index: -1;
+  background: var(--bk-card-2);
+  border: 1px solid var(--bk-line);
+  border-radius: var(--bk-r);
+}
+.bk-sheet::before {
+  bottom: -7px;
+}
+.bk-sheet::after {
+  bottom: -13px;
+  left: 26px;
+  right: 26px;
+  opacity: 0.6;
+}
+
+/* ————— panels + reveal ————— */
+.bk-panel[hidden] {
+  display: none;
+}
+.bk-panel--active > * {
+  animation: bk-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.bk-panel--active > *:nth-child(2) {
+  animation-delay: 0.06s;
+}
+.bk-panel--active > *:nth-child(3) {
+  animation-delay: 0.12s;
+}
+.bk-panel--active > *:nth-child(4) {
+  animation-delay: 0.18s;
+}
+.bk-panel--active > *:nth-child(5) {
+  animation-delay: 0.24s;
+}
+.bk-panel--active > *:nth-child(6) {
+  animation-delay: 0.3s;
+}
+@keyframes bk-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bk-panel--active > * {
+    animation: none;
+  }
+}
+
+/* ————— shared section furniture ————— */
+.bk-sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.bk-kicker {
+  font-family: var(--bk-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--bk-brand);
+  white-space: nowrap;
+}
+.bk-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--bk-line);
+}
+.bk-sec-title {
+  font-family: var(--bk-font-heading);
+  font-size: clamp(26px, 3.2vw, 36px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 10px;
+  color: var(--bk-ink);
+}
+.bk-sec-sub {
+  color: var(--bk-muted);
+  font-style: italic;
+  max-width: 560px;
+}
+.bk-divider {
+  height: 1px;
+  background: var(--bk-line);
+  margin: 44px 0;
+  border: none;
+}
+
+/* ————— ghost / empty state — the load-bearing pattern (spec §5) ————— */
+.bk-ghost {
+  border: 1.5px dashed var(--bk-ghost);
+  border-radius: 12px;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 10px,
+    rgba(150, 131, 109, 0.045) 10px 20px
+  );
+  padding: 18px 20px;
+  color: var(--bk-muted);
+}
+.bk-ghost-hint {
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* placeholder chapter — "this chapter is being written" */
+.bk-ghost-chapter {
+  border: 1.5px dashed var(--bk-ghost);
+  border-radius: 12px;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 10px,
+    rgba(150, 131, 109, 0.045) 10px 20px
+  );
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--bk-muted);
+  text-align: center;
+  padding: 40px 24px;
+  margin-top: 34px;
+}
+.bk-ghost-chapter .bk-fleur {
+  font-family: var(--bk-serif);
+  font-size: 22px;
+  color: var(--bk-brand);
+  opacity: 0.45;
+}
+.bk-ghost-chapter p {
+  font-family: var(--bk-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.bk-ghost-chapter em {
+  font-family: var(--bk-serif);
+  font-style: italic;
+  font-size: 14.5px;
+  color: var(--bk-muted);
+}
+
+/* ————— colours & fonts · named palette ————— */
+.bk-pal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin: 34px 0 12px;
+}
+.bk-swatch {
+  border: 1px solid var(--bk-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bk-card);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.bk-swatch:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 30px -18px rgba(var(--bk-ink-rgb), 0.35);
+}
+.bk-chip-lg {
+  height: 130px;
+  position: relative;
+  box-shadow: inset 0 0 0 1px rgba(var(--bk-ink-rgb), 0.06);
+}
+.bk-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-family: var(--bk-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(252, 248, 241, 0.85);
+  color: var(--bk-muted);
+  border: 1px solid rgba(var(--bk-ink-rgb), 0.08);
+  backdrop-filter: blur(2px);
+}
+.bk-swatch-info {
+  padding: 15px 16px 17px;
+}
+.bk-swatch-nm {
+  font-size: 17px;
+  font-weight: 600;
+  font-style: italic;
+  margin-bottom: 3px;
+  color: var(--bk-ink);
+}
+.bk-swatch-hex {
+  font-family: var(--bk-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--bk-muted);
+  text-transform: uppercase;
+}
+.bk-swatch-role {
+  display: inline-block;
+  margin-left: 8px;
+  font-family: var(--bk-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid var(--bk-line);
+  border-radius: 999px;
+  padding: 2.5px 8px;
+  color: var(--bk-muted);
+}
+.bk-swatch-why {
+  margin-top: 9px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--bk-muted);
+  font-style: italic;
+  border-top: 1px solid var(--bk-line-soft);
+  padding-top: 9px;
+}
+.bk-swatch-why--ghost {
+  color: var(--bk-muted-2);
+}
+.bk-chip-lg--pending {
+  background: repeating-linear-gradient(-45deg, #efe7da 0 12px, #e7dccc 12px 24px);
+  display: grid;
+  place-items: center;
+}
+.bk-chip-pending-label {
+  font-family: var(--bk-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--bk-muted);
+}
+.bk-pal-footnote {
+  font-family: var(--bk-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bk-muted-2);
+  margin-bottom: 8px;
+}
+
+/* ————— colours & fonts · font suite ————— */
+.bk-font-row {
+  display: grid;
+  grid-template-columns: 250px 1fr auto;
+  gap: 40px;
+  align-items: center;
+  padding: 32px 0;
+  border-top: 1px solid var(--bk-line-soft);
+}
+.bk-font-row--first {
+  border-top: none;
+  margin-top: 26px;
+}
+.bk-rolelab-k {
+  font-family: var(--bk-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--bk-ink);
+}
+.bk-rolelab-src {
+  font-size: 13px;
+  color: var(--bk-muted);
+  font-style: italic;
+}
+.bk-font-sample {
+  overflow: hidden;
+}
+.bk-font-sample-big {
+  font-size: 34px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  color: var(--bk-ink);
+}
+.bk-font-sample-glyphs {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--bk-muted);
+  letter-spacing: 0.06em;
+}
+.bk-font-wts {
+  font-family: var(--bk-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bk-muted);
+  text-align: right;
+  line-height: 2;
+}
+.bk-font-ghost {
+  grid-column: 2 / 4;
+}
+
+/* ————— font pack ————— */
+.bk-fontpack {
+  margin-top: 38px;
+  border: 1px solid var(--bk-line);
+  border-radius: 12px;
+  background: var(--bk-card-2);
+  padding: 22px 26px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.bk-fontpack-ico {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: var(--bk-brand);
+  color: var(--bk-card);
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  flex: none;
+  font-family: var(--bk-font-heading);
+}
+.bk-fontpack-tx {
+  flex: 1;
+  min-width: 240px;
+}
+.bk-fontpack-tx b {
+  display: block;
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: var(--bk-ink);
+}
+.bk-fontpack-tx span {
+  font-size: 13.5px;
+  color: var(--bk-muted);
+  font-style: italic;
+}
+
+/* quiet pill button — the book's edit-adjacent affordance */
+.bk-btn {
+  font-family: var(--bk-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--bk-line);
+  background: var(--bk-card);
+  color: var(--bk-ink);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.bk-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(var(--bk-ink-rgb), 0.12);
+}
+.bk-btn--primary {
+  background: var(--bk-brand);
+  border-color: var(--bk-brand);
+  color: var(--bk-card);
+}
+
+/* ————— colophon ————— */
+.bk-colophon {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 32px 48px;
+  text-align: center;
+  font-family: var(--bk-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--bk-muted-2);
+}
+.bk-colophon .bk-fleur {
+  font-family: var(--bk-serif);
+  font-size: 18px;
+  letter-spacing: 0;
+  color: var(--bk-brand);
+  opacity: 0.5;
+  margin-bottom: 12px;
+}
+
+/* ————— print / PDF export (spec §8 — template ships print CSS from slice 1) ————— */
+@media print {
+  .bk-canvas {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    background: var(--bk-paper) !important;
+  }
+  .bk-tabs,
+  .bk-btn {
+    display: none !important;
+  }
+  .bk-masthead {
+    padding: 34vh 0 0;
+    break-after: page;
+  }
+  .bk-panel,
+  .bk-panel[hidden] {
+    display: block !important;
+    break-before: page;
+    padding-top: 6mm;
+  }
+  .bk-panel--active > * {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .bk-bookwrap {
+    padding-bottom: 0;
+  }
+  .bk-sheet {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    background: transparent;
+  }
+  .bk-sheet::before,
+  .bk-sheet::after {
+    display: none;
+  }
+  .bk-swatch,
+  .bk-font-row,
+  .bk-fontpack,
+  .bk-ghost,
+  .bk-ghost-chapter {
+    break-inside: avoid;
+  }
+  .bk-swatch:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  .bk-colophon .bk-fleur {
+    display: none;
+  }
+}
+
+/* ————— responsive ————— */
+@media (max-width: 900px) {
+  .bk-font-row {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .bk-font-wts {
+    text-align: left;
+  }
+  .bk-font-ghost {
+    grid-column: auto;
+  }
+}
+@media (max-width: 560px) {
+  .bk-masthead {
+    padding: 40px 20px 28px;
+  }
+  .bk-bookwrap {
+    padding: 0 16px 50px;
+  }
+}

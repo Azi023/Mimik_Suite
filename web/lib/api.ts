@@ -57,11 +57,30 @@ export interface ApiClient {
   notes: string | null;
 }
 
-/** mimik_contracts.brand.ColorRole */
+/** mimik_contracts.brand.ColorRole (Brand Kit v2 fields are additive + optional on the wire). */
 export interface ApiColorRole {
   name: string;
   hex: string;
   usage: string | null;
+  /** NEW — human colour name proposed at onboarding, e.g. "Clinical Plum". */
+  display_name?: string | null;
+  /** NEW — one line: WHY this colour is in the brand. */
+  rationale?: string | null;
+  /** NEW — false ⇒ provisional badge in the brand book. Absent on older payloads. */
+  confirmed?: boolean;
+}
+
+/** mimik_contracts.brand.FontRole — one typed slot in the brand's font suite (Brand Kit v2). */
+export interface ApiFontRole {
+  role: "display" | "heading" | "subheading" | "body" | "accent" | "arabic";
+  source: "builtin" | "uploaded";
+  /** Key from creative/render/builtin_fonts.py ("poppins", "playfair_display"…). */
+  builtin_key: string | null;
+  /** BrandAsset(kind=FONT) id when source === "uploaded". */
+  asset_id: string | null;
+  weights: string[];
+  /** Overrides the built-in preview text in specimens. */
+  sample_text: string | null;
 }
 
 /** mimik_contracts.brand.Typography */
@@ -69,6 +88,33 @@ export interface ApiTypography {
   heading_font: string | null;
   body_font: string | null;
   hierarchy: string[];
+  /** NEW (Brand Kit v2) — typed font suite; heading/body_font stay the engine's flat view. */
+  font_roles?: ApiFontRole[];
+}
+
+/** mimik_contracts.brand.PendingColor — a named colour whose hex was never supplied. */
+export interface ApiPendingColor {
+  name: string;
+  display_name?: string | null;
+  rationale?: string | null;
+}
+
+/** mimik_contracts.brand.KitTheme — brand-book chrome derivation (auto = darkest brand colour). */
+export interface ApiKitTheme {
+  mode: "auto" | "manual";
+  ink_hex: string | null;
+  paper_hex: string | null;
+}
+
+/**
+ * mimik_contracts.brand.BrandKit — the per-client brand book attached to a Brand.
+ * Only the fields this slice renders are typed; the wire object carries more
+ * (discovery, direction, patterns…) which later slices will add here.
+ */
+export interface ApiBrandKit {
+  pending_colors: ApiPendingColor[];
+  theme: ApiKitTheme;
+  published: boolean;
 }
 
 /** mimik_contracts.brand.LogoSpec */
@@ -154,6 +200,8 @@ export interface ApiBrand {
   tokens: ApiBrandTokens;
   imagery_style: string | null;
   references: ApiReference[];
+  /** NEW (Brand Kit v2) — the brand book. Optional on older payloads. */
+  kit?: ApiBrandKit;
 }
 
 /** mimik_contracts.job.Job */
