@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # f"{app_base_url}/invite/accept?token=...". Config-only; override per environment via env.
     app_base_url: str = "http://localhost:3000"
 
+    # Where the Playwright exporter reaches the Next.js web app from INSIDE the cluster to render
+    # the public /book/{token} page for PDF/PNG capture. This is server-to-server (container DNS),
+    # distinct from app_base_url (the browser-facing origin baked into the share link). In
+    # docker-compose the web service is `web:3000`. Config-only; override per environment via env.
+    web_internal_url: str = "http://web:3000"
+
     supabase_url: str = ""
     supabase_jwt_secret: str = ""
     # Overridable for tests; empty -> derived from supabase_url.

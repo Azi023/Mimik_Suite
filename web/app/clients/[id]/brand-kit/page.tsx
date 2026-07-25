@@ -5,7 +5,6 @@ import { AppShell } from "@/components/AppShell";
 import { BrandBookCanvas } from "@/components/brand-kit/BrandBookCanvas";
 import { BrandKitControls, type KitSectionLink } from "@/components/brand-kit/BrandKitControls";
 import { KIT_TABS } from "@/components/brand-kit/registry";
-import { getApiBaseUrl } from "@/lib/api";
 import { getClientBrandEditData, getSidebarData } from "@/lib/data";
 import { redirectClientToPortal } from "@/lib/guard";
 import { getSessionToken } from "@/lib/session";
@@ -81,14 +80,15 @@ export default async function BrandKitPage({
     );
   }
 
-  // Export endpoints (spec §8) — served by the API's Playwright export stack.
-  const apiBase = getApiBaseUrl();
-  const brandPath = `${apiBase}/brands/${encodeURIComponent(brand.id)}`;
-  const pdfHref = `${brandPath}/brand-book.pdf`;
+  // Export endpoints (spec §8) — served by the API's Playwright export stack, reached through
+  // SAME-ORIGIN proxies so the plain-navigation download links authenticate via the httpOnly
+  // session cookie (the bearer is attached server-side in the proxy, never exposed to the browser).
+  const proxyBase = `/api/brand-kit/${encodeURIComponent(brand.id)}`;
+  const pdfHref = `${proxyBase}/brand-book.pdf`;
   const sectionLinks: KitSectionLink[] = KIT_TABS.map((tab) => ({
     key: tab.key,
     label: `${tab.number} · ${tab.label}`,
-    href: `${brandPath}/brand-book/${encodeURIComponent(tab.key)}.png`,
+    href: `${proxyBase}/section/${encodeURIComponent(tab.key)}`,
   }));
 
   return (

@@ -239,6 +239,7 @@ export function Sidebar({ groups, branding, onCollapse, mobile = false }: Sideba
                   className={`rail-btn${(href === "/" ? pathname === "/" : pathname.startsWith(href)) ? " rail-btn--active" : ""}`}
                   href={href}
                   aria-label={item.label}
+                  title={item.label}
                 >
                   {content}
                 </Link>
@@ -249,6 +250,7 @@ export function Sidebar({ groups, branding, onCollapse, mobile = false }: Sideba
                   className={`rail-btn${item.active ? " rail-btn--active" : ""}`}
                   aria-current={item.active ? "page" : undefined}
                   aria-label={item.label}
+                  title={item.label}
                 >
                   {content}
                 </button>

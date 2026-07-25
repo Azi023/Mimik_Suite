@@ -16,6 +16,13 @@ from creative.render.templates import TemplateContext, get_template
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
+# One canonical Chromium launch profile for every render path in this module.
+_LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
+
+# Scroll-reveal chrome hides content until an intersection observer fires — which never happens
+# in a headless single-shot capture. Force everything visible and freeze motion before capture.
+_FREEZE_CSS = "*{opacity:1!important;animation:none!important;transition:none!important}"
+
 
 def browser_available() -> bool:
     """True if the Playwright package imports. (The chromium binary is a separate install.)"""
@@ -49,7 +56,7 @@ async def render_html_to_png(html: str, width: int, height: int, *, scale: int =
         f"</head><body>{html}</body></html>"
     )
     async with async_playwright() as p:
-        browser = await p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+        browser = await p.chromium.launch(args=_LAUNCH_ARGS)
         try:
             page = await browser.new_page(
                 viewport={"width": width, "height": height}, device_scale_factor=scale
@@ -66,6 +73,52 @@ async def render_context_to_png(ctx: TemplateContext, template_key: str, *, scal
     html = get_template(template_key).render(ctx)
     width, height = ctx.size()
     return await render_html_to_png(html, width, height, scale=scale)
+
+
+async def render_url_to_pdf(url: str) -> bytes:
+    """Navigate to `url` (the internal /book/{token}?export=pdf page) and return its print PDF.
+
+    Reuses this module's single Chromium launch profile — the ONE Playwright pattern. Waits for
+    network idle so lazy content settles, then freezes scroll-reveal animations so nothing is
+    left hidden in the headless single-shot render. `prefer_css_page_size` honours the page's own
+    @page size; `print_background` keeps brand colours/grounds in the output.
+    """
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(args=_LAUNCH_ARGS)
+        try:
+            page = await browser.new_page()
+            await page.goto(url, wait_until="networkidle")
+            await page.add_style_tag(content=_FREEZE_CSS)
+            pdf = await page.pdf(print_background=True, prefer_css_page_size=True)
+        finally:
+            await browser.close()
+    return pdf
+
+
+async def render_url_element_to_png(url: str, selector: str, *, scale: int = 2) -> bytes:
+    """Navigate to `url` (the internal /book/{token}?export=png&section=… page) and screenshot the
+    one element matching `selector` at `scale`× device pixels (2× for crisp export by default).
+
+    Reuses this module's single Chromium launch profile. Freezes scroll-reveal animations before
+    capture so the section isn't left transparent in the headless render.
+    """
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(args=_LAUNCH_ARGS)
+        try:
+            page = await browser.new_page(device_scale_factor=scale)
+            await page.goto(url, wait_until="networkidle")
+            await page.add_style_tag(content=_FREEZE_CSS)
+            element = await page.wait_for_selector(selector, state="visible")
+            if element is None:
+                raise ValueError(f"section element not found for selector {selector!r}")
+            png = await element.screenshot()
+        finally:
+            await browser.close()
+    return png
 
 
 class Compositor:

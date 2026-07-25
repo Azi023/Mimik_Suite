@@ -16,6 +16,7 @@ from api.routers import (
     approvals,
     assets,
     billing,
+    brand_book,
     brands,
     briefs,
     clients,
@@ -85,6 +86,7 @@ app.include_router(admin.router)
 app.include_router(intake.router)
 app.include_router(clients.router)
 app.include_router(brands.router)
+app.include_router(brand_book.router)
 app.include_router(assets.router)
 app.include_router(fonts.router)
 app.include_router(pillars.router)

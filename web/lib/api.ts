@@ -917,6 +917,33 @@ export async function fetchCreativeArtifact(
   return response;
 }
 
+/**
+ * Authenticated raw brand-book export fetch (PDF or one section PNG), used ONLY by the
+ * same-origin Next route proxies. The studio "Download PDF" / "Export PNG" buttons are plain
+ * browser navigations that carry the httpOnly session cookie, not a bearer — so the proxy
+ * attaches the bearer server-side and streams the file back (mirrors `fetchCreativeArtifact`).
+ * `path` is the API export path (`brand-book.pdf` or `brand-book/{section}.png`).
+ */
+export async function fetchBrandBookExport(
+  brandId: string,
+  path: string,
+  sessionToken?: string,
+): Promise<Response> {
+  const url = `${getApiBaseUrl()}/brands/${encodeURIComponent(brandId)}/${path}`;
+  const headers: Record<string, string> = { Accept: "*/*" };
+  const token = resolveBearer(sessionToken);
+  if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(url, {
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(CREATIVE_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw await apiError(response, `GET ${url} -> ${response.status}`);
+  }
+  return response;
+}
+
 /** Raw SVG master text for the in-product canvas editor. */
 export async function fetchCreativeSvg(
   creativeId: string,
