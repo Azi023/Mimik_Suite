@@ -4,7 +4,146 @@
 
 ---
 
-## ► LATEST (2026-07-26 am01) — P0 STORAGE BUG FOUND + FIXED; canvas fix shipped; codex runs LOCALLY now
+## ► LATEST (2026-07-26 am06) — LAYOUT ENGINE shipped · Leonardo API R&D done · Shevin's UX bugs fixed · 10LEGOS kit generated
+
+Continues am01 (below). Everything here is MERGED + DEPLOYED unless marked otherwise.
+
+### 🎯 THE BIG ONE: the "5-layer engine" was a 2-layer engine (FIXED — `5ac6ad9`)
+Operator looked at a generated creative and said "looks like a set of templates added and the placements
+is shitty". He was right, and the diagnosis was structural:
+- `LayerKind` declares L1..L5 but `api/services/creative_generation.py` referenced **L2_CONCEPT /
+  L3_SCAFFOLD / L4_MESSAGE exactly ZERO times**. Only L1_BASE + L5_FINISH were ever emitted → a
+  background plus ONE flat HTML template render. That is why the canvas editor greys out L1..L4.
+- Symptom 1: the hero ornament was placed at a FIXED fraction of canvas height
+  (`hero_cy = st + params['hero_center_frac'] * (h-st-sb)`), blind to where text landed. A 3-line
+  headline pushed body copy underneath it → **the pink ornament rendered ON TOP OF the body text.**
+- Symptom 2: `_wrap()` broke lines by CHARACTER COUNT against one average-glyph constant
+  (`_HEAVY_GLYPH_FACTOR`) → orphaned words ("very" alone on a line).
+**FIX:** `compositor.measure_svg_text` measures with the SAME Chromium that renders (`getBBox` +
+`getComputedTextLength`), one page reused. Blocks stack into named scaffold regions; the hero is placed
+into the largest REMAINING FREE RECT, with `hero_frac` as a MAXIMUM not a fixed position. Overlap is now
+an INVARIANT — text∩decoration or safe-area breach RAISES rather than emitting a broken creative. Real
+L3_SCAFFOLD + L4_MESSAGE layers are emitted. Visual identity unchanged.
+Verified in prod by regenerating the SAME topic: body copy readable, hero below the text, no collision.
+- ⚠ **Known gap (logged, not fixed):** the `ayah_translation` archetype marks its hero `data-container`
+  instead of `data-occluding`, so text-vs-hero overlap is NOT checked there, and nothing verifies the text
+  is actually CONTAINED within the container. Narrow + cosmetic.
+- ⚠ **Layout is SAFE but not yet BALANCED** — big dead gaps body→hero and hero→CTA. Non-collision is
+  solved; optical rhythm is not. Operator asked for "balance the layout" — NOT DONE, next lane.
+
+### 💰 LEONARDO API — key wired + full model/cost R&D (spent 80 of 3345 tokens)
+- Key is in `/root/mimik-suite/.env` as `LEONARDO_API_KEY` (chmod 600, .env backed up). Piped via stdin,
+  never in an ssh command line (ps would expose it). **⚠ The key was pasted in chat — ROTATE IT after R&D.**
+  **⚠ Also rotate the Supabase DB password** — `DATABASE_URL` leaked into a shell error while sourcing .env.
+- Account: `apiPaidTokens` = 3345 initially (this is the real budget, not "$5"), 10 concurrency slots.
+  Read balance: `GET /api/rest/v1/me` → `user_details[0].apiPaidTokens`. Diff it to measure real cost.
+- `/pricing-calculator` endpoint EXISTS and is schema-valid (required fields: modelId, imageWidth,
+  imageHeight, numImages, inferenceSteps, promptMagic, alchemyMode, highResolution, isModelCustom, isSDXL)
+  but returns `cost: null` for every model on this tier — **useless, measure empirically instead.**
+- **MEASURED costs** (832x1216, 1 image, 10 steps, seed 777, same prompt):
+  | model | id | cost | verdict |
+  |---|---|---|---|
+  | Flux Schnell | `1dd50843-d653-4516-a8e3-f0238ee453ff` | **2** | good vector, mushy hands — ITERATION TIER |
+  | Lucid Realism | `05ce0082-2d80-4a2d-8653-4d1c85e2418e` | **8** | 🏆 BEST — cleanest editorial, best headroom |
+  | Flux Dev | `b2614463-296c-462a-9586-aafdb8f00e36` | **8** | 🏆 excellent, diverse skin tones |
+  | Lucid Origin | `7b592283-e8a7-4c5a-9ba6-d18c31f258b9` | 8 | strong |
+  | Lightning XL | `b24e16ff-06e3-43eb-8d33-4416c2d75876` | 8 | ❌ dark/moody semi-real, off-brand |
+  | Phoenix 1.0 | `de7d3faf-762f-48e0-b3b7-9d0ac3a3fcf3` | 11 | ❌ fills frame, NO headroom for text |
+  | AlbedoBase XL / Leo Diffusion XL / Leo Vision XL | — | 11 | ❌ all fill the frame / off-palette |
+  | FLUX.1 Kontext | `28aeddf8-bd19-4803-80fc-79602d1a9989` | — | rejected h=1216; needs 672/720/752/832/880/944/1024/1104 |
+- **KEY FINDING: the ENTIRE 11-token tier LOST.** They are realism/painterly models that fill the frame
+  edge-to-edge, which is exactly wrong when the frame must hold headline + body + CTA. **Paying more hurts.**
+- **STRATEGY: iterate at 2 (Flux Schnell), finalise at 8 (Lucid Realism primary, Flux Dev for figures),
+  never the 11-tier for Simply Nikah.** ~400 finished deliverables remain in budget.
+- Prompt that worked (art must carry NO text; the engine composites text around it):
+  `flat vector editorial illustration, <subject>, deep plum linework, magenta and blush pink fills, pale
+  pink gradient background with large soft organic blob shapes, subtle small sparkle accents, generous
+  empty negative space at top and bottom of the frame, clean minimal geometric shapes, centered composition`
+  negative: `text, letters, words, typography, watermark, signature, photograph, 3d render, clutter`
+- ⚠ **"Switch the imagery" is a BUILD, not a flag.** `IMAGE_BACKEND_HERO` is still UNSET, and there is
+  **NO Leonardo API adapter** — `creative/adapters/` has only `leonardo_browser.py` (Chrome automation) and
+  `ImageBackend` has no `LEONARDO_API` value. Operator explicitly wants the direct API, not browser login.
+  So: NEW adapter + enum value + spend guard + token accounting. Fully specified by the R&D above. NOT DONE.
+- Gemini free tier has **NO image quota**; chatgpt_browser is **Cloudflare-blocked**. Only paid APIs or
+  leonardo work. Keep `MIMIK_ALLOW_PAID_IMAGES` as a GUARD (set to 1) + a hard request cap — do not delete it.
+
+### 🧑‍💻 SHEVIN'S FEEDBACK — both bugs fixed (`3953da1`)
+1. **P1 SCROLL BUG (worse than reported):** `.app-shell` is `height:100dvh; overflow:hidden` and
+   `.app-content` had NO `overflow-y` → EVERY page taller than the viewport was silently clipped, mouse
+   wheel AND keyboard dead. Only the Board escaped (it owns an internal scroller). On `/assets` the heading
+   was cut off at top and the last card at bottom **with ZERO assets**; with 9 logos everything below was
+   unreachable. FIX: shell owns the scroller; pages opt out explicitly via `contentScroll="internal"`
+   (Board only) so there is never an accidental double scrollbar; scroller is keyboard-focusable; legacy
+   page roots (`.brief`, `.brief-editor`, `.wiz`, `.kit`, `.bk-canvas`) no longer self-scroll.
+2. **Colour picker:** both palette editors used `<input type="color">` (the OS dialog Shevin screenshotted)
+   with no hex entry. Replaced with a shared `HexColourControl` — hex entry (3/6-digit, ±#, any case) + live
+   swatch, invalid drafts stay visible with an alert instead of silently reverting.
+   ⚠ **PARTIAL: this is hex-entry ONLY — there is NO visual picker any more.** Shevin asked for "a really
+   new one", i.e. a MODERN PICKER *with* hex. Choosing a colour now requires knowing the hex → a capability
+   regression for non-technical users. **A proper picker (sat/hue field + swatches) is QUEUED as a Fable
+   lane** per CLAUDE.md's frontend rule (needs a visual reference).
+   Note `HexColourControl.ts` is `.ts`+`createElement`, NOT `.tsx` — deliberate: the repo's web tests run via
+   `cd web && node --test --experimental-strip-types` (32 tests), which strips types but CANNOT transform JSX.
+3. **"How do I generate the brand kit?" — he's right, THE FEATURE DOES NOT EXIST.** Zero UI actions; the only
+   paths are `scripts/curate_brand_kit.py` + `scripts/seed_brand_kit.py` (dev scripts over SSH). Operator
+   asked to "have it added" — **NOT DONE, next lane.**
+
+### ✅ 10LEGOS BRAND KIT GENERATED (Shevin's client, Jasmin tenant) — live on prod
+- `kit` was `{}`. Authored via a **Fable subagent** from the real brand record, applied through the REAL
+  `PATCH /brands/{id}` kit endpoint (audited + deep-merged), NOT a raw DB write.
+- Brand: `87e9f667-adff-4de2-85de-295cb2876bb0` · client `5c7f6d52-b7b4-4af2-a459-8bfb89f8edf4` ·
+  tenant Jasmin `3c9fb673-2e9d-4cb1-8e91-ba3e71d12639`. Niche: Toys & Premium Collectibles. Palette:
+  Blueberry `#4330be` / Sunshine `#f2b705` / Sunlight `#f27405` / Poppy `#f21a05`.
+- The copy's load-bearing idea, reusable: **"premium wins on structure (grid, spacing, type); playful wins
+  on content (illustration, copy)"** — resolves the playful-vs-premium tension for this brand.
+- ⚠ **HOW TO WRITE CROSS-TENANT:** `super_admin` bypasses ROLE gates but tenant-scoped queries still filter
+  by the principal's OWN `tenant_id`, so you CANNOT administer another tenant's brands via the normal
+  endpoints (correct IDOR design). Mint a tenant-scoped token instead:
+  `docker exec mimiksuite-api-1 python -c "from api.core.security import create_access_token; print(create_access_token(tenant_id='<T>', role='owner'))"`
+- ⚠ Querying prod DB: `DATABASE_URL` in the container is `postgresql://` so SQLAlchemy grabs psycopg2 (absent).
+  Rewrite to `postgresql+asyncpg://` and strip the query string.
+
+### `curate_brand_kit.py` RAN ON PROD → `eligible=0` (CORRECT, not a bug)
+`scripts/curate_brand_kit.py:113-120` requires BOTH `artifact_exists(creative.id)` AND the latest approval
+action == `"approve"`. Nothing is approved and the artifacts were destroyed by the am01 storage bug. It will
+work once the generate→approve loop has run once with the volume in place. No code change needed.
+
+### Repos synced
+Mimik_Suite `3953da1` · mimik-contracts `9e2df2f` · mimik-knowledge `d4010b4` — all pushed, all clean.
+⚠ The VPS clone of Mimik_Suite was **stranded on `lane/fix-canvas-editor`**, so the 3-min `sync-pull.sh`
+cron (which does `pull --ff-only` on the CURRENT branch) silently could not advance it. Now on `main`.
+**Check the VPS clone's BRANCH, not just the cron, when it looks stale.**
+
+### Anti-context (added this session)
+- `gh run list --limit 1` right after a push returns the PREVIOUS run → `gh run watch` reports a FALSE GREEN.
+  Always resolve by headSha and poll until the run exists. Then verify the DEPLOYED ARTIFACT (curl prod
+  `/openapi.json`), not the tick.
+- The Bash tool's cwd PERSISTS between calls — a `cd web` earlier made `git add web` fail with
+  "pathspec did not match". Use absolute paths in git commands.
+- Leonardo image CDN download 403s from the VPS; fetch image URLs from the local machine instead.
+- `sourcing` prod `.env` in bash breaks on special chars in DATABASE_URL **and echoes the password in the
+  error**. Read single keys with awk instead.
+
+### NEXT ACTIONS (operator-directed, in priority order)
+1. **Add brand-kit generation as a UI action** (does not exist; Shevin blocked).
+2. **Build the Leonardo API adapter** + enum value + spend guard, then set `IMAGE_BACKEND_HERO`
+   (Lucid Realism finals / Flux Schnell iteration). Operator: "use this API directly, not chrome login".
+3. **Balance the layout** (optical rhythm; kill the dead gaps). Touches `nikah_templates.py` — must not
+   race another lane in that file.
+4. **Asset gathering** — operator says important. Copyright: client's own material + licensed fonts fine;
+   others' posters = REFERENCES ONLY. Operator stated "all rights are reserved" for their material.
+5. **Proper visual colour picker** (Fable + frontend-design + a reference).
+6. **BYOK API keys in Settings** — operator wants it, and wants Shevin to use Leonardo. ⚠ Today the key is a
+   GLOBAL env var, so enabling imagery means Shevin spends the operator's credits with no per-tenant
+   accounting. Real BYOK = encrypted at rest, write-only field, audit on change, strict tenant scoping —
+   its own reviewed lane, NOT a settings text column.
+7. Zaid stays `super_admin` — operator explicitly said **do not demote**.
+8. Still open from am01: prod compose untracked/hand-synced · suspension check = a DB hit per authed request
+   · `ayah_translation` containment · asset upload has never round-tripped through the new volume.
+
+---
+
+## (2026-07-26 am01) — P0 STORAGE BUG FOUND + FIXED; canvas fix shipped; codex runs LOCALLY now
 
 Read this whole entry before touching prod. The headline is **not** the canvas fix — it's that
 production was **destroying every creative artifact and every uploaded brand asset on every deploy**.
