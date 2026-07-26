@@ -27,11 +27,9 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Studio view: the book renders inside the app shell's non-scrolling flex content region
-   (.app-content is display:flex; the shell itself is 100dvh/overflow:hidden), so the book must
-   OWN its vertical scroll or its chapters get clipped below the fold. The public/export variant
-   (.bk-canvas--full) is rendered OUTSIDE the shell and must stay unconstrained — natural height
-   for the Playwright PDF/PNG capture and normal body scroll on the shared /book page. */
+/* Studio view can fill the app shell; page-scroll mode overrides this to visible overflow so
+   the shell owns vertical scrolling. The public/export variant (.bk-canvas--full) is rendered
+   OUTSIDE the shell and stays unconstrained for capture and normal body scroll. */
 .bk-canvas:not(.bk-canvas--full) {
   flex: 1;
   min-height: 0;

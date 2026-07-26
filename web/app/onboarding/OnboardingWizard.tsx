@@ -7,6 +7,7 @@ import type { ApiClient, ApiPillarPreset } from "@/lib/api";
 import { useUnsavedGuard } from "@/lib/hooks";
 import { ChipsInput } from "@/components/ChipsInput";
 import { CheckIcon } from "@/components/icons";
+import { HexColourControl } from "@/components/HexColourControl";
 import { OnboardingField as Field, OnboardingSectionTitle as SectionTitle } from "@/components/OnboardingFields";
 import {
   IMAGERY_MEDIA,
@@ -501,12 +502,10 @@ export function OnboardingWizard({
             <div className="wiz-colors">
               {colors.map((c, i) => (
                 <div className="wiz-color-row" key={i}>
-                  <input
-                    type="color"
-                    className="wiz-color__swatch"
+                  <HexColourControl
                     value={c.hex}
-                    onChange={(e) => updateColor(i, { hex: e.target.value })}
-                    aria-label="Colour"
+                    onChange={(value) => updateColor(i, { hex: value })}
+                    label={`Colour ${i + 1}`}
                     data-api-field="hex"
                     aria-invalid={invalidField === "hex" ? true : undefined}
                   />

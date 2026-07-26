@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { saveClientBrand } from "@/app/clients/[id]/edit/actions";
 import { ChipsInput } from "@/components/ChipsInput";
+import { HexColourControl } from "@/components/HexColourControl";
 import {
   OnboardingField as Field,
   OnboardingSectionTitle as SectionTitle,
@@ -200,14 +201,12 @@ export function ClientBrandEditor({ client, brand }: ClientBrandEditorProps): JS
               <p className="wiz__hint">The brand colours every creative composes from.</p>
               <div className="wiz-colors">
                 {palette.map((color, index) => (
-                  <div className="wiz-color-row" key={`${index}-${color.hex}`}>
-                    <input
-                      className="wiz-color__swatch"
+                  <div className="wiz-color-row" key={index}>
+                    <HexColourControl
                       name="color_hex"
-                      type="color"
                       value={color.hex}
-                      onChange={(event) => updateColor(index, "hex", event.target.value)}
-                      aria-label={`Color ${index + 1}`}
+                      onChange={(value) => updateColor(index, "hex", value)}
+                      label={`Colour ${index + 1}`}
                     />
                     <input
                       className="input"

@@ -3,6 +3,7 @@
 import { useRef, useState, type CSSProperties, type JSX, type PointerEvent } from "react";
 import Link from "next/link";
 import { saveBrandKit, type KitSaveResult } from "@/app/brands/[id]/kit/actions";
+import { HexColourControl } from "@/components/HexColourControl";
 import { useAutosave, useUnsavedGuard } from "@/lib/hooks";
 import type {
   ApiBrand,
@@ -241,15 +242,13 @@ export function BrandKitEditor({ brand, clientName }: BrandKitEditorProps): JSX.
             <div className="wiz-colors">
               {colors.map((c, i) => (
                 <div className="wiz-color-row" key={i}>
-                  <input
-                    type="color"
-                    className="wiz-color__swatch"
+                  <HexColourControl
                     value={c.hex}
-                    onChange={(e) => {
-                      setColors((cs) => cs.map((x, idx) => (idx === i ? { ...x, hex: e.target.value } : x)));
+                    onChange={(value) => {
+                      setColors((cs) => cs.map((x, idx) => (idx === i ? { ...x, hex: value } : x)));
                       touched();
                     }}
-                    aria-label="Colour"
+                    label={`Colour ${i + 1}`}
                   />
                   <input
                     className="input"

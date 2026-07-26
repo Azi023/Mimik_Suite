@@ -16,6 +16,8 @@ interface AppShellProps {
   title?: string;
   /** Optional secondary crumb next to the title. */
   crumb?: string;
+  /** Opt out when the page deliberately owns one or more internal scroll regions. */
+  contentScroll?: "page" | "internal";
 }
 
 /**
@@ -23,7 +25,13 @@ interface AppShellProps {
  * On mobile the sidebar collapses (see globals.css) and the TopBar hamburger
  * opens the off-canvas MobileNavDrawer, which reuses the same Sidebar content.
  */
-export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JSX.Element {
+export function AppShell({
+  children,
+  sidebar,
+  title,
+  crumb,
+  contentScroll = "page",
+}: AppShellProps): JSX.Element {
   const pathname = usePathname();
   // Only the canvas editor + the review/approve surface collapse app chrome —
   // NOT /clients/[id]/edit (the brand form) or /brands/[id]/kit, which want the client list.
@@ -94,7 +102,12 @@ export function AppShell({ children, sidebar, title, crumb }: AppShellProps): JS
           navOpen={mobileNavOpen}
           onOpenNav={openMobileNav}
         />
-        <main className="app-content">{children}</main>
+        <main
+          className={`app-content app-content--${contentScroll}-scroll`}
+          tabIndex={contentScroll === "page" ? 0 : -1}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

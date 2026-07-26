@@ -105,7 +105,7 @@ export function BoardView({
 
   return (
     <div className="board-view">
-      <div className="board-view__main">
+      <div className="board-view__main" tabIndex={0} aria-label="Board content">
         <form className="generate-control" onSubmit={handleGenerate}>
           <label className="visually-hidden" htmlFor="generate-client">
             Client
