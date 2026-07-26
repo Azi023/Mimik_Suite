@@ -31,6 +31,7 @@ _PURPOSE_ENV: dict[str, str] = {
 }
 # Key env var per fallback-eligible paid backend (a backend without its key is never tried).
 _KEY_ENV: dict[ImageBackend, str] = {
+    ImageBackend.LEONARDO_API: "LEONARDO_API_KEY",
     ImageBackend.GPT_IMAGE: "OPENAI_API_KEY",
     ImageBackend.OPENROUTER: "OPENROUTER_API_KEY",
 }
@@ -78,14 +79,18 @@ def choose_backend(purpose: Literal["dev", "hero"]) -> ImageBackend | None:
 
 def _alternate_paid_backend(primary: ImageBackend) -> ImageBackend | None:
     """The single paid backend to try after `primary` fails — only if its key is configured."""
-    for candidate in (ImageBackend.GPT_IMAGE, ImageBackend.OPENROUTER):
+    for candidate in (
+        ImageBackend.GPT_IMAGE,
+        ImageBackend.OPENROUTER,
+        ImageBackend.LEONARDO_API,
+    ):
         if candidate != primary and os.environ.get(_KEY_ENV[candidate]):
             return candidate
     return None
 
 
 async def generate_with_fallback(
-    request: ImageRequest, purpose: str = "hero"
+    request: ImageRequest, purpose: Literal["dev", "hero"] = "hero"
 ) -> ImageResult | None:
     """Generate via the configured backend with retry-once + one paid alternate.
 
@@ -93,13 +98,16 @@ async def generate_with_fallback(
     ONE alternate paid backend (key-configured) gets a single attempt — each attempt is real
     money once the spend gate is open. All failures → ImageGenerationFailed.
     """
-    backend = choose_backend(purpose)  # type: ignore[arg-type]  # validated inside
+    backend = choose_backend(purpose)
     if backend is None:
         logger.info("image backend for purpose=%s is 'none' — placeholder path, zero spend", purpose)
         return None
 
     from . import get_adapter  # local import: the registry lives in the package root
 
+    routed_request = request.model_copy(
+        update={"params": {**request.params, "purpose": purpose}}
+    )
     chain: list[ImageBackend] = [backend]
     alternate = _alternate_paid_backend(backend)
     if alternate is not None:
@@ -111,7 +119,7 @@ async def generate_with_fallback(
         tries = 2 if index == 0 else 1
         for attempt in range(1, tries + 1):
             try:
-                result = await adapter.generate(request)
+                result = await adapter.generate(routed_request)
             except PaidImageSpendNotApproved:
                 raise  # operator gate — neither retry nor fallback can approve spend
             except (KeyError, ValueError, TypeError):

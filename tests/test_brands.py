@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
 from conftest import superadmin_headers
 from httpx import AsyncClient
 
 from api.core.security import create_access_token
+from creative import prompting
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -347,3 +351,157 @@ async def test_client_role_cannot_patch_brand_kit(client: AsyncClient) -> None:
     assert rejected.status_code == 403
     fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token))
     assert fetched.json()["kit"]["discovery"]["purpose"] is None
+
+
+def _generated_kit_reply() -> dict[str, object]:
+    return {
+        "discovery": {
+            "purpose": "Generated purpose",
+            "mission": "Generated mission",
+            "vision": "Generated vision",
+            "personality": "Generated personality",
+            "values": ["Clarity", "Care"],
+            "tone_of_voice": "Generated tone",
+            "key_usp": "Generated USP",
+            "visual_competitor_analysis": "Generated competitor analysis",
+            "existing_brand_review": "Generated existing review",
+            "timeline": "Generated timeline",
+        },
+        "direction": {
+            "palette_rationale": "Generated palette rationale",
+            "visual_tone": "Generated visual tone",
+            "personality_alignment": "Generated alignment",
+            "competitor_differentiation": "Generated differentiation",
+        },
+    }
+
+
+def _stub_brand_kit_text(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    prompts: list[str] = []
+
+    def generate(prompt: str) -> str:
+        prompts.append(prompt)
+        return json.dumps(_generated_kit_reply())
+
+    monkeypatch.setattr(prompting, "default_generate", lambda: (generate, "injected:test"))
+    return prompts
+
+
+async def test_generate_brand_kit_fills_only_empty_fields_by_default(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompts = _stub_brand_kit_text(monkeypatch)
+    token = await _new_tenant(client, slug="kit-generate-empty")
+    brand_id = await _new_brand(client, token)
+    seeded = await client.patch(
+        f"/brands/{brand_id}",
+        json={
+            "kit": {
+                "discovery": {
+                    "purpose": "Operator-authored purpose",
+                    "mission": None,
+                },
+                "direction": {"visual_tone": "Operator-authored visual tone"},
+            }
+        },
+        headers=_auth(token),
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    generated = await client.post(
+        f"/brands/{brand_id}/kit/generate",
+        json={},
+        headers=_auth(token),
+    )
+
+    assert generated.status_code == 200, generated.text
+    kit = generated.json()["kit"]
+    assert kit["discovery"]["purpose"] == "Operator-authored purpose"
+    assert kit["discovery"]["mission"] == "Generated mission"
+    assert kit["discovery"]["values"] == ["Clarity", "Care"]
+    assert kit["direction"]["visual_tone"] == "Operator-authored visual tone"
+    assert kit["direction"]["palette_rationale"] == "Generated palette rationale"
+    assert kit["prompt_ref"] == "brand_kit_narrative@v1"
+    assert kit["updated_at"] is not None
+    assert kit["updated_by"]["role"] == "owner"
+    assert len(prompts) == 1
+
+
+async def test_generate_brand_kit_overwrite_replaces_populated_fields(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_brand_kit_text(monkeypatch)
+    token = await _new_tenant(client, slug="kit-generate-overwrite")
+    brand_id = await _new_brand(client, token)
+    seeded = await client.patch(
+        f"/brands/{brand_id}",
+        json={
+            "kit": {
+                "discovery": {"purpose": "Operator purpose"},
+                "direction": {"visual_tone": "Operator visual tone"},
+            }
+        },
+        headers=_auth(token),
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    generated = await client.post(
+        f"/brands/{brand_id}/kit/generate",
+        json={"overwrite": True},
+        headers=_auth(token),
+    )
+
+    assert generated.status_code == 200, generated.text
+    assert generated.json()["kit"]["discovery"]["purpose"] == "Generated purpose"
+    assert generated.json()["kit"]["direction"]["visual_tone"] == "Generated visual tone"
+
+
+async def test_generate_brand_kit_tenant_isolation_leaves_owner_bytes_unchanged(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompts = _stub_brand_kit_text(monkeypatch)
+    token_a = await _new_tenant(client, slug="kit-generate-a")
+    token_b = await _new_tenant(client, slug="kit-generate-b")
+    brand_id = await _new_brand(client, token_a)
+    seeded = await client.patch(
+        f"/brands/{brand_id}",
+        json={"kit": {"discovery": {"purpose": "Tenant A purpose"}}},
+        headers=_auth(token_a),
+    )
+    assert seeded.status_code == 200, seeded.text
+    stored_before = seeded.json()["kit"]
+
+    rejected = await client.post(
+        f"/brands/{brand_id}/kit/generate",
+        json={"overwrite": True},
+        headers=_auth(token_b),
+    )
+
+    assert rejected.status_code == 404
+    fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token_a))
+    assert fetched.json()["kit"] == stored_before
+    assert prompts == []
+
+
+async def test_client_role_cannot_generate_brand_kit(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompts = _stub_brand_kit_text(monkeypatch)
+    token = await _new_tenant(client, slug="kit-generate-client")
+    brand_id = await _new_brand(client, token)
+    brand = await client.get(f"/brands/{brand_id}", headers=_auth(token))
+    client_token = create_access_token(
+        tenant_id=brand.json()["tenant_id"],
+        role="client",
+    )
+
+    rejected = await client.post(
+        f"/brands/{brand_id}/kit/generate",
+        json={},
+        headers=_auth(client_token),
+    )
+
+    assert rejected.status_code == 403
+    fetched = await client.get(f"/brands/{brand_id}", headers=_auth(token))
+    assert fetched.json()["kit"]["discovery"]["purpose"] is None
+    assert prompts == []

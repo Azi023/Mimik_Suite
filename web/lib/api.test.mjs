@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ApiError, createClient } from "./api.ts";
+import { ApiError, createClient, generateBrandKit } from "./api.ts";
 
 test("ApiError carries parsed FastAPI validation detail", async () => {
   const originalFetch = globalThis.fetch;
@@ -38,6 +38,28 @@ test("ApiError carries parsed FastAPI validation detail", async () => {
         return true;
       },
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("generateBrandKit posts an explicit overwrite choice with bearer auth", async () => {
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (input, init) => {
+    request = { input, init };
+    return new Response(JSON.stringify({ id: "brand-1" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    await generateBrandKit("brand-1", { overwrite: true }, "server-token");
+    assert.match(String(request.input), /\/brands\/brand-1\/kit\/generate$/);
+    assert.equal(request.init.method, "POST");
+    assert.equal(request.init.headers.Authorization, "Bearer server-token");
+    assert.equal(request.init.body, JSON.stringify({ overwrite: true }));
   } finally {
     globalThis.fetch = originalFetch;
   }

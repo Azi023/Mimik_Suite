@@ -174,6 +174,7 @@ export interface ApiBrandKit {
   launch_templates: ApiLaunchTemplate[];
   theme: ApiKitTheme;
   published: boolean;
+  prompt_ref: string | null;
   updated_at: string | null;
   updated_by: { id: string; role: string; name?: string | null } | null;
 }
@@ -804,6 +805,10 @@ export interface UpdateBrandKitBody {
   };
 }
 
+export interface GenerateBrandKitBody {
+  overwrite: boolean;
+}
+
 /** PATCH /brands/{id} — update brief fields and palette colors without replacing other tokens. */
 export function updateBrandBrief(
   brandId: string,
@@ -820,6 +825,20 @@ export function updateBrandKit(
   sessionToken?: string,
 ): Promise<ApiBrand> {
   return apiPatch<ApiBrand>(`/brands/${encodeURIComponent(brandId)}`, body, sessionToken);
+}
+
+/** POST /brands/{id}/kit/generate — draft kit narrative from the tenant-scoped brand. */
+export function generateBrandKit(
+  brandId: string,
+  body: GenerateBrandKitBody,
+  sessionToken?: string,
+): Promise<ApiBrand> {
+  return apiPost<ApiBrand>(
+    `/brands/${encodeURIComponent(brandId)}/kit/generate`,
+    body,
+    sessionToken,
+    120000,
+  );
 }
 
 /** DELETE /brands/{id} — soft-delete one tenant-scoped brand. */

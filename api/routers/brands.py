@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -16,6 +17,7 @@ from api.core.config import get_settings
 from api.db import repo
 from api.db.mappers import to_brand
 from api.db.session import get_session
+from creative.copy import brand_kit as brand_kit_copy
 from creative.render.compositor import render_url_element_to_png, render_url_to_pdf
 from mimik_contracts import (
     Actor,
@@ -24,6 +26,7 @@ from mimik_contracts import (
     BrandKit,
     BrandTokens,
     ColorRole,
+    GenerateBrandKit,
     Reference,
     UpdateBrandKit,
 )
@@ -101,6 +104,26 @@ def _deep_merge(current: dict[str, object], patch: dict[str, object]) -> dict[st
         else:
             merged[key] = value
     return merged
+
+
+def _empty_only_patch(
+    current: dict[str, object], generated: dict[str, object]
+) -> dict[str, object]:
+    """Select generated leaves whose current value is null, blank, absent, or an empty list."""
+    selected: dict[str, object] = {}
+    for key, value in generated.items():
+        existing = current.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            nested = _empty_only_patch(existing, value)
+            if nested:
+                selected[key] = nested
+        elif (
+            existing is None
+            or existing == []
+            or (isinstance(existing, str) and not existing.strip())
+        ):
+            selected[key] = value
+    return selected
 
 
 def _normalize_kit_clears(patch: dict[str, object]) -> dict[str, object]:
@@ -210,6 +233,44 @@ async def update_brand(
         row = updated
     await session.commit()
     return to_brand(row)
+
+
+@router.post("/{brand_id}/kit/generate", response_model=Brand)
+async def generate_brand_kit(
+    brand_id: str,
+    body: GenerateBrandKit,
+    principal: Principal = Depends(require_role(*_TEAM_ROLES)),
+    session: AsyncSession = Depends(get_session),
+) -> Brand:
+    """Draft kit narrative from this tenant-scoped brand without replacing authored copy."""
+    row = await repo.get_brand(
+        session, tenant_id=principal.tenant_id, brand_id=brand_id
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    try:
+        draft = await asyncio.to_thread(brand_kit_copy.draft_brand_kit, to_brand(row))
+    except (brand_kit_copy.BrandKitDraftError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=502, detail="Brand kit generation failed") from exc
+
+    current_kit = BrandKit.model_validate(row.kit) if row.kit else BrandKit()
+    current = current_kit.model_dump(mode="json")
+    generated = draft.narrative.model_dump(mode="json")
+    patch = generated if body.overwrite else _empty_only_patch(current, generated)
+    patch["prompt_ref"] = draft.prompt_ref
+    merged = _deep_merge(current, patch)
+    updated_kit = _stamp_brand_kit(BrandKit.model_validate(merged), principal)
+    updated = await repo.update_brand(
+        session,
+        tenant_id=principal.tenant_id,
+        brand_id=brand_id,
+        kit=updated_kit.model_dump(mode="json"),
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    await session.commit()
+    return to_brand(updated)
 
 
 @router.get("/{brand_id}", response_model=Brand)

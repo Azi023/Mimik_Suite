@@ -1419,6 +1419,60 @@
 }
 
 /* ————— studio control bar · share & export (studio surface only) ————— */
+.bk-generate {
+  max-width: 1116px;
+  margin: 26px auto 0;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  border: 1px solid var(--bk-line);
+  border-radius: 12px;
+  background: var(--bk-card);
+}
+.bk-generate__copy {
+  display: grid;
+  gap: 3px;
+  flex: 1 1 360px;
+}
+.bk-generate__copy strong {
+  color: var(--bk-ink);
+  font-size: 14px;
+}
+.bk-generate__copy span {
+  color: var(--bk-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.bk-generate__overwrite {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--bk-ink);
+  font-family: var(--bk-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.bk-generate__overwrite input {
+  accent-color: var(--bk-brand);
+}
+.bk-generate .bk-btn[disabled] {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+.bk-generate__message {
+  width: 100%;
+  margin: 0;
+  color: var(--bk-ink);
+  font-size: 13px;
+}
+.bk-generate__message--error {
+  color: #a83228;
+}
 .bk-ctlbar {
   max-width: 1180px;
   margin: 0 auto;
@@ -1651,6 +1705,13 @@
   }
   .bk-ctlbar {
     padding: 20px 16px 0;
+  }
+  .bk-generate {
+    margin: 20px 16px 0;
+    align-items: stretch;
+  }
+  .bk-generate .bk-btn {
+    text-align: center;
   }
   .bk-bookwrap {
     padding: 0 16px 50px;

@@ -14,6 +14,7 @@ from .gemini_free import GeminiFreeAdapter
 from .gemini_image import GeminiImageAdapter
 from .gpt_image import GPTImageAdapter
 from .leonardo_browser import LeonardoBrowserAdapter
+from .leonardo_api import LeonardoAPIAdapter, LeonardoBudgetExceeded
 from .openrouter import OpenRouterAdapter
 from .router import (
     ImageGenerationFailed,
@@ -27,6 +28,7 @@ _REGISTRY: dict[ImageBackend, type[ImageAdapter]] = {
     ImageBackend.LEONARDO_BROWSER: LeonardoBrowserAdapter,  # subscription browser path (no API cost)
     ImageBackend.GEMINI_FREE: GeminiFreeAdapter,
     # Paid APIs — spend-gated inside each adapter (MIMIK_ALLOW_PAID_IMAGES=1):
+    ImageBackend.LEONARDO_API: LeonardoAPIAdapter,
     ImageBackend.GPT_IMAGE: GPTImageAdapter,
     ImageBackend.OPENROUTER: OpenRouterAdapter,
     ImageBackend.GEMINI_IMAGE: GeminiImageAdapter,
@@ -56,6 +58,8 @@ __all__ = [
     "available_backends",
     "ChatGPTBrowserAdapter",
     "LeonardoBrowserAdapter",
+    "LeonardoAPIAdapter",
+    "LeonardoBudgetExceeded",
     "GeminiFreeAdapter",
     "GeminiImageAdapter",
     "GPTImageAdapter",
