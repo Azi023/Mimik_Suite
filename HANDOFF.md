@@ -124,12 +124,51 @@ cron (which does `pull --ff-only` on the CURRENT branch) silently could not adva
 - `sourcing` prod `.env` in bash breaks on special chars in DATABASE_URL **and echoes the password in the
   error**. Read single keys with awk instead.
 
+### ✅ SHIPPED AFTER am06 — kit-generate action + Leonardo direct-API adapter (`d1bc7a9`, deployed)
+- **POST /brands/{brand_id}/kit/generate** — the missing product action Shevin asked for. Drafts
+  discovery+direction from the brand's OWN record via the existing free-text path (prompt
+  `brand_kit_narrative` now lives in **mimik-knowledge/prompts/** = the version of record, `abfb99f`).
+  NON-DESTRUCTIVE by default (fills EMPTY fields only; `overwrite: true` is explicit), reuses the router's
+  existing kit deep-merge, tenant-scoped both ways with 404 on miss, client-role rejected, brand text
+  fenced as DATA (#3). UI action lives in `web/components/brand-kit/BrandKitEditor.tsx` +
+  `web/app/api/brand-kit/[id]/generate/route.ts`. VERIFIED live in prod `/openapi.json`.
+- **creative/adapters/leonardo_api.py** + `ImageBackend.LEONARDO_API` (contracts `e226ea0`).
+  `ensure_spend_approved()` is the FIRST statement of `generate()`. `LeonardoBudgetExceeded` SUBCLASSES
+  `PaidImageSpendNotApproved` so existing catch sites cover budget refusals. Checked BEFORE submit:
+  `LEONARDO_MAX_TOKENS_PER_RUN` (default 8 = one hero image) and `LEONARDO_MIN_TOKEN_BALANCE` (default 16).
+  Balance read from `/me` before+after; tokens spent logged at INFO. **The key appears ONLY in the
+  Authorization header** — never in a log, exception or artifact. Model defaults from MEASUREMENT:
+  `LEONARDO_MODEL_HERO`=Lucid Realism (8 tok), `LEONARDO_MODEL_DEV`=Flux Schnell (2 tok).
+- ⚠ **IMAGERY IS STILL OFF AND SPENDS NOTHING.** Verified on prod after deploy:
+  `IMAGE_BACKEND_HERO=<UNSET>`, `MIMIK_ALLOW_PAID_IMAGES=<UNSET>`. To enable, set BOTH on prod
+  (`IMAGE_BACKEND_HERO=leonardo_api`, `MIMIK_ALLOW_PAID_IMAGES=1`) and restart api. **The first real
+  generation costs 8 tokens and is the moment to check the QA critic's headline-CONTRAST check against
+  photographic art — it has only ever run against a flat placeholder.**
+
+### ✅ ASSET GATHERING — resolved by investigation, not by browsing
+- 10LEGOS ALREADY has its own material uploaded and **INTACT**: 6 logos, 5 reference creatives, fonts
+  (12 asset rows, 16 files) at `/root/mimik-suite/var/assets/<tenant>/<brand>/`.
+- **This CLOSED the last unverified part of the P0 storage fix, with real client data:** files written
+  04:56 survived an image built 06:41 + container recreated 06:44, and a 4th deploy after that (16 files
+  still present, 2 backup archives rotating).
+- ⚠ `10legos.com` is **NXDOMAIN** — the website in their brand record does not resolve. Nothing to fetch
+  from their site; ask Shevin to confirm the handle.
+- **So the REAL remaining work is wiring EXISTING assets into `kit.logo_suite` slots and
+  `kit.direction.moodboard_asset_ids`** — code, not browsing, and no copyright judgment needed (it is all
+  the client's own material, already in the system).
+
 ### NEXT ACTIONS (operator-directed, in priority order)
 1. **Add brand-kit generation as a UI action** (does not exist; Shevin blocked).
 2. **Build the Leonardo API adapter** + enum value + spend guard, then set `IMAGE_BACKEND_HERO`
    (Lucid Realism finals / Flux Schnell iteration). Operator: "use this API directly, not chrome login".
-3. **Balance the layout** (optical rhythm; kill the dead gaps). Touches `nikah_templates.py` — must not
-   race another lane in that file.
+3. **BALANCE THE LAYOUT — THE SINGLE CLEAR NEXT ACTION.** Layout is SAFE (no collisions) but not
+   BALANCED: big dead gaps body->hero and hero->CTA, and the lattice ground is washed out vs the
+   operator's reference posts. Touches `creative/render/nikah_templates.py`, which now holds the
+   measurement pass + scaffold regions + the overlap invariant — it is the most load-bearing file in the
+   engine. Review this diff carefully and with fresh context; a sloppy review here can reintroduce the
+   ornament-over-text bug. Reference posts to aim at: the operator's own @simply_nikah grid (logo top,
+   headline w/ optional knockout highlight word, 2-4 line body, ONE big flat-vector hero, bottom payoff
+   pill or white card w/ pink border, pale-pink ground with large soft blobs).
 4. **Asset gathering** — operator says important. Copyright: client's own material + licensed fonts fine;
    others' posters = REFERENCES ONLY. Operator stated "all rights are reserved" for their material.
 5. **Proper visual colour picker** (Fable + frontend-design + a reference).
