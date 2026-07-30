@@ -4,7 +4,178 @@
 
 ---
 
-## ► LATEST (2026-07-26 am06) — LAYOUT ENGINE shipped · Leonardo API R&D done · Shevin's UX bugs fixed · 10LEGOS kit generated
+## ► LATEST (2026-07-29 16:29 +0530) · 192.168.1.15 · claude-opus-5[1m] via Claude Code — 🔴 CRITICAL: prod Supabase `public` schema was world-writable; RLS migration written + validated, **NOT YET APPLIED TO PROD**
+
+**Goal:** Close a live data-exposure hole — every tenant's rows in the production
+database were readable AND writable by anyone holding the project URL + anon key,
+bypassing the API entirely. Triggered by a Supabase security email
+(`rls_disabled_in_public`, project `gxpjkqjewjqmztguqudt`, dated 26 Jul 2026).
+
+**State:**
+- Branch: `main` @ `ef42a8d` → new commit this session (see below)
+- Tests: **760 passed, 1 skipped** against the RLS-enabled local `:5434` DB (incl. the IDOR negative test)
+- `ruff check` + `ruff format --check`: clean
+- WIP branch: none
+- ⚠️ **Production is still UNPATCHED.** The migration exists in git; it has NOT run against Supabase.
+
+**Commits this session:** one commit —
+`fix(P-SEC): enable RLS + revoke PostgREST grants on public schema` — carries the
+migration, the `scratchpad/` gitignore fix, and this handoff entry.
+
+### 🔴 The finding (worse than the email said)
+
+The email named one table. It was **all 17**. Root cause is architectural, not a
+missed checkbox:
+
+- `docker-compose.prod.yml:7` — *"Postgres is EXTERNAL (Supabase) — there is
+  intentionally no postgres service."* **In prod, Supabase IS the app database.**
+- So all 16 Alembic tables (`tenants`, `clients`, `brands`, `briefs`, `jobs`,
+  `creative_docs`, `approvals`, `user_accounts`, …) + `alembic_version` live in
+  `public`, which Supabase auto-exposes over PostgREST.
+- With RLS off, PostgREST served read+write on every row to the `anon` role.
+  **Locked constraint #2 (tenant authZ at the DATA layer) was void** — reachable
+  without an IDOR at all, so the green IDOR test proved nothing about this path.
+
+**Mitigating factor (verified, not assumed):** `SUPABASE_ANON_KEY` is read
+server-side only — no `NEXT_PUBLIC_` prefix, `web/lib/session.ts:73,155`. The key
+never reaches the browser, so this was not a key-is-public situation. Posture was
+still wrong: Supabase's model assumes RLS is on.
+
+### The fix — `migrations/versions/f3a7c21b9e04_rls_lockdown_public_schema.py`
+
+Head `d41f83a2c906` → `f3a7c21b9e04`. Two statements, both iterating the live
+catalog rather than a hardcoded table list:
+
+1. `ENABLE ROW LEVEL SECURITY` on every `public` table owned by the current role.
+2. `REVOKE ALL` from `anon` + `authenticated`, including schema `USAGE`.
+
+**Why the catalog loop, not a table list:** it also covers `alembic_version` and
+any table created outside migrations (dashboard, ad-hoc SQL) — plausibly what
+tripped the linter, since I could not see the live DB to confirm which table the
+email meant. Extension-owned tables (`pg_depend` deptype `'e'`) are skipped —
+we cannot `ALTER` them and they are not ours.
+
+**Why zero policies is correct here (the load-bearing fact):** *nothing* in this
+product talks to PostgREST. `web/package.json` has **no** `@supabase/supabase-js`
+dependency; the web app reaches the API over `NEXT_PUBLIC_API_URL`, and Supabase
+is used only to issue/verify JWTs (`api/core/supabase_auth.py`). RLS with no
+policies = default deny for `anon`/`authenticated`, zero impact on the app.
+
+**Why it does not break the API:** the backend connects as the table *owner*, and
+owners bypass RLS. **`FORCE ROW LEVEL SECURITY` is deliberately NOT used** — it
+strips that bypass and would take the backend down. Verified `relforcerowsecurity
+= f` on all 17.
+
+**Verified locally (`:5434`), not asserted:**
+
+| Check | Result |
+|---|---|
+| RLS enabled | 17/17, `forced = f` on every one |
+| `pg_policies` in `public` | `0` — default deny |
+| downgrade → upgrade round-trip | 17/17 → 0/17 → 17/17 clean |
+| pytest | 760 passed, 1 skipped |
+
+### Secrets audit (ran before committing, per operator instruction)
+
+- No `.env` / `*.key` / `*.pem` / `credentials*` tracked. Only `.env.example` +
+  `web/.env.example`, both placeholders.
+- No JWT-shaped (`eyJ…`) or `sb_secret_` literals in **any** tracked file.
+- `scratchpad/` (62 files incl. `api.log`, `codex_*.log`) was untracked **but not
+  gitignored** — one `git add -A` from being committed. **Added to `.gitignore`
+  this session.** Scanned first: 0 files contained secret-shaped strings.
+
+**Decisions made:**
+- Committed **only** the migration + gitignore fix, not the 5 pre-existing dirty
+  files (`uv.lock`, `.claude/settings.json`, `web/pnpm-lock.yaml`,
+  `web/pnpm-workspace.yaml`, `scratchpad/`) — they predate this session and mixing
+  them would make a security commit non-revertible in isolation. **They are still
+  dirty; someone must decide on them.** Note `.claude/settings.json` is literally
+  `{}` (3 bytes) and probably deletable.
+- Chose an Alembic migration over pasting SQL into the dashboard, so the fix is
+  version-controlled and auto-applies on API boot
+  (`docker/api-entrypoint.sh` → `alembic upgrade head`).
+- Did **not** move tables out of `public` into an unexposed schema. That is the
+  deeper fix (removes the REST surface instead of denying it) but a much bigger
+  migration; RLS was the correct call for a live hole.
+
+**Don't repeat:**
+- Don't run `uv run --no-sync alembic ...` against the `.env` `DATABASE_URL` from
+  this machine — it dies with `SSL: CERTIFICATE_VERIFY_FAILED: self-signed
+  certificate in certificate chain`. The bundled `docker/supabase-ca.crt`
+  ("Supabase Root 2021 CA", wired in `api/core/config.py:84-90`) appears to have
+  been superseded by a newer Supabase CA. **Unresolved — this means the local →
+  prod migration path is currently broken.** Local validation was done by
+  overriding the URL inline:
+  `DATABASE_URL='postgresql+asyncpg://mimik:mimik@localhost:5434/mimik_suite' uv run --no-sync alembic upgrade head`
+- Don't add `FORCE ROW LEVEL SECURITY` "for completeness" — it removes the owner
+  bypass the API depends on and will 500 every request.
+- Don't assume the green IDOR test covers this class of bug. It exercises the API
+  layer; PostgREST bypasses the API entirely.
+
+**Open loops:**
+- ☐ **URGENT — apply the migration to prod.** Two paths, either works (the
+  migration is idempotent: `ENABLE RLS` on an already-enabled table is a no-op,
+  so dashboard-then-deploy will not conflict):
+  (a) Supabase SQL editor now — seconds, closes the hole immediately;
+  (b) redeploy the API — entrypoint runs `alembic upgrade head` on boot.
+  Operator was asked and chose neither yet.
+- ☐ Verify post-apply in prod:
+  `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r';`
+  → expect all `t` / `f`. Then smoke-test login + one authed API read.
+- ☐ Fix the Supabase CA trust chain — `api/core/config.py:84-90` bundles the 2021
+  root; refresh `docker/supabase-ca.crt` or drop the override if the pooler now
+  serves publicly-trusted certs. Blocks running migrations against prod locally.
+- ☐ Decide on the 5 pre-existing dirty files (see Decisions).
+- ☐ Consider the deeper fix: relocate app tables out of `public` to a schema
+  PostgREST does not expose.
+- ☐ Add RLS to the new-table checklist — a future migration creating a table in
+  `public` reopens this hole silently. No mechanical guard exists today.
+- ☐ Carried over from am06, untouched this session: layout balance in
+  `creative/render/nikah_templates.py` (body→hero / hero→CTA dead gaps vs the
+  operator's `@simply_nikah` reference grid). Was the "single clear next action"
+  before the security email pre-empted it.
+- ☐ `HANDOFF.md` is **2196 lines** — past the ~500-line archive threshold.
+  Suggest moving pre-July entries to `docs/handoff-archive.md`.
+
+**Next concrete action (start here):**
+1. Apply to prod. Fastest path — Supabase dashboard → SQL Editor → paste the two
+   `DO $$ … $$;` blocks from
+   `migrations/versions/f3a7c21b9e04_rls_lockdown_public_schema.py`
+   (`upgrade()`), run, then run the verify query in Open Loops.
+2. Then redeploy the API so `alembic_version` records `f3a7c21b9e04` and prod
+   state matches git. (Or skip step 1 and just do this, if the delay is acceptable.)
+3. Smoke-test: log in via the web app, load one authed page (`/briefs`), confirm
+   no 500s. If the API 500s on every request, the connection role is NOT the table
+   owner — that is the one assumption that would invalidate this fix; run
+   `SELECT current_user, pg_get_userbyid(relowner) FROM pg_class WHERE relname='tenants';`
+   and compare.
+4. Then the CA fix, then back to layout balance.
+
+**For the next LLM:**
+- Read `docker-compose.prod.yml:1-10` first. The "Postgres is external = Supabase"
+  fact is the thing that makes this whole class of bug possible and is easy to miss
+  — `CLAUDE.md` implies a self-hosted Postgres on `:5434`, which is **local only**.
+- The local `.env` `DATABASE_URL` points at the REMOTE host, not localhost. Any
+  local DB work needs the inline override shown in "Don't repeat", or you will
+  either hit the TLS error or, worse, touch prod.
+- Do not read or echo `.env*` — operator's hard rule. Local dev creds are in
+  `docker-compose.yml:5-7` (`mimik:mimik`), which is safe to read.
+- `CLAUDE.md` constraint #2 should arguably be amended to say tenant authZ must
+  hold at the *database* layer too, not just "every query is filtered by
+  tenant_id" — this session showed the API layer can be bypassed entirely.
+
+**Suggested skills:**
+- `/security-review` — verify the RLS posture after applying to prod; this is a
+  security fix that has not yet been reviewed by anything but its own tests.
+- `/scope-check` — before any further probing of the live Supabase project.
+- `/verification-before-completion` — the prod-apply step MUST be verified with
+  the catalog query, not assumed from a successful-looking deploy log.
+- `/impeccable` or `/frontend-design` — only when work returns to the deferred
+  layout-balance task.
+
+---
+
+## (2026-07-26 am06) — LAYOUT ENGINE shipped · Leonardo API R&D done · Shevin's UX bugs fixed · 10LEGOS kit generated
 
 Continues am01 (below). Everything here is MERGED + DEPLOYED unless marked otherwise.
 

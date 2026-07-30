@@ -256,3 +256,24 @@ Chronological audit trail of decisions. Newest at bottom.
 - OpenAI/ChatGPT is logged into the SAME debug Chrome (chatgpt.com tab) — ready for a future
   ChatGPT-image adapter using the same CDP-attach pattern; _pick_page already isolates tabs.
 - WhatsApp adapter (WAHA/OpenWA): DEFERRED to a NEW session per operator.
+
+## 2026-07-29 — Session 5, iteration 1 (CRITICAL: Supabase public-schema RLS lockdown)
+
+- Supabase security email (`rls_disabled_in_public`, project `gxpjkqjewjqmztguqudt`) → investigated
+  and found it was NOT one table but all 17: prod Postgres IS Supabase
+  (`docker-compose.prod.yml:7`), so every Alembic table sits in `public` and was served
+  read+write over PostgREST to `anon`. Locked constraint #2 was void via a path the API
+  never sees — the green IDOR test proved nothing about it.
+- Fix: `migrations/versions/f3a7c21b9e04_rls_lockdown_public_schema.py` — ENABLE RLS on all
+  owned `public` tables + REVOKE ALL from anon/authenticated. Catalog-driven, not a hardcoded
+  list, so it also covers `alembic_version` and dashboard-created tables. NO `FORCE RLS` (the
+  owner bypass is what keeps the API working).
+- Safe because nothing uses PostgREST: no `@supabase/supabase-js` in web/package.json; Supabase
+  is JWT-only. Anon key confirmed server-side only (`web/lib/session.ts:73,155`).
+- Verified on local :5434 — 17/17 RLS on, `forced=f`, 0 policies, clean downgrade/upgrade
+  round-trip, 760 passed / 1 skipped, ruff clean.
+- ⚠ **PROD STILL UNPATCHED** — operator has not chosen dashboard-SQL vs redeploy. See HANDOFF.md.
+- Blocker found: local alembic → prod dies on `CERTIFICATE_VERIFY_FAILED` (bundled
+  `docker/supabase-ca.crt` 2021 root looks superseded). Local→prod migration path is broken.
+- Safety: audited for secrets before committing — none tracked. `scratchpad/` (62 files incl.
+  api.log) was untracked but NOT gitignored → added to `.gitignore`.

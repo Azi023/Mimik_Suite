@@ -60,3 +60,7 @@ gcp-*.json
 .claude/*.lock
 _archive/
 
+# Agent/session working files. Holds api.log + codex_*.log, which can capture
+# request bodies and connection strings — never commit these.
+scratchpad/
+
