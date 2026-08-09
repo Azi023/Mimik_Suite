@@ -6,10 +6,44 @@
 
 ## ► LATEST (2026-08-09) · claude-opus-5[1m] via Claude Code — ✅ RLS **APPLIED + VERIFIED IN PROD**; Supabase CA host-match bug fixed; HANDOFF archived
 
-**Goal:** Close out the open loops from the 2026-07-29 security session.
+### 🎯 START HERE NEXT SESSION — layout balance (blocked on one file from the operator)
+
+**The task:** `creative/render/nikah_templates.py` — close the dead gaps in the
+body→hero and hero→CTA spacing so the composition matches the `@simply_nikah`
+reference grid. Deferred three sessions running (am06 → 07-29 → this one), every
+time pre-empted by something else. **Nothing else is in flight. This is the work.**
+
+**The blocker (30 seconds to clear):** there is no `@simply_nikah` reference image
+anywhere in the repo — `docs/design-refs/` contains only `17-design-principles.png`.
+Locked constraint #9 forbids styling without a concrete visual reference, so the next
+session will stop at the same wall.
+
+> **Operator action before starting:** save a screenshot of the `@simply_nikah`
+> reference grid into `docs/design-refs/` (e.g. `simply-nikah-grid.png`). Then say
+> "layout balance" and it runs.
+
+**Where to start reading once unblocked:**
+- `creative/render/nikah_templates.py` — 2315 lines. The spacing knobs are the
+  `hero_frac` / `hero_center_frac` values in the template dict at **`:527-565`**
+  (`highlighted_word_hero`, `protection_symbol_hero`, and the third variant).
+- Geometry that consumes them: `_NikahComposition` at **`:389-406`**
+  (`hero_cy`, `hero_box`, `hero_bbox`, `cta_top`, `cta_h`, `cta_bbox`).
+- `_compose()` at **`:641`** is where the gaps actually get computed.
+- Guard tests: `tests/test_nikah_templates.py`, `tests/test_nikah_vectors.py`.
+- Spec: `docs/NIKAH_ENGINE_SPEC.md`.
+
+**Suggested skill:** `/impeccable` or `/frontend-design` — but only *after* the
+reference is in hand; both refuse to invent taste from nothing, which is the point.
+
+**Estimate:** an afternoon, assuming the reference lands and the existing nikah tests
+stay green.
+
+---
+
+**Goal (this session):** Close out the open loops from the 2026-07-29 security session.
 
 **State:**
-- Branch: `main` @ `54afb4e`, pushed. Working tree clean.
+- Branch: `main` @ `4b2bdca`, pushed. Working tree clean.
 - Tests: **765 passed, 1 skipped** (`:5434` local DB). `ruff check` + `format --check` clean.
 - 🟢 **The live data-exposure hole is CLOSED.** Verified against prod, not assumed.
 
