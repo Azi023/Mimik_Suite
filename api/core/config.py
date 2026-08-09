@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://mimik:mimik@localhost:5434/mimik_suite"
-    # Optional path to a CA bundle for the DB's TLS cert (only if the host uses a private CA;
-    # Supabase's pooler uses publicly-trusted certs and needs none). Enables full verification.
+    # Optional path to a CA bundle for the DB's TLS cert. Supabase hosts need none — the bundled
+    # Supabase root is auto-trusted in `db_connect_args`. Set this for any OTHER private CA.
     db_ssl_root_cert: str = ""
     redis_url: str = "redis://localhost:6381/0"
     jwt_secret: str = "dev-only-insecure-change-me-0000000000"  # >=32 bytes; real secret via env
@@ -66,8 +66,9 @@ class Settings(BaseSettings):
         not enable it by default, so a remote host gets a full-verification SSLContext built from
         the SYSTEM CA bundle — `ssl.create_default_context()` sets check_hostname=True +
         verify_mode=CERT_REQUIRED (rejects MITM) WITHOUT needing a `~/.postgresql/root.crt` file
-        (which the bare `ssl="verify-full"` string demands). Verifies cleanly against Supabase's
-        pooler (`*.pooler.supabase.com`, publicly-trusted certs) — the recommended DSN. A local/
+        (which the bare `ssl="verify-full"` string demands). Supabase hosts get the bundled Supabase
+        root added to that trust (see below) — that covers BOTH the pooler (`*.pooler.supabase.com`)
+        and the direct host (`db.<ref>.supabase.co`), neither of which is publicly trusted. A local/
         loopback host connects plaintext. Point `DB_SSL_ROOT_CERT` at a bundle for a private CA."""
         from urllib.parse import urlparse
 
@@ -83,7 +84,10 @@ class Settings(BaseSettings):
         # not in the public trust store — so full verification fails against the system bundle. We
         # ship that CA (docker/supabase-ca.crt, a PUBLIC cert) and add it to the trust for *.supabase
         # hosts, keeping check_hostname + CERT_REQUIRED. Result: verified TLS, no MITM, no user setup.
-        if not cafile and host.endswith(".supabase.com"):
+        # Both TLDs matter: the pooler DSN is `*.pooler.supabase.com`, the direct DSN is
+        # `db.<ref>.supabase.co`. Matching only `.com` made every direct-host connection fail with
+        # CERTIFICATE_VERIFY_FAILED, which is what broke running migrations against prod locally.
+        if not cafile and host.endswith((".supabase.com", ".supabase.co")):
             bundled = Path(__file__).resolve().parents[2] / "docker" / "supabase-ca.crt"
             if bundled.exists():
                 cafile = str(bundled)
