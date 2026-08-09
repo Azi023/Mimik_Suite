@@ -4,7 +4,103 @@
 
 ---
 
-## ► LATEST (2026-07-29 16:29 +0530) · 192.168.1.15 · claude-opus-5[1m] via Claude Code — 🔴 CRITICAL: prod Supabase `public` schema was world-writable; RLS migration written + validated, **NOT YET APPLIED TO PROD**
+## ► LATEST (2026-08-09) · claude-opus-5[1m] via Claude Code — ✅ RLS **APPLIED + VERIFIED IN PROD**; Supabase CA host-match bug fixed; HANDOFF archived
+
+**Goal:** Close out the open loops from the 2026-07-29 security session.
+
+**State:**
+- Branch: `main` @ `54afb4e`, pushed. Working tree clean.
+- Tests: **765 passed, 1 skipped** (`:5434` local DB). `ruff check` + `format --check` clean.
+- 🟢 **The live data-exposure hole is CLOSED.** Verified against prod, not assumed.
+
+### 1. RLS applied to production ✅
+
+Before touching anything, ran a read-only catalog query inside `mimiksuite-api-1`
+on the VPS. Prod was **still fully unpatched** — the handoff's suspicion was right:
+
+| | before | after |
+|---|---|---|
+| `alembic_version` | `d41f83a2c906` | `f3a7c21b9e04` |
+| tables with RLS on | **0 / 17** | **17 / 17** |
+| `relforcerowsecurity` | 0 | 0 (correct — owner bypass preserved) |
+| `pg_policies` in `public` | 0 | 0 (default deny) |
+| grants to `anon` | **119** | **0** |
+| grants to `authenticated` | **119** | **0** |
+
+**Why it was still open:** `mimiksuite-api-1` had been `Up 2 weeks` — no redeploy since
+the migration was committed, so the entrypoint's `alembic upgrade head` never ran it.
+The container image literally did not contain the revision file (15 versions, not 16).
+
+**How it was applied:** copied `f3a7c21b9e04_rls_lockdown_public_schema.py` into the
+running container's `migrations/versions/`, then `alembic upgrade head`. Chose this over
+pasting SQL in the dashboard so `alembic_version` advanced in the same transaction —
+prod state now matches git. **Leave that file in the container**; deleting it would leave
+alembic pointing at a revision it cannot resolve. The next image build ships it anyway,
+so the next deploy is a clean no-op.
+
+**Post-apply smoke, verified:**
+- `current_user` = `postgres`, `pg_get_userbyid(relowner)` = `postgres` → **the owner
+  bypass assumption holds.** This was the one thing that could have invalidated the fix.
+- Row counts read fine through the app's own connection: tenants 2, clients 4, brands 4,
+  briefs 4, jobs 5, creative_docs 5, user_accounts 3. Nothing lost, nothing 500ing.
+- API container still reports `(healthy)`.
+
+### 2. Supabase CA — the real bug was the host match, not the cert ⚠️ correction
+
+The previous entry concluded the bundled `docker/supabase-ca.crt` was superseded.
+**It is not.** Tested against both live hosts with `openssl s_client -CAfile`:
+
+```
+aws-0-ap-southeast-1.pooler.supabase.com  → Verify return code: 0 (ok)
+db.gxpjkqjewjqmztguqudt.supabase.co       → Verify return code: 0 (ok)
+```
+
+"Supabase Root 2021 CA" is valid to **2031-04-26** and validates both chains.
+
+The actual defect was in `api/core/config.py` `db_connect_args`:
+`host.endswith(".supabase.com")`. Supabase hands out **two** DSN shapes on **two TLDs** —
+the pooler on `.supabase.com` and the direct host on `db.<ref>.supabase.co`. The direct
+host missed the match, fell back to the system trust store, and died with
+`CERTIFICATE_VERIFY_FAILED`. Now matches `(".supabase.com", ".supabase.co")`.
+
+Also corrected two comments (`config.py:12`, `:64`) that claimed the pooler serves
+publicly-trusted certs. It does not — it serves the same private Supabase CA.
+
+New `tests/test_config_db_ssl.py` pins both TLDs, the local-plaintext path, and that a
+non-Supabase remote host does **not** get the bundled root. 5 tests.
+
+### 3. HANDOFF archived
+
+`HANDOFF.md` 2367 → 649 lines. Entries from **2026-07-25 pm14** and earlier moved to
+`docs/handoff-archive.md` (1729 lines), which is linked from the bottom of this file.
+
+**Don't repeat:**
+- Don't trust "the API container is running" as evidence a migration landed. This one had
+  been up 2 weeks and was 1 revision behind. **Check `alembic_version` in the DB.**
+- Heredocs nested inside `ssh '...'` silently produce no output on this VPS. Pipe the
+  script into `ssh 'cat > /tmp/x.py && docker cp … && docker exec …'` instead.
+- `api/core/config.py` exports `get_settings()`, not a module-level `settings`.
+- Prod DSN is the **pooler in eu-central-1**, not ap-southeast-1.
+
+**Open loops:**
+- ☐ **Layout balance — BLOCKED, needs you.** `creative/render/nikah_templates.py` body→hero
+  and hero→CTA dead gaps. There is **no `@simply_nikah` reference image anywhere in the
+  repo** (`docs/design-refs/` holds only `17-design-principles.png`). Locked constraint #9
+  forbids styling without a concrete reference. **Drop a screenshot of the reference grid
+  into `docs/design-refs/` and this unblocks.**
+- ☐ Add "enable RLS" to the new-table checklist. A future migration creating a table in
+  `public` reopens this silently — still no mechanical guard.
+- ☐ Consider the deeper fix: move app tables out of `public` to a schema PostgREST does
+  not expose. Removes the REST surface instead of denying it.
+- ☐ Redeploy the API at some point so the image matches git (not urgent — DB state is
+  already correct and the next deploy is a no-op).
+
+**Next concrete action:** put the `@simply_nikah` reference screenshot in
+`docs/design-refs/`, then resume the layout-balance work.
+
+---
+
+## ► (2026-07-29 16:29 +0530) · 192.168.1.15 · claude-opus-5[1m] via Claude Code — 🔴 CRITICAL: prod Supabase `public` schema was world-writable; RLS migration written + validated, **NOT YET APPLIED TO PROD** *(superseded — applied 2026-08-09, see above)*
 
 **Goal:** Close a live data-exposure hole — every tenant's rows in the production
 database were readable AND writable by anyone holding the project URL + anon key,
