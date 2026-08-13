@@ -129,9 +129,9 @@ docker build \
   Mimik_Suite/web
 ```
 
-> If you also expose the first-party bootstrap bearer (`NEXT_PUBLIC_DEV_TOKEN`),
-> pass it as another `--build-arg`. It is inlined into the client bundle, so it
-> must be a low-privilege token, never a real secret.
+> The first-party bootstrap bearer is now `MIMIK_DEV_TOKEN`: server-only, runtime-only,
+> and ignored when `NODE_ENV=production`. Never pass it as a build argument or configure
+> it on production.
 
 Cross-arch note: build for the VPS architecture. Hetzner Cloud CX/CPX is x86-64,
 so build `linux/amd64`. On an Apple-silicon Mac add
@@ -276,7 +276,7 @@ Enumerated from `api/core/config.py` + `os.environ` reads across `api/` and
 | Var | Notes |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | Inlined at build. `https://suite.mimikcreations.com/api`. |
-| `NEXT_PUBLIC_DEV_TOKEN` | Optional low-privilege bootstrap bearer; inlined at build. Never a real secret. |
+| `MIMIK_DEV_TOKEN` | Dev-only bootstrap bearer; runtime-only and ignored in production. Do not configure in prod. |
 
 ---
 

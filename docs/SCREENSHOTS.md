@@ -35,7 +35,7 @@ print(create_access_token(tenant_id='platform', role='super_admin'))
 # 4. point the web app at the API + owner token, in dev mode
 #    web/.env.local:
 #      NEXT_PUBLIC_API_URL=http://localhost:8000
-#      NEXT_PUBLIC_DEV_TOKEN=<OWNER_TOKEN>
+#      MIMIK_DEV_TOKEN=<OWNER_TOKEN>
 #      APP_ENV=dev
 #    then: (in web/) npx next dev -p 3001   # a FREE port
 

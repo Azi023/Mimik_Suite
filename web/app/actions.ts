@@ -34,7 +34,8 @@ export async function generateCreativeAction(
     return { ok: false, error: "Choose a client and enter a topic." };
   }
   const token = await getSessionToken();
-  const devToken = process.env.NEXT_PUBLIC_DEV_TOKEN;
+  const devToken =
+    process.env.NODE_ENV !== "production" ? process.env.MIMIK_DEV_TOKEN : undefined;
   if (token === null && (devToken === undefined || devToken === "")) {
     return { ok: false, error: "Your session has expired. Sign in again." };
   }
@@ -82,7 +83,8 @@ export type CanvasEditActionResult =
 /** Resolve the bearer exactly like generateCreativeAction: session first, dev token fallback. */
 async function resolveCanvasBearer(): Promise<string | undefined | null> {
   const token = await getSessionToken();
-  const devToken = process.env.NEXT_PUBLIC_DEV_TOKEN;
+  const devToken =
+    process.env.NODE_ENV !== "production" ? process.env.MIMIK_DEV_TOKEN : undefined;
   if (token === null && (devToken === undefined || devToken === "")) return null;
   return token ?? undefined;
 }

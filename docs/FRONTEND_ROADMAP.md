@@ -193,9 +193,9 @@ Build `web` with `next build && next start` (or a Node image); run `api` with uv
 - **Nothing secret is in git.** Only `.env.example` files are tracked; `.env`, `.env*.local` are
   gitignored (root + `web/`). Verified. So a colleague cloning the repo gets **no secrets**.
 - **A `.env` file is never served to the browser.** Next only inlines `NEXT_PUBLIC_*` vars into the
-  client bundle. Keep secrets **un-prefixed** (e.g. `SUPABASE_ANON_KEY`, DB URLs) → they stay
-  server-side. The one client-inlined value is `NEXT_PUBLIC_DEV_TOKEN` — **DEV ONLY; leave it empty in
-  prod** (set `APP_ENV=prod` to disable the dev-token fallback and force Supabase login).
+  client bundle. Keep secrets **un-prefixed** (e.g. `SUPABASE_ANON_KEY`, DB URLs) so they stay
+  server-side. `MIMIK_DEV_TOKEN` is server-only and **DEV ONLY**; production mode ignores it even if
+  misconfigured. Leave it empty in prod and use Supabase login.
 - **On the VPS:** prefer real environment variables (compose `environment:` / a root-owned `.env`
   loaded by compose) over a `.env` inside the web root. Never place `.env` in a static/served dir.
   Lock file perms (`chmod 600`), keep it out of any Nginx `root`.

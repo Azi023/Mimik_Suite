@@ -70,6 +70,15 @@ services:
       - "3000:3000"
     mem_limit: 450m
     mem_reservation: 200m
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /app/.next/cache:rw,noexec,nosuid,nodev,size=64m,mode=0755,uid=1001,gid=1001
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s

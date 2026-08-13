@@ -22,9 +22,11 @@ interface OnboardingPageProps {
 /** Whether the DEV-ONLY unauthenticated fallback may render (dev + a build-time dev token). */
 function devFallbackAllowed(): boolean {
   const appEnv = process.env.APP_ENV;
-  const isDev = appEnv === undefined || appEnv === "" || appEnv === "dev";
+  const isDev =
+    process.env.NODE_ENV !== "production" &&
+    (appEnv === undefined || appEnv === "" || appEnv === "dev");
   const hasDevToken =
-    process.env.NEXT_PUBLIC_DEV_TOKEN !== undefined && process.env.NEXT_PUBLIC_DEV_TOKEN !== "";
+    process.env.MIMIK_DEV_TOKEN !== undefined && process.env.MIMIK_DEV_TOKEN !== "";
   return isDev && hasDevToken;
 }
 

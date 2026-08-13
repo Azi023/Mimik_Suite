@@ -1,7 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ApiError, createClient, generateBrandKit } from "./api.ts";
+import { ApiError, createClient, generateBrandKit, isApiConfigured } from "./api.ts";
+
+test("dev bootstrap bearer is ignored in production", () => {
+  process.env.NODE_ENV = "production";
+  process.env.NEXT_PUBLIC_API_URL = "http://api.test";
+  process.env.MIMIK_DEV_TOKEN = "test-only-token";
+  try {
+    assert.equal(isApiConfigured(), false);
+  } finally {
+    delete process.env.NODE_ENV;
+    delete process.env.NEXT_PUBLIC_API_URL;
+    delete process.env.MIMIK_DEV_TOKEN;
+  }
+});
+
+test("server-only bootstrap bearer remains available in development", () => {
+  process.env.NODE_ENV = "development";
+  process.env.NEXT_PUBLIC_API_URL = "http://api.test";
+  process.env.MIMIK_DEV_TOKEN = "test-only-token";
+  try {
+    assert.equal(isApiConfigured(), true);
+  } finally {
+    delete process.env.NODE_ENV;
+    delete process.env.NEXT_PUBLIC_API_URL;
+    delete process.env.MIMIK_DEV_TOKEN;
+  }
+});
 
 test("ApiError carries parsed FastAPI validation detail", async () => {
   const originalFetch = globalThis.fetch;

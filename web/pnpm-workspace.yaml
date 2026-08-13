@@ -2,3 +2,8 @@ allowBuilds:
   sharp: set this to true or false
   unrs-resolver: set this to true or false
 dangerouslyAllowAllBuilds: true
+minimumReleaseAgeExclude:
+  - brace-expansion@5.0.9
+  - brace-expansion@1.1.18
+  - js-yaml@4.3.1
+  - nanoid@3.3.18

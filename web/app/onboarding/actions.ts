@@ -96,12 +96,13 @@ function buildTokens(kit: OnboardingPayload["kit"]): ApiBrandTokens {
 
 export async function createOnboarding(formData: FormData): Promise<OnboardingResult> {
   const token = await getSessionToken();
-  const devToken = process.env.NEXT_PUBLIC_DEV_TOKEN;
+  const devToken =
+    process.env.NODE_ENV !== "production" ? process.env.MIMIK_DEV_TOKEN : undefined;
   if (token === null && (devToken === undefined || devToken === "")) {
     return { ok: false, error: "Your session has expired — sign in again." };
   }
   // Match every other write action: when there is no per-user session, let the
-  // API client fall back to NEXT_PUBLIC_DEV_TOKEN (dev-only) via `resolveBearer`
+  // API client fall back to MIMIK_DEV_TOKEN (dev-only) via `resolveBearer`
   // by passing `token ?? undefined`. Onboarding previously hard-failed here, which
   // blocked the dev/audit flow at the first authorized write.
   const bearer = token ?? undefined;

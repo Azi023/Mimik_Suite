@@ -54,7 +54,7 @@ connection.
 HUMAN GATES: pause for the operator at contract changes and before commits. Show a Playwright
 screenshot (light+dark) of each screen before committing (seed demo data via a first-party owner token
 like scripts/… / the prior session's seed pattern: super_admin token -> POST /tenants -> owner token;
-set web/.env.local NEXT_PUBLIC_DEV_TOKEN + APP_ENV=dev; run next dev on a free port; screenshot; the
+set web/.env.local MIMIK_DEV_TOKEN + APP_ENV=dev; run next dev on a free port; screenshot; the
 .wiz/.kit/.brief containers are their own scroll containers so flatten heights for full-page shots).
 IMPORTANT: never run `next build` while `next dev` is running on the same dir — it corrupts .next
 (rm -rf web/.next and restart dev if it happens). Commit per screen with phase-tagged messages; update

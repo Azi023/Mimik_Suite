@@ -7,10 +7,9 @@
  *
  * Configuration (env, read at build/render time):
  * - `NEXT_PUBLIC_API_URL`   — API origin. Defaults to `http://localhost:8000`.
- * - `NEXT_PUBLIC_DEV_TOKEN` — a first-party HS256 bootstrap bearer token minted by
- *   `POST /tenants` (see api/core/auth.py). This is a DEV-ONLY convenience: a
- *   `NEXT_PUBLIC_*` value is inlined into the client bundle, so it must never carry a
- *   production credential.
+ * - `MIMIK_DEV_TOKEN` — a server-only HS256 bootstrap bearer token minted by
+ *   `POST /tenants` (see api/core/auth.py). This is a DEV-ONLY convenience and is
+ *   ignored whenever Next runs in production mode.
  *
  * Bearer precedence (see `resolveBearer`): a per-request Supabase session token
  * (threaded server-side from `lib/session.getSessionToken`) is used when present;
@@ -518,14 +517,17 @@ export function getApiBaseUrl(): string {
 
 /** The dev bootstrap bearer token, if configured. */
 function getDevToken(): string | undefined {
-  const token = process.env.NEXT_PUBLIC_DEV_TOKEN;
+  if (process.env.NODE_ENV === "production") {
+    return undefined;
+  }
+  const token = process.env.MIMIK_DEV_TOKEN;
   return token !== undefined && token !== "" ? token : undefined;
 }
 
 /**
  * The bearer to send on API calls, in precedence order:
  *   1. the caller-supplied Supabase session token (real per-user auth), when present.
- *   2. the DEV-ONLY `NEXT_PUBLIC_DEV_TOKEN` bootstrap token, as a fallback.
+ *   2. the DEV-ONLY `MIMIK_DEV_TOKEN` bootstrap token, as a fallback.
  * Returns `undefined` when neither exists — the request goes out unauthenticated and
  * callers handle the resulting error without substituting records.
  */
@@ -732,7 +734,7 @@ async function apiDelete(path: string, sessionToken?: string): Promise<void> {
 /**
  * Every endpoint below accepts an optional `sessionToken` — the per-user Supabase
  * bearer, threaded server-side from `lib/session.getSessionToken`. When omitted, the
- * request falls back to the DEV-ONLY `NEXT_PUBLIC_DEV_TOKEN` (see `resolveBearer`).
+ * request falls back to the DEV-ONLY `MIMIK_DEV_TOKEN` (see `resolveBearer`).
  */
 
 /** GET /clients — the caller-tenant's clients. */

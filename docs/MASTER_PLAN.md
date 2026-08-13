@@ -101,7 +101,7 @@ explicitly planned but the vision requires it.
 | Stripe billing ($750/mo + 3-free-designs trial) | **[PARTIAL]** | full mocked scaffold (P5 gate green); keys empty, never live |
 | Acquisition→fulfillment auto-bridge (Sales closes → tenant auto-created) | **[DNB]** | Sales stays confidential; only the storefront claim path exists |
 | Figma deep-edit L4 handoff (export→edit→re-import) | **[DNB]** | grep `figma` in creative/+api/ → zero; was a LOCKED plan pillar ("no custom canvas editor — Figma for deep edits") — note the irony: we built the canvas editor instead |
-| Supabase real login as the ACTIVE path | **[STALE]** | full Supabase ES256/JWKS + IAM + invitations built; local runs on dev-token; `NEXT_PUBLIC_DEV_TOKEN` ships in client bundle (deploy HELD on hardening) |
+| Supabase real login as the ACTIVE path | **[BUILT]** | full Supabase ES256/JWKS + IAM + invitations built; local dev may use the server-only `MIMIK_DEV_TOKEN`, which production mode ignores |
 | Multi-tenant 2nd agency (Jasmine Media) | **[DNB]** | plan promise "used by Mimik AND Jasmine"; only tenant `mimik` provisioned |
 | Production deployment | **[STALE]** | suite.mimikcreations.com deployed 2026-07-21, then **all subsequent work local-only**; deploy HELD — prod is now ~2 days behind the product |
 | Per-job context record (HANDOFF-per-client) | **[DNB]** | knowledge-layer item 6; nothing |
